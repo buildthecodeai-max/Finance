@@ -1,0 +1,55 @@
+@tailwind base; @tailwind components; @tailwind utilities;
+
+/* ---------- Design tokens: RGB triplets so Tailwind can apply opacity (bg-accent/15) ---------- */
+:root, :root[data-theme='light'] {
+  color-scheme: light;
+  --bg: 245 247 250;          --surface: 255 255 255;     --surface-2: 241 244 248;   --line: 226 231 239;
+  --fg: 15 23 42;             --muted: 90 104 126;
+  --accent: 0 118 98;         --accent-ink: 255 255 255;  --accent-soft: 0 118 98;
+  --success: 4 112 81;        --warn: 164 74 7;           --danger: 185 28 28;        --info: 29 78 216;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 3px rgb(15 23 42 / 0.04);
+  --shadow-pop: 0 10px 30px -8px rgb(15 23 42 / 0.25);
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: 10 14 20;             --surface: 17 23 32;        --surface-2: 26 34 46;      --line: 38 48 64;
+  --fg: 230 237 243;          --muted: 139 151 166;
+  --accent: 0 196 160;        --accent-ink: 3 22 18;      --accent-soft: 0 196 160;
+  --success: 52 211 153;      --warn: 251 191 36;         --danger: 248 113 113;      --info: 96 165 250;
+  --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.02);
+  --shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 0.65);
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body { @apply bg-bg text-fg font-body antialiased; font-feature-settings: 'cv11', 'ss01'; }
+  h1, h2, h3, h4 { @apply tracking-tight; }
+  ::selection { background: rgb(var(--accent) / 0.25); }
+  :focus-visible { @apply outline-none ring-2 ring-accent/60 ring-offset-2 ring-offset-bg rounded-md; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; } ::-webkit-scrollbar-thumb { background: rgb(var(--line)); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--muted) / 0.6); background-clip: content-box; }
+  @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+}
+
+@layer base { .theme-switching, .theme-switching *, .theme-switching *::before, .theme-switching *::after { transition: none !important; } }
+
+@layer components {
+  /* Numbers: proportional digits aligned in columns (modern fintech look) instead of monospace */
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum', 'cv11'; }
+  .card { @apply bg-surface border border-line rounded-xl p-4 shadow-card; }
+  .btn { @apply whitespace-nowrap shrink-0 inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg text-sm font-medium bg-accent text-accent-ink shadow-sm transition hover:brightness-110 active:brightness-95 disabled:opacity-40 disabled:pointer-events-none; }
+  .btn-ghost { @apply whitespace-nowrap shrink-0 inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg text-sm font-medium bg-surface text-fg border border-line transition hover:bg-surface2 disabled:opacity-40 disabled:pointer-events-none; }
+  .btn-icon { @apply inline-flex items-center justify-center h-9 w-9 rounded-lg text-muted hover:text-fg hover:bg-surface2 transition; }
+  .input { @apply w-full h-9 bg-surface border border-line rounded-lg px-3 text-sm text-fg placeholder:text-muted/70 transition focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-60 disabled:bg-surface2; }
+  textarea.input { @apply h-auto py-2; }
+  .pill { @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap; }
+  .pill::before { content: ''; width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }
+  th { @apply text-left text-[11px] font-semibold text-muted uppercase tracking-wider py-2.5 px-3 bg-surface2/70 first:rounded-tl-xl last:rounded-tr-xl whitespace-nowrap; }
+  td { @apply py-2.5 px-3 border-t border-line/70 text-sm; }
+  tbody tr { @apply transition-colors; }
+  fieldset { @apply border border-line rounded-xl px-3 pb-3 pt-1; }
+  legend { @apply text-xs; }
+  .skeleton { @apply rounded-md bg-surface2 animate-pulse; }
+  .kbd { @apply inline-flex items-center px-1.5 h-5 rounded border border-line bg-surface2 text-[10px] font-medium text-muted; }
+  .hairline { @apply border-line; }
+}

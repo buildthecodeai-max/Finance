@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.log*
+.DS_Store
+backend/.local-storage/
+backend/backups/
+*.sql.gz
+*.sql.gz.enc
+*.sql.gz.enc.json
+coverage/
+.vite/
