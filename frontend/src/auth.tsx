@@ -5,6 +5,7 @@ export interface AgencyRef { id: number; name: string; base_currency: string; ta
 interface Ctx {
   user: any; agencies: AgencyRef[]; agency: AgencyRef | null; ready: boolean; support: boolean;
   supportLogin(token: string, agency: { id: number; name: string; base_currency: string; tax_label?: string }): void;
+  workspaceLogin(accessToken: string, user: any, agency: { id: number; name: string; base_currency: string; tax_label?: string }): void;
   login(email: string, password: string, totp?: string): Promise<void>; logout(): Promise<void>; switchAgency(id: number): void;
   can(...roles: AgencyRef['role'][]): boolean;
 }
@@ -27,6 +28,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: s?.user, agencies: s?.agencies ?? [], agency, ready, support,
     /** Operator support session: a read-only token for one agency. Held in memory only; a reload ends it. */
     supportLogin(token, a) { setSession(token, a.id); setAid(a.id); setSupport(true); setS({ user: { id: 0, name: 'Support (read-only)', email: '' }, agencies: [{ id: a.id, name: a.name, base_currency: a.base_currency, tax_label: a.tax_label ?? 'Tax', role: 'viewer' }] }); },
+    /** Platform admin full workspace access: signs in as the agency's admin. Held in memory only; a reload ends it. */
+    workspaceLogin(accessToken, user, a) { setSession(accessToken, a.id); setAid(a.id); setSupport(false); setS({ user, agencies: [{ id: a.id, name: a.name, base_currency: a.base_currency, tax_label: a.tax_label ?? 'Tax', role: 'admin' }] }); },
     async login(email, password, totp) { apply(await api('/auth/login', 'POST', { email, password, totp })); },
     async logout() { await api('/auth/logout', 'POST'); setSession(null, null); setS(null); setSupport(false); },
     switchAgency(id) { localStorage.setItem('agency', String(id)); setSession(null, id); setAid(id); location.reload(); },

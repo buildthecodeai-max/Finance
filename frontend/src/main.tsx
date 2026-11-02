@@ -52,6 +52,7 @@ const Operations = lazy(() => import('./pages/Operations'));
 const PublicQuote = lazy(() => import('./pages/PublicQuote'));
 const Platform = lazy(() => import('./pages/Platform'));
 const SupportEntry = lazy(() => import('./pages/Platform').then((m) => ({ default: m.SupportEntry })));
+const AgencyAccessEntry = lazy(() => import('./pages/Platform').then((m) => ({ default: m.AgencyAccessEntry })));
 
 function Guard() {
   const { user, ready, agencies } = useAuth();
@@ -65,6 +66,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <Route path="/login" element={<Login />} />
     <Route path="/platform" element={<Suspense fallback={<Fallback />}><Platform /></Suspense>} />
     <Route path="/support" element={<Suspense fallback={<Fallback />}><SupportEntry /></Suspense>} />
+    <Route path="/workspace-access" element={<Suspense fallback={<Fallback />}><AgencyAccessEntry /></Suspense>} />
     <Route path="/forgot-password" element={<Suspense fallback={<Fallback />}><ForgotPassword /></Suspense>} />
     <Route path="/reset-password/:token" element={<Suspense fallback={<Fallback />}><ResetPassword /></Suspense>} />
     <Route path="/portal/:token" element={<Suspense fallback={<Fallback />}><Portal /></Suspense>} />

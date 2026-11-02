@@ -3,6 +3,8 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { pool } from '../db.js';
 import { config } from '../config.js';
+import { HttpError } from '../errors.js';
+import { signAccess } from '../auth.js';
 import { health } from '../services/observability.js';
 import * as P from '../services/platform.js';
 import { idParam, parse } from './util.js';
@@ -35,6 +37,19 @@ platformRouter.post('/approvals/:id/cancel', P.needs('suspend'), async (req, res
 platformRouter.post('/agencies/:id/reactivate', P.needs('suspend'), P.stepUp, async (req, res) => { await P.reactivate(req, idParam(req), parse(Reason, req.body).reason); res.json({ ok: true }); });
 platformRouter.post('/agencies/:id/support-session', P.needs('support'), P.stepUp, async (req, res) => { const b = parse(Reason.extend({ minutes: z.number().int().min(5).max(60).default(30) }), req.body); res.status(201).json(await P.startSupportSession(req, idParam(req), b.reason, b.minutes)); });
 platformRouter.post('/support-sessions/:id/revoke', P.needs('support'), async (req, res) => { await P.revokeSupportSession(req, idParam(req), parse(Reason, req.body).reason); res.json({ ok: true }); });
+platformRouter.post('/agencies/:id/access-workspace', P.needs('support'), P.stepUp, async (req, res) => {
+  const id = idParam(req);
+  const [[admin]]: any = await pool.query(
+    `SELECT u.id, u.name, u.email FROM users u JOIN memberships m ON m.user_id = u.id WHERE m.agency_id = ? AND m.role = 'admin' ORDER BY u.id LIMIT 1`,
+    [id]
+  );
+  if (!admin) throw new HttpError(404, 'No admin member found for this agency');
+  const [[agency]]: any = await pool.query('SELECT id, name, base_currency, tax_label FROM agencies WHERE id = ?', [id]);
+  const b = parse(Reason, req.body);
+  const accessToken = signAccess(admin.id);
+  await P.audit(req, 'workspace_access', id, `entered workspace as ${admin.email}`, b.reason);
+  res.json({ accessToken, user: { id: admin.id, name: admin.name, email: admin.email }, agency });
+});
 
 const Plan = z.object({ code: z.string().optional(), name: z.string().min(2).max(60), description: z.string().max(200).nullish(), price_monthly: z.number().min(0).max(100000), price_yearly: z.number().min(0).max(1000000), currency: z.string().length(3).optional(), trial_days: z.number().int().min(0).max(90),
   max_seats: z.number().int().min(1).nullable(), max_branches: z.number().int().min(1).nullable(), max_bookings_month: z.number().int().min(1).nullable(), features: z.array(z.string()), allowed_modules: z.array(z.string()).nullable().default(null), support_level: z.string().min(2).max(30), stripe_price_monthly: z.string().max(80).nullish(), stripe_price_yearly: z.string().max(80).nullish(), active: z.boolean(), sort: z.number().int() });

@@ -87,7 +87,7 @@ function Overview() {
       <div className="card"><div className="font-medium mb-2">Needs attention</div><div className="text-sm space-y-1"><div className="flex justify-between"><span>Dead webhook deliveries</span><span className={`num ${o.dead_webhook_deliveries ? 'text-danger' : ''}`}>{o.dead_webhook_deliveries}</span></div><div className="flex justify-between"><span>Open critical exceptions</span><span className={`num ${o.open_critical_exceptions ? 'text-warn' : ''}`}>{o.open_critical_exceptions}</span></div></div></div></div></div>;
 }
 
-type Act = { kind: 'extend-trial' | 'set-plan' | 'grant' | 'suspend' | 'reactivate' | 'support-session'; id: number; name: string };
+type Act = { kind: 'extend-trial' | 'set-plan' | 'grant' | 'suspend' | 'reactivate' | 'support-session' | 'access-workspace'; id: number; name: string };
 function NewAgencyModal({ plans, onClose, onDone }: { plans: any[]; onClose(): void; onDone(msg: string): void }) {
   const { guarded } = useOp();
   const [f, setF] = useState({ agencyName: '', adminName: '', adminEmail: '', adminPassword: '', planCode: plans[0]?.code ?? 'growth', baseCurrency: 'USD' });
@@ -146,6 +146,7 @@ function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: 
       <div className="card"><div className="text-xs text-muted">Usage</div><div className="text-sm mt-1">{detail.usage.seats} members · {detail.usage.branches} branches · {detail.usage.bookings} bookings this month</div><div className="text-xs text-muted mt-2">Last active {day(detail.last_active)} · {detail.requests_30d} requests / 30 d</div></div>
       <div className="card"><div className="text-xs text-muted">Health</div><div className="text-sm mt-1">{detail.open_critical_exceptions} critical exceptions · {detail.failed_emails_7d} failed emails (7 d)</div></div></div>
     <div className="flex flex-wrap gap-2 mb-4">{([['extend-trial', 'Extend trial', 'billing'], ['set-plan', 'Set plan', 'billing'], ['grant', 'Grant invoiced access', 'billing'], ['support-session', 'Open support session (read-only)', 'support']] as const).filter(([, , c]) => me.caps.includes(c)).map(([k, l]) => <button key={k} className="btn-ghost" onClick={() => onAct({ kind: k, id: detail.agency.id, name: detail.agency.name })}>{l}</button>)}
+      {me.caps.includes('support') && <button className="btn" onClick={() => onAct({ kind: 'access-workspace', id: detail.agency.id, name: detail.agency.name })}>Access workspace</button>}
       {me.caps.includes('suspend') && (detail.subscription?.platform_hold ? <button className="btn" onClick={() => onAct({ kind: 'reactivate', id: detail.agency.id, name: detail.agency.name })}>Release hold</button> : <button className="btn-ghost text-danger" onClick={() => onAct({ kind: 'suspend', id: detail.agency.id, name: detail.agency.name })}>Request suspension</button>)}
       {me.role === 'readonly' && <span className="text-xs text-muted self-center">Your operator role is read-only.</span>}</div>
     <div className="grid gap-4 md:grid-cols-2"><div><div className="font-medium text-sm mb-1">Members</div><Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => m.role }, { h: '2FA', render: (m: any) => (m.totp_enabled ? '✓' : '—') }]} /></div>
@@ -246,6 +247,7 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
                 {me.caps.includes('billing') && r.status === 'trialing' && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'extend-trial', id: r.id, name: r.name })}>Extend trial</button>}
                 {me.caps.includes('billing') && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'set-plan', id: r.id, name: r.name })}>Set plan</button>}
                 {me.caps.includes('support') && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'support-session', id: r.id, name: r.name })}>Support</button>}
+                {me.caps.includes('support') && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'access-workspace', id: r.id, name: r.name })}>Access</button>}
                 {me.caps.includes('suspend') && (r.platform_hold
                   ? <button className="btn-ghost !py-0.5 !px-2 text-xs text-accent" onClick={() => setAct({ kind: 'reactivate', id: r.id, name: r.name })}>Release</button>
                   : <button className="btn-ghost !py-0.5 !px-2 text-xs text-danger" onClick={() => setAct({ kind: 'suspend', id: r.id, name: r.name })}>Suspend</button>)}
@@ -314,17 +316,19 @@ function ActionModal({ act, onClose, onDone }: { act: Act; onClose(): void; onDo
   const { guarded } = useOp();
   const [f, setF] = useState<any>({ reason: '', days: 7, plan: 'growth', interval: 'yearly', until: new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10), minutes: 30 }); const [err, setErr] = useState(''); const [plans, setPlans] = useState<any[]>([]);
   useEffect(() => { if (act.kind === 'set-plan' || act.kind === 'grant') api('/platform/plans').then(setPlans); }, []);
-  const titles: Record<Act['kind'], string> = { 'extend-trial': 'Extend trial', 'set-plan': 'Set plan', grant: 'Grant invoiced access', suspend: 'Request suspension', reactivate: 'Release operator hold', 'support-session': 'Open read-only support session' };
+  const titles: Record<Act['kind'], string> = { 'extend-trial': 'Extend trial', 'set-plan': 'Set plan', grant: 'Grant invoiced access', suspend: 'Request suspension', reactivate: 'Release operator hold', 'support-session': 'Open read-only support session', 'access-workspace': 'Access agency workspace' };
   const submit = async () => {
     try {
       const body: any = { reason: f.reason, ...(act.kind === 'extend-trial' ? { days: Number(f.days) } : {}), ...(act.kind === 'set-plan' ? { plan: f.plan, interval: f.interval } : {}), ...(act.kind === 'grant' ? { plan: f.plan, interval: f.interval, until: f.until } : {}), ...(act.kind === 'support-session' ? { minutes: Number(f.minutes) } : {}) };
       const r = await guarded(() => api(`/platform/agencies/${act.id}/${act.kind}`, 'POST', body));
       if (act.kind === 'support-session') { const payload = btoa(JSON.stringify({ token: r.token, agency: r.agency })); window.open(`/support#${payload}`, '_blank', 'noopener'); }
+      if (act.kind === 'access-workspace') { const payload = btoa(JSON.stringify({ accessToken: r.accessToken, user: r.user, agency: r.agency })); window.open(`/workspace-access#${payload}`, '_blank', 'noopener'); }
       onDone(act.kind === 'suspend' && r.status === 'pending' ? 'Suspension requested. A second admin operator must approve it under Approvals — nothing has changed for the customer yet.' : undefined);
     } catch (e: any) { setErr(e.message); }
   };
   return <Modal title={`${titles[act.kind]} — ${act.name}`} onClose={onClose}><Err e={err} />
     {act.kind === 'support-session' && <p className="text-sm text-muted mb-3">Opens this workspace in a new tab as a viewer. It is read-only, lasts {f.minutes} minutes, and the customer's admins are notified and can end it.</p>}
+    {act.kind === 'access-workspace' && <p className="text-sm text-warn mb-3">Opens this workspace in a new tab with full admin access as the agency's first admin user. Use only for authorised support or investigation.</p>}
     {act.kind === 'suspend' && <p className="text-sm text-danger mb-3">This sends a request to a second admin operator. Once they approve, the workspace becomes read-only and stays that way even if the customer pays, until a hold release.</p>}
     {act.kind === 'extend-trial' && <Field label="Extra days"><input className="input num" type="number" min={1} max={60} value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} /></Field>}
     {(act.kind === 'set-plan' || act.kind === 'grant') && <div className="grid grid-cols-2 gap-x-4"><Field label="Plan"><select className="input" value={f.plan} onChange={(e) => setF({ ...f, plan: e.target.value })}>{plans.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}</select></Field><Field label="Interval"><select className="input" value={f.interval} onChange={(e) => setF({ ...f, interval: e.target.value })}><option>monthly</option><option>yearly</option></select></Field></div>}
@@ -390,6 +394,18 @@ function System() { const [s, setS] = useState<any>(null); useEffect(() => { api
   if (!s) return <div className="skeleton h-40" />; const h = s.health;
   return <div className="grid gap-3 md:grid-cols-2"><div className="card"><div className="font-medium mb-2">Readiness</div><div className="text-sm space-y-1"><div className="flex justify-between"><span>Database</span><Pill s={h.checks.database === 'ok' ? 'approved' : 'void'} /></div><div className="flex justify-between"><span>Migrations</span><span className="num text-xs">{h.checks.migrations?.applied} · {h.checks.migrations?.latest}</span></div></div></div>
     <div className="card"><div className="font-medium mb-2">Background jobs</div>{Object.entries(h.checks.jobs ?? {}).map(([k, v]: any) => <div key={k} className="flex justify-between text-sm py-0.5"><span>{k.replace(/_/g, ' ')}</span><span className="text-xs"><Pill s={v.status === 'ok' ? 'approved' : 'overdue'} /> <span className="text-muted ml-1">{v.age_minutes} min ago</span></span></div>)}{!Object.keys(h.checks.jobs ?? {}).length && <div className="text-sm text-muted">No heartbeats yet — the daily job has not run.</div>}</div></div>; }
+
+/** /workspace-access#<payload> — opens agency workspace with full admin access in a new tab. */
+export function AgencyAccessEntry() {
+  const { ready, workspaceLogin, user } = useAuth(); const nav = useNavigate(); const [err, setErr] = useState(''); const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    if (!ready) return;
+    try { const p = JSON.parse(atob(location.hash.slice(1))); history.replaceState(null, '', '/workspace-access'); workspaceLogin(p.accessToken, p.user, p.agency); setEntered(true); }
+    catch { setErr('This workspace access link is invalid. Open it from the platform console.'); }
+  }, [ready]);
+  useEffect(() => { if (entered && user) nav('/', { replace: true }); }, [entered, user]);
+  return <div className="min-h-screen grid place-items-center p-6">{err ? <div className="card max-w-md text-center"><p className="text-danger text-sm">{err}</p></div> : <div className="h-8 w-8 rounded-full border-2 border-line border-t-accent animate-spin" role="status" aria-label="Opening workspace" />}</div>;
+}
 
 /** /support#<payload> — arrives from the console in a new tab; the token never touches the server log (URL fragment). */
 export function SupportEntry() {
