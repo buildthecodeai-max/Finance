@@ -258,7 +258,7 @@ export async function updatePlan(req: Request, id: number, b: PlanIn, reasonIn: 
 
 /* ------------------------------------------------------------------ agency creation (platform operator) */
 export async function createAgency(req: Request, b: { agencyName: string; adminName: string; adminEmail: string; adminPassword: string; planCode: string; baseCurrency: string }) {
-  const bcrypt = await import('bcryptjs');
+  const { default: bcrypt } = await import('bcryptjs');
   const { startTrial } = await import('./billing.js');
   const { seedChart } = await import('./accounting.js');
   const { Tenant } = await import('../db.js');
