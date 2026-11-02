@@ -311,9 +311,6 @@ function ActionModal({ act, onClose, onDone }: { act: Act; onClose(): void; onDo
     } catch (e: any) { setErr(e.message); }
   };
   return <Modal title={`${titles[act.kind]} — ${act.name}`} onClose={onClose}><Err e={err} />
-    {act.kind === 'support-session' && <p className="text-sm text-muted mb-3">Opens this workspace in a new tab as a viewer. It is read-only, lasts {f.minutes} minutes, and the customer's admins are notified and can end it.</p>}
-    {act.kind === 'access-workspace' && <p className="text-sm text-warn mb-3">Opens this workspace in a new tab with full admin access as the agency's first admin user. Use only for authorised support or investigation.</p>}
-    {act.kind === 'suspend' && <p className="text-sm text-danger mb-3">This sends a request to a second admin operator. Once they approve, the workspace becomes read-only and stays that way even if the customer pays, until a hold release.</p>}
     {act.kind === 'extend-trial' && <Field label="Extra days"><input className="input num" type="number" min={1} max={60} value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} /></Field>}
     {(act.kind === 'set-plan' || act.kind === 'grant') && <div className="grid grid-cols-2 gap-x-4"><Field label="Plan"><select className="input" value={f.plan} onChange={(e) => setF({ ...f, plan: e.target.value })}>{plans.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}</select></Field><Field label="Interval"><select className="input" value={f.interval} onChange={(e) => setF({ ...f, interval: e.target.value })}><option>monthly</option><option>yearly</option></select></Field></div>}
     {act.kind === 'grant' && <Field label="Access until"><input className="input num" type="date" value={f.until} onChange={(e) => setF({ ...f, until: e.target.value })} /></Field>}
