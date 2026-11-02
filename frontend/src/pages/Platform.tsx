@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { Plane, Search } from 'lucide-react';
+import { AlertTriangle, Building2, Clock, DollarSign, Plane, Search, ShieldAlert, Users } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Pill, Table } from '../components/ui';
@@ -19,12 +19,12 @@ type Cap = 'read' | 'support' | 'billing' | 'suspend';
 interface Me { email: string; role: string; caps: Cap[] }
 const OpCtx = createContext<{ me: Me; guarded<T>(fn: () => Promise<T>): Promise<T> }>(null as any);
 const useOp = () => useContext(OpCtx);
-type Tab = 'overview' | 'agencies' | 'plans' | 'audit' | 'security' | 'system' | 'operators' | 'approvals';
+type Tab = 'dashboard' | 'overview' | 'agencies' | 'plans' | 'audit' | 'security' | 'system' | 'operators' | 'approvals';
 
 /** Operator-only console: fleet overview, agencies, plans, audit. Every change asks for a reason and is written to an append-only log. */
 export default function Platform() {
   const { user, ready, logout } = useAuth(); const nav = useNavigate();
-  const [tab, setTab] = useState<Tab>('overview'); const [need2fa, setNeed2fa] = useState(false);
+  const [tab, setTab] = useState<Tab>('dashboard'); const [need2fa, setNeed2fa] = useState(false);
   const [me, setMe] = useState<Me | null>(null); const [pending, setPending] = useState(0);
   const [askCode, setAskCode] = useState<null | { resolve(ok: boolean): void }>(null);
   useEffect(() => { if (tab) refreshPending(); }, [tab, me]);
@@ -41,7 +41,7 @@ export default function Platform() {
   if (!ready) return <div className="min-h-screen grid place-items-center"><div className="h-8 w-8 rounded-full border-2 border-line border-t-accent animate-spin" role="status" aria-label="Loading" /></div>;
   if (!user) return <Navigate to="/login" replace />;
   if (!user.is_platform_admin) return <Navigate to="/" replace />;
-  const tabs: [Tab, string][] = [['overview', 'Overview'], ['agencies', 'Agencies'], ['plans', 'Plans'], ['audit', 'Operator audit'], ['security', 'Security events'], ['system', 'System'], ...(me?.caps.includes('suspend') ? [['approvals', pending ? `Approvals (${pending})` : 'Approvals'] as [Tab, string], ['operators', 'Operators'] as [Tab, string]] : [])];
+  const tabs: [Tab, string][] = [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies'], ['plans', 'Plans'], ['audit', 'Operator audit'], ['security', 'Security events'], ['system', 'System'], ...(me?.caps.includes('suspend') ? [['approvals', pending ? `Approvals (${pending})` : 'Approvals'] as [Tab, string], ['operators', 'Operators'] as [Tab, string]] : [])];
   return (
     <div className="min-h-screen">
       <header className="border-b border-line bg-surface/80 backdrop-blur px-4 md:px-8 h-14 flex items-center justify-between">
@@ -51,7 +51,7 @@ export default function Platform() {
       <div className="max-w-[1300px] mx-auto px-4 md:px-8 py-6">
         {need2fa ? <TwoFactorGate onDone={() => { setNeed2fa(false); api('/platform/me').then(setMe); }} /> : !me ? <div className="skeleton h-40" /> : <OpCtx.Provider value={{ me, guarded }}><>
           <div className="flex flex-wrap gap-2 mb-5" role="tablist">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'btn' : 'btn-ghost'} onClick={() => setTab(k)}>{l}</button>)}</div>
-          {tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <Operators />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}</></OpCtx.Provider>}
+          {tab === 'dashboard' && <Dashboard onNavigate={setTab} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <Operators />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}</></OpCtx.Provider>}
       </div>
       {askCode && <StepUpModal onResult={(ok) => { askCode.resolve(ok); setAskCode(null); }} />}
     </div>
@@ -132,22 +132,182 @@ function Agencies() {
       { h: 'Seats', right: true, render: (r: any) => r.seats }, { h: 'Last active', render: (r: any) => <span className="text-xs num">{day(r.last_active)}</span> }]} />
     <div className="flex items-center justify-between mt-3 text-sm text-muted"><span>{res.total} agencies</span><div className="flex gap-2"><button className="btn-ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button><button className="btn-ghost" disabled={page * res.page_size >= res.total} onClick={() => setPage(page + 1)}>Next</button></div></div>
 
-    {detail && <Modal title={detail.agency.name} wide onClose={() => setDetail(null)}>
-      <div className="grid gap-4 md:grid-cols-3 mb-4">
-        <div className="card"><div className="text-xs text-muted">Subscription</div>{detail.subscription ? <><div className="mt-1"><Pill s={detail.subscription.status} /> <span className="font-medium ml-1">{detail.subscription.plan_name}</span> <span className="text-xs text-muted">{detail.subscription.interval}</span></div>
-          <dl className="text-xs mt-2 space-y-0.5 text-muted"><div>Trial ends: <span className="num text-fg">{day(detail.subscription.trial_ends_at)}</span></div><div>Period ends: <span className="num text-fg">{day(detail.subscription.current_period_end)}</span></div>{detail.subscription.manual && <div>Invoiced customer (no card)</div>}{detail.subscription.platform_hold && <div className="text-danger">Operator hold: {detail.subscription.hold_reason}</div>}</dl></> : '—'}</div>
-        <div className="card"><div className="text-xs text-muted">Usage</div><div className="text-sm mt-1">{detail.usage.seats} members · {detail.usage.branches} branches · {detail.usage.bookings} bookings this month</div><div className="text-xs text-muted mt-2">Last active {day(detail.last_active)} · {detail.requests_30d} requests / 30 d</div></div>
-        <div className="card"><div className="text-xs text-muted">Health</div><div className="text-sm mt-1">{detail.open_critical_exceptions} critical exceptions · {detail.failed_emails_7d} failed emails (7 d)</div></div></div>
-      <div className="flex flex-wrap gap-2 mb-4">{([['extend-trial', 'Extend trial', 'billing'], ['set-plan', 'Set plan', 'billing'], ['grant', 'Grant invoiced access', 'billing'], ['support-session', 'Open support session (read-only)', 'support']] as const).filter(([, , c]) => me.caps.includes(c)).map(([k, l]) => <button key={k} className="btn-ghost" onClick={() => setAct({ kind: k, id: detail.agency.id, name: detail.agency.name })}>{l}</button>)}
-        {me.caps.includes('suspend') && (detail.subscription?.platform_hold ? <button className="btn" onClick={() => setAct({ kind: 'reactivate', id: detail.agency.id, name: detail.agency.name })}>Release hold</button> : <button className="btn-ghost text-danger" onClick={() => setAct({ kind: 'suspend', id: detail.agency.id, name: detail.agency.name })}>Request suspension</button>)}
-        {me.role === 'readonly' && <span className="text-xs text-muted self-center">Your operator role is read-only.</span>}</div>
-      <div className="grid gap-4 md:grid-cols-2"><div><div className="font-medium text-sm mb-1">Members</div><Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => m.role }, { h: '2FA', render: (m: any) => (m.totp_enabled ? '✓' : '—') }]} /></div>
-        <div><div className="font-medium text-sm mb-1">Billing events</div><Table rows={detail.billing_events.map((m: any, i: number) => ({ ...m, id: i }))} empty="None" cols={[{ h: 'When', render: (e: any) => <span className="text-xs num">{day(e.created_at)}</span> }, { h: 'Event', render: (e: any) => <>{e.kind}<div className="text-xs text-muted">{e.detail}</div></> }]} /></div></div>
-      <div className="font-medium text-sm mt-4 mb-1">Support access history</div><Table rows={detail.support_sessions} empty="No support sessions" cols={[{ h: 'Operator', render: (s: any) => s.admin_email }, { h: 'Reason', render: (s: any) => s.reason }, { h: 'Expires', render: (s: any) => <span className="text-xs num">{day(s.expires_at)}</span> }, { h: '', render: (s: any) => (s.revoked_at ? <Pill s="void" /> : new Date(s.expires_at) > new Date() ? me.caps.includes('support') ? <button className="btn-ghost" onClick={async () => { const reason = prompt('Reason for ending this session:'); if (reason) { await api(`/platform/support-sessions/${s.id}/revoke`, 'POST', { reason }); open(detail.agency.id); } }}>End</button> : '' : '') }]} />
-    </Modal>}
+    {detail && <AgencyDetailModal detail={detail} me={me} onClose={() => setDetail(null)} onAct={setAct} onRefresh={() => open(detail.agency.id)} />}
     {notice && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-info/30 bg-surface shadow-pop text-sm px-4 py-3 max-w-md" role="status">{notice}<button className="ml-3 text-muted" onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
     {act && <ActionModal act={act} onClose={() => setAct(null)} onDone={(msg) => { setAct(null); if (msg) setNotice(msg); load(); if (detail) open(detail.agency.id); }} />}
   </>;
+}
+
+function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: any; me: Me; onClose(): void; onAct(a: Act): void; onRefresh(): void }) {
+  return <Modal title={detail.agency.name} wide onClose={onClose}>
+    <div className="grid gap-4 md:grid-cols-3 mb-4">
+      <div className="card"><div className="text-xs text-muted">Subscription</div>{detail.subscription ? <><div className="mt-1"><Pill s={detail.subscription.status} /> <span className="font-medium ml-1">{detail.subscription.plan_name}</span> <span className="text-xs text-muted">{detail.subscription.interval}</span></div>
+        <dl className="text-xs mt-2 space-y-0.5 text-muted"><div>Trial ends: <span className="num text-fg">{day(detail.subscription.trial_ends_at)}</span></div><div>Period ends: <span className="num text-fg">{day(detail.subscription.current_period_end)}</span></div>{detail.subscription.manual && <div>Invoiced customer (no card)</div>}{detail.subscription.platform_hold && <div className="text-danger">Operator hold: {detail.subscription.hold_reason}</div>}</dl></> : '—'}</div>
+      <div className="card"><div className="text-xs text-muted">Usage</div><div className="text-sm mt-1">{detail.usage.seats} members · {detail.usage.branches} branches · {detail.usage.bookings} bookings this month</div><div className="text-xs text-muted mt-2">Last active {day(detail.last_active)} · {detail.requests_30d} requests / 30 d</div></div>
+      <div className="card"><div className="text-xs text-muted">Health</div><div className="text-sm mt-1">{detail.open_critical_exceptions} critical exceptions · {detail.failed_emails_7d} failed emails (7 d)</div></div></div>
+    <div className="flex flex-wrap gap-2 mb-4">{([['extend-trial', 'Extend trial', 'billing'], ['set-plan', 'Set plan', 'billing'], ['grant', 'Grant invoiced access', 'billing'], ['support-session', 'Open support session (read-only)', 'support']] as const).filter(([, , c]) => me.caps.includes(c)).map(([k, l]) => <button key={k} className="btn-ghost" onClick={() => onAct({ kind: k, id: detail.agency.id, name: detail.agency.name })}>{l}</button>)}
+      {me.caps.includes('suspend') && (detail.subscription?.platform_hold ? <button className="btn" onClick={() => onAct({ kind: 'reactivate', id: detail.agency.id, name: detail.agency.name })}>Release hold</button> : <button className="btn-ghost text-danger" onClick={() => onAct({ kind: 'suspend', id: detail.agency.id, name: detail.agency.name })}>Request suspension</button>)}
+      {me.role === 'readonly' && <span className="text-xs text-muted self-center">Your operator role is read-only.</span>}</div>
+    <div className="grid gap-4 md:grid-cols-2"><div><div className="font-medium text-sm mb-1">Members</div><Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => m.role }, { h: '2FA', render: (m: any) => (m.totp_enabled ? '✓' : '—') }]} /></div>
+      <div><div className="font-medium text-sm mb-1">Billing events</div><Table rows={detail.billing_events.map((m: any, i: number) => ({ ...m, id: i }))} empty="None" cols={[{ h: 'When', render: (e: any) => <span className="text-xs num">{day(e.created_at)}</span> }, { h: 'Event', render: (e: any) => <>{e.kind}<div className="text-xs text-muted">{e.detail}</div></> }]} /></div></div>
+    <div className="font-medium text-sm mt-4 mb-1">Support access history</div>
+    <Table rows={detail.support_sessions} empty="No support sessions" cols={[{ h: 'Operator', render: (s: any) => s.admin_email }, { h: 'Reason', render: (s: any) => s.reason }, { h: 'Expires', render: (s: any) => <span className="text-xs num">{day(s.expires_at)}</span> },
+      { h: '', render: (s: any) => (s.revoked_at ? <Pill s="void" /> : new Date(s.expires_at) > new Date() ? me.caps.includes('support') ? <button className="btn-ghost" onClick={async () => { const reason = prompt('Reason for ending this session:'); if (reason) { await api(`/platform/support-sessions/${s.id}/revoke`, 'POST', { reason }); onRefresh(); } }}>End</button> : '' : '') }]} />
+  </Modal>;
+}
+
+/* ------------------------------------------------------------------ Dashboard ------------------------------------------------------------------ */
+function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
+  const { me } = useOp();
+  const [o, setO] = useState<any>(null);
+  const [res, setRes] = useState<any>({ rows: [], total: 0, page_size: 25 });
+  const [recent, setRecent] = useState<any[]>([]);
+  const [q, setQ] = useState(''); const [status, setStatus] = useState('');
+  const [detail, setDetail] = useState<any>(null); const [act, setAct] = useState<Act | null>(null);
+  const [notice, setNotice] = useState(''); const [newAgency, setNewAgency] = useState(false);
+  const [plans, setPlans] = useState<any[]>([]); const [err, setErr] = useState('');
+
+  const loadAgencies = (qs = q, st = status) =>
+    api(`/platform/agencies?${qs ? `q=${encodeURIComponent(qs)}&` : ''}${st ? `status=${st}&` : ''}`).then(setRes).catch((e: any) => setErr(e.message));
+
+  useEffect(() => {
+    api('/platform/overview').then(setO).catch(() => {});
+    loadAgencies();
+    api('/platform/audit').then((r: any[]) => setRecent(r.slice(0, 8))).catch(() => {});
+    if (me.caps.includes('billing')) api('/platform/plans').then(setPlans).catch(() => {});
+  }, []);
+
+  const open = async (id: number) => { try { setDetail(await api(`/platform/agencies/${id}`)); } catch (e: any) { setErr(e.message); } };
+
+  const kpis = [
+    { icon: Building2, label: 'Total agencies', value: o?.agencies, sub: o ? `${o.new_30d} new this month` : '…' },
+    { icon: DollarSign, label: 'MRR', value: o ? money(o.mrr) : '…', sub: o ? `${money(o.arr)} ARR` : '…' },
+    { icon: DollarSign, label: 'Invoiced MRR', value: o ? money(o.manual_mrr) : '…', sub: 'manual billing' },
+    { icon: Clock, label: 'Trials expiring', value: o?.trials_ending_7d ?? '…', sub: 'within 7 days', alert: !!(o?.trials_ending_7d) },
+    { icon: Users, label: 'Support sessions', value: o?.active_support_sessions ?? '…', sub: 'live now' },
+    { icon: ShieldAlert, label: 'Operator holds', value: o?.platform_holds ?? '…', sub: o?.pending_approvals ? `${o.pending_approvals} pending approval` : 'no holds', alert: !!(o?.platform_holds || o?.pending_approvals) },
+  ];
+
+  const alerts: string[] = o ? [
+    ...(o.trials_ending_7d ? [`${o.trials_ending_7d} trial(s) expiring within 7 days`] : []),
+    ...(o.platform_holds ? [`${o.platform_holds} agenc${o.platform_holds === 1 ? 'y' : 'ies'} on operator hold`] : []),
+    ...(o.pending_approvals ? [`${o.pending_approvals} suspension request(s) awaiting approval`] : []),
+    ...(o.dead_webhook_deliveries ? [`${o.dead_webhook_deliveries} dead webhook deliveries`] : []),
+    ...(o.open_critical_exceptions ? [`${o.open_critical_exceptions} open critical exception(s)`] : []),
+  ] : [];
+
+  return (
+    <div className="space-y-5">
+      {/* KPI strip */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {kpis.map((k) => (
+          <div key={k.label} className={`card ${k.alert ? 'border-warn/40 bg-warn/5' : ''}`}>
+            <div className="flex items-center gap-1.5 text-xs text-muted mb-1"><k.icon size={13} className={k.alert ? 'text-warn' : ''} />{k.label}</div>
+            <div className={`text-2xl font-semibold num ${k.alert ? 'text-warn' : ''}`}>{k.value ?? <span className="block h-7 w-16 skeleton rounded" />}</div>
+            <div className="text-[11px] text-muted mt-0.5">{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Alert banner */}
+      {alerts.length > 0 && (
+        <div className="rounded-lg border border-warn/30 bg-warn/5 px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-1.5">
+          <AlertTriangle size={15} className="text-warn shrink-0" />
+          {alerts.map((a) => <span key={a} className="text-sm text-warn">{a}</span>)}
+        </div>
+      )}
+
+      {/* Agency management table */}
+      <div className="card !p-0 overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-line">
+          <span className="font-semibold text-sm">All agencies</span>
+          <span className="pill bg-surface2 text-muted">{res.total}</span>
+          <form className="flex flex-wrap gap-2 ml-auto" onSubmit={(e) => { e.preventDefault(); loadAgencies(); }}>
+            <div className="relative"><Search size={14} className="absolute left-3 top-2.5 text-muted" />
+              <input className="input pl-8 w-48" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+            <select className="input w-36" value={status} onChange={(e) => { setStatus(e.target.value); loadAgencies(q, e.target.value); }}>
+              <option value="">All statuses</option>
+              {['trialing', 'active', 'past_due', 'grace', 'suspended', 'cancelled'].map((s) => <option key={s}>{s}</option>)}
+            </select>
+            <button className="btn-ghost text-sm">Search</button>
+          </form>
+          {me.caps.includes('billing') && <button className="btn text-sm" onClick={() => setNewAgency(true)}>+ New agency</button>}
+        </div>
+        <Err e={err} />
+        <Table rows={res.rows} onRow={(r: any) => open(r.id)} empty="No agencies match"
+          cols={[
+            { h: 'Agency', render: (r: any) => <><div className="font-medium">{r.name}</div><div className="text-xs text-muted num">#{r.id} · {String(r.created_at).slice(0, 10)}</div></> },
+            { h: 'Plan', render: (r: any) => <span className="text-sm">{r.plan_name ?? '—'}</span> },
+            { h: 'Status', render: (r: any) => <><Pill s={r.status ?? 'cancelled'} />{!!r.platform_hold && <span className="text-xs text-danger ml-1.5">hold</span>}</> },
+            { h: 'Seats', right: true, render: (r: any) => r.seats },
+            { h: 'Last active', render: (r: any) => <span className="text-xs num text-muted">{day(r.last_active)}</span> },
+            { h: '', render: (r: any) => (
+              <div className="flex gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
+                {me.caps.includes('billing') && r.status === 'trialing' && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'extend-trial', id: r.id, name: r.name })}>Extend trial</button>}
+                {me.caps.includes('billing') && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'set-plan', id: r.id, name: r.name })}>Set plan</button>}
+                {me.caps.includes('support') && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'support-session', id: r.id, name: r.name })}>Support</button>}
+                {me.caps.includes('suspend') && (r.platform_hold
+                  ? <button className="btn-ghost !py-0.5 !px-2 text-xs text-accent" onClick={() => setAct({ kind: 'reactivate', id: r.id, name: r.name })}>Release</button>
+                  : <button className="btn-ghost !py-0.5 !px-2 text-xs text-danger" onClick={() => setAct({ kind: 'suspend', id: r.id, name: r.name })}>Suspend</button>)}
+              </div>
+            )},
+          ]} />
+      </div>
+
+      {/* Plan distribution + Recent audit */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="card">
+          <div className="flex items-center justify-between mb-3">
+            <span className="font-semibold text-sm">Plan distribution</span>
+            <button className="text-xs text-accent hover:underline" onClick={() => onNavigate('plans')}>Manage plans</button>
+          </div>
+          {!o && <div className="skeleton h-24 rounded" />}
+          {o?.by_plan.map((p: any) => (
+            <div key={p.code} className="flex items-center gap-2.5 py-1.5">
+              <span className="text-sm flex-1 truncate">{p.name}</span>
+              <div className="w-28 h-1.5 bg-surface2 rounded-full overflow-hidden shrink-0">
+                <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${Math.min(100, Math.round((p.n / Math.max(1, o.agencies)) * 100))}%` }} />
+              </div>
+              <span className="num text-sm w-5 text-right shrink-0 text-muted">{p.n}</span>
+            </div>
+          ))}
+          {o && (
+            <div className="mt-3 pt-3 border-t border-line grid grid-cols-3 gap-2 text-center">
+              {Object.entries(o.by_status as Record<string, number>).slice(0, 3).map(([k, v]) => (
+                <div key={k}><div className="text-lg font-semibold num">{v}</div><Pill s={k} /></div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="card">
+          <div className="flex items-center justify-between mb-3">
+            <span className="font-semibold text-sm">Recent operator actions</span>
+            <button className="text-xs text-accent hover:underline" onClick={() => onNavigate('audit')}>View all</button>
+          </div>
+          {!o && <div className="skeleton h-24 rounded" />}
+          {o && recent.length === 0 && <div className="text-sm text-muted">No operator actions yet.</div>}
+          <div className="space-y-2.5">
+            {recent.map((a: any) => (
+              <div key={a.id} className="flex items-start gap-2 text-xs">
+                <span className="text-muted num shrink-0">{String(a.created_at).slice(0, 10)}</span>
+                <div className="min-w-0 flex-1">
+                  <span className="capitalize">{a.action.replace(/_/g, ' ')}</span>
+                  {a.agency_name && <span className="text-muted"> · {a.agency_name}</span>}
+                </div>
+                <span className="text-muted shrink-0 truncate max-w-[80px]">{a.admin_email?.split('@')[0]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Modals */}
+      {newAgency && <NewAgencyModal plans={plans} onClose={() => setNewAgency(false)} onDone={(msg) => { setNewAgency(false); setNotice(msg); loadAgencies(); }} />}
+      {detail && <AgencyDetailModal detail={detail} me={me} onClose={() => setDetail(null)} onAct={setAct} onRefresh={() => open(detail.agency.id)} />}
+      {act && <ActionModal act={act} onClose={() => setAct(null)} onDone={(msg) => { setAct(null); if (msg) setNotice(msg); loadAgencies(); if (detail) open(detail.agency.id); }} />}
+      {notice && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-info/30 bg-surface shadow-pop text-sm px-4 py-3 max-w-md" role="status">{notice}<button className="ml-3 text-muted" onClick={() => setNotice('')}>×</button></div>}
+    </div>
+  );
 }
 
 function ActionModal({ act, onClose, onDone }: { act: Act; onClose(): void; onDone(msg?: string): void }) {
