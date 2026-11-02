@@ -22,6 +22,26 @@ platformRouter.get('/system', async (_req, res) => { const [hb]: any = await poo
 
 platformRouter.get('/agencies', async (req, res) => res.json(await P.listAgencies(parse(z.object({ q: z.string().max(100).optional(), status: z.string().max(20).optional(), plan: z.string().max(30).optional(), page: z.coerce.number().int().min(1).optional() }), req.query))));
 platformRouter.get('/agencies/:id', async (req, res) => { const id = idParam(req), d = await P.agencyDetail(id); await P.audit(req, 'view_agency', id); res.json(d); });   // viewing member emails is itself audited
+platformRouter.put('/agencies/:id', P.needs('billing'), async (req, res) => {
+  const id = idParam(req);
+  const b = parse(z.object({ name: z.string().min(2).max(120), base_currency: z.string().length(3), tax_label: z.string().min(1).max(10), timezone: z.string().max(50).optional() }), req.body);
+  await pool.query('UPDATE agencies SET name=?, base_currency=?, tax_label=?, timezone=COALESCE(?,timezone) WHERE id=?', [b.name, b.base_currency.toUpperCase(), b.tax_label, b.timezone ?? null, id]);
+  await P.audit(req, 'edit_agency', id, `name="${b.name}" currency=${b.base_currency}`);
+  res.json({ ok: true });
+});
+platformRouter.delete('/agencies/:id', P.needs('suspend'), async (req, res) => {
+  const id = idParam(req);
+  const b = parse(Reason, req.body);
+  const [[ag]]: any = await pool.query('SELECT name FROM agencies WHERE id=?', [id]);
+  if (!ag) throw new HttpError(404, 'Agency not found');
+  // Delete child rows before removing the agency (cascade that MySQL won't do automatically)
+  for (const t of ['memberships', 'subscriptions', 'billing_events', 'support_sessions', 'platform_audit_log', 'security_events', 'system_state']) {
+    try { await pool.query(`DELETE FROM ${t} WHERE agency_id=?`, [id]); } catch { /* table may not have agency_id — skip */ }
+  }
+  await pool.query('DELETE FROM agencies WHERE id=?', [id]);
+  await P.audit(req, 'delete_agency', id, `deleted "${ag.name}"`, b.reason);
+  res.json({ ok: true });
+});
 platformRouter.post('/agencies/:id/extend-trial', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ days: z.number().int().min(1).max(60) }), req.body); res.json(await P.extendTrial(req, idParam(req), b.days, b.reason)); });
 platformRouter.post('/agencies/:id/set-plan', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ plan: z.string(), interval: Interval.default('monthly') }), req.body); await P.setPlan(req, idParam(req), b.plan, b.interval, b.reason); res.json({ ok: true }); });
 platformRouter.post('/agencies/:id/grant', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ plan: z.string(), interval: Interval.default('yearly'), until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }), req.body); await P.grant(req, idParam(req), b.plan, b.interval, b.until, b.reason); res.json({ ok: true }); });

@@ -71,7 +71,7 @@ function Overview() {
       <div className="card"><div className="font-medium mb-2">Needs attention</div><div className="text-sm space-y-1"><div className="flex justify-between"><span>Dead webhook deliveries</span><span className={`num ${o.dead_webhook_deliveries ? 'text-danger' : ''}`}>{o.dead_webhook_deliveries}</span></div><div className="flex justify-between"><span>Open critical exceptions</span><span className={`num ${o.open_critical_exceptions ? 'text-warn' : ''}`}>{o.open_critical_exceptions}</span></div></div></div></div></div>;
 }
 
-type Act = { kind: 'extend-trial' | 'set-plan' | 'grant' | 'suspend' | 'reactivate' | 'support-session' | 'access-workspace'; id: number; name: string };
+type Act = { kind: 'extend-trial' | 'set-plan' | 'grant' | 'suspend' | 'reactivate' | 'support-session' | 'access-workspace' | 'edit-agency' | 'delete-agency'; id: number; name: string; data?: Record<string, string> };
 function NewAgencyModal({ plans, onClose, onDone }: { plans: any[]; onClose(): void; onDone(msg: string): void }) {
   const { guarded } = useOp();
   const [f, setF] = useState({ agencyName: '', adminName: '', adminEmail: '', adminPassword: '', planCode: plans[0]?.code ?? 'growth', baseCurrency: 'USD' });
@@ -118,7 +118,7 @@ function Agencies() {
 
     {detail && <AgencyDetailModal detail={detail} me={me} onClose={() => setDetail(null)} onAct={setAct} onRefresh={() => open(detail.agency.id)} />}
     {notice && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-info/30 bg-surface shadow-pop text-sm px-4 py-3 max-w-md" role="status">{notice}<button className="ml-3 text-muted" onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
-    {act && <ActionModal act={act} onClose={() => setAct(null)} onDone={(msg) => { setAct(null); if (msg) setNotice(msg); load(); if (detail) open(detail.agency.id); }} />}
+    {act && <ActionModal act={act} onClose={() => setAct(null)} onDone={(msg, closeDetail) => { setAct(null); if (msg) setNotice(msg); load(); if (closeDetail) setDetail(null); else if (detail) open(detail.agency.id); }} />}
   </>;
 }
 
@@ -130,8 +130,10 @@ function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: 
       <div className="card"><div className="text-xs text-muted">Usage</div><div className="text-sm mt-1">{detail.usage.seats} members · {detail.usage.branches} branches · {detail.usage.bookings} bookings this month</div><div className="text-xs text-muted mt-2">Last active {day(detail.last_active)} · {detail.requests_30d} requests / 30 d</div></div>
       <div className="card"><div className="text-xs text-muted">Health</div><div className="text-sm mt-1">{detail.open_critical_exceptions} critical exceptions · {detail.failed_emails_7d} failed emails (7 d)</div></div></div>
     <div className="flex flex-wrap gap-2 mb-4">{([['extend-trial', 'Extend trial', 'billing'], ['set-plan', 'Set plan', 'billing'], ['grant', 'Grant invoiced access', 'billing'], ['support-session', 'Open support session (read-only)', 'support']] as const).filter(([, , c]) => me.caps.includes(c)).map(([k, l]) => <button key={k} className="btn-ghost" onClick={() => onAct({ kind: k, id: detail.agency.id, name: detail.agency.name })}>{l}</button>)}
+      {me.caps.includes('billing') && <button className="btn-ghost" onClick={() => onAct({ kind: 'edit-agency', id: detail.agency.id, name: detail.agency.name, data: { name: detail.agency.name, base_currency: detail.agency.base_currency ?? 'USD', tax_label: detail.agency.tax_label ?? 'TAX' } })}>Edit</button>}
       {me.caps.includes('support') && <button className="btn" onClick={() => onAct({ kind: 'access-workspace', id: detail.agency.id, name: detail.agency.name })}>Access workspace</button>}
       {me.caps.includes('suspend') && (detail.subscription?.platform_hold ? <button className="btn" onClick={() => onAct({ kind: 'reactivate', id: detail.agency.id, name: detail.agency.name })}>Release hold</button> : <button className="btn-ghost text-danger" onClick={() => onAct({ kind: 'suspend', id: detail.agency.id, name: detail.agency.name })}>Request suspension</button>)}
+      {me.caps.includes('suspend') && <button className="btn-ghost text-danger" onClick={() => onAct({ kind: 'delete-agency', id: detail.agency.id, name: detail.agency.name })}>Delete</button>}
       {me.role === 'readonly' && <span className="text-xs text-muted self-center">Your operator role is read-only.</span>}</div>
     <div className="grid gap-4 md:grid-cols-2"><div><div className="font-medium text-sm mb-1">Members</div><Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => m.role }, { h: '2FA', render: (m: any) => (m.totp_enabled ? '✓' : '—') }]} /></div>
       <div><div className="font-medium text-sm mb-1">Billing events</div><Table rows={detail.billing_events.map((m: any, i: number) => ({ ...m, id: i }))} empty="None" cols={[{ h: 'When', render: (e: any) => <span className="text-xs num">{day(e.created_at)}</span> }, { h: 'Event', render: (e: any) => <>{e.kind}<div className="text-xs text-muted">{e.detail}</div></> }]} /></div></div>
@@ -290,19 +292,27 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
       {/* Modals */}
       {newAgency && <NewAgencyModal plans={plans} onClose={() => setNewAgency(false)} onDone={(msg) => { setNewAgency(false); setNotice(msg); loadAgencies(); }} />}
       {detail && <AgencyDetailModal detail={detail} me={me} onClose={() => setDetail(null)} onAct={setAct} onRefresh={() => open(detail.agency.id)} />}
-      {act && <ActionModal act={act} onClose={() => setAct(null)} onDone={(msg) => { setAct(null); if (msg) setNotice(msg); loadAgencies(); if (detail) open(detail.agency.id); }} />}
+      {act && <ActionModal act={act} onClose={() => setAct(null)} onDone={(msg, closeDetail) => { setAct(null); if (msg) setNotice(msg); loadAgencies(); if (closeDetail) setDetail(null); else if (detail) open(detail.agency.id); }} />}
       {notice && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-info/30 bg-surface shadow-pop text-sm px-4 py-3 max-w-md" role="status">{notice}<button className="ml-3 text-muted" onClick={() => setNotice('')}>×</button></div>}
     </div>
   );
 }
 
-function ActionModal({ act, onClose, onDone }: { act: Act; onClose(): void; onDone(msg?: string): void }) {
+function ActionModal({ act, onClose, onDone }: { act: Act; onClose(): void; onDone(msg?: string, closeDetail?: boolean): void }) {
   const { guarded } = useOp();
-  const [f, setF] = useState<any>({ reason: '', days: 7, plan: 'growth', interval: 'yearly', until: new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10), minutes: 30 }); const [err, setErr] = useState(''); const [plans, setPlans] = useState<any[]>([]);
+  const [f, setF] = useState<any>({ reason: '', days: 7, plan: 'growth', interval: 'yearly', until: new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10), minutes: 30, name: act.data?.name ?? '', base_currency: act.data?.base_currency ?? 'USD', tax_label: act.data?.tax_label ?? 'TAX' }); const [err, setErr] = useState(''); const [plans, setPlans] = useState<any[]>([]);
   useEffect(() => { if (act.kind === 'set-plan' || act.kind === 'grant') api('/platform/plans').then(setPlans); }, []);
-  const titles: Record<Act['kind'], string> = { 'extend-trial': 'Extend trial', 'set-plan': 'Set plan', grant: 'Grant invoiced access', suspend: 'Request suspension', reactivate: 'Release operator hold', 'support-session': 'Open read-only support session', 'access-workspace': 'Access agency workspace' };
+  const titles: Record<Act['kind'], string> = { 'extend-trial': 'Extend trial', 'set-plan': 'Set plan', grant: 'Grant invoiced access', suspend: 'Request suspension', reactivate: 'Release operator hold', 'support-session': 'Open read-only support session', 'access-workspace': 'Access agency workspace', 'edit-agency': 'Edit agency', 'delete-agency': 'Delete agency' };
   const submit = async () => {
     try {
+      if (act.kind === 'edit-agency') {
+        await guarded(() => api(`/platform/agencies/${act.id}`, 'PUT', { name: f.name, base_currency: f.base_currency, tax_label: f.tax_label }));
+        onDone(`Agency "${f.name}" updated.`); return;
+      }
+      if (act.kind === 'delete-agency') {
+        await guarded(() => api(`/platform/agencies/${act.id}`, 'DELETE', { reason: f.reason }));
+        onDone(`Agency "${act.name}" deleted.`, true); return;
+      }
       const body: any = { reason: f.reason, ...(act.kind === 'extend-trial' ? { days: Number(f.days) } : {}), ...(act.kind === 'set-plan' ? { plan: f.plan, interval: f.interval } : {}), ...(act.kind === 'grant' ? { plan: f.plan, interval: f.interval, until: f.until } : {}), ...(act.kind === 'support-session' ? { minutes: Number(f.minutes) } : {}) };
       const r = await guarded(() => api(`/platform/agencies/${act.id}/${act.kind}`, 'POST', body));
       if (act.kind === 'support-session') { const payload = btoa(JSON.stringify({ token: r.token, agency: r.agency })); window.open(`/support#${payload}`, '_blank', 'noopener'); }
@@ -310,13 +320,22 @@ function ActionModal({ act, onClose, onDone }: { act: Act; onClose(): void; onDo
       onDone(act.kind === 'suspend' && r.status === 'pending' ? 'Suspension requested. A second admin operator must approve it under Approvals — nothing has changed for the customer yet.' : undefined);
     } catch (e: any) { setErr(e.message); }
   };
+  const isEditValid = act.kind === 'edit-agency' ? f.name.length >= 2 && f.base_currency.length === 3 && f.tax_label.length >= 1 : true;
+  const isDeleteValid = act.kind === 'delete-agency' ? f.reason.trim().length >= 5 : true;
+  const isReasonRequired = !['edit-agency', 'delete-agency'].includes(act.kind);
   return <Modal title={`${titles[act.kind]} — ${act.name}`} onClose={onClose}><Err e={err} />
+    {act.kind === 'edit-agency' && <div className="grid grid-cols-2 gap-x-4">
+      <Field label="Agency name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
+      <Field label="Base currency (3 letters)"><input className="input num" maxLength={3} value={f.base_currency} onChange={(e) => setF({ ...f, base_currency: e.target.value.toUpperCase() })} /></Field>
+      <Field label="Tax label"><input className="input num" value={f.tax_label} onChange={(e) => setF({ ...f, tax_label: e.target.value })} /></Field>
+    </div>}
     {act.kind === 'extend-trial' && <Field label="Extra days"><input className="input num" type="number" min={1} max={60} value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} /></Field>}
     {(act.kind === 'set-plan' || act.kind === 'grant') && <div className="grid grid-cols-2 gap-x-4"><Field label="Plan"><select className="input" value={f.plan} onChange={(e) => setF({ ...f, plan: e.target.value })}>{plans.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}</select></Field><Field label="Interval"><select className="input" value={f.interval} onChange={(e) => setF({ ...f, interval: e.target.value })}><option>monthly</option><option>yearly</option></select></Field></div>}
     {act.kind === 'grant' && <Field label="Access until"><input className="input num" type="date" value={f.until} onChange={(e) => setF({ ...f, until: e.target.value })} /></Field>}
     {act.kind === 'support-session' && <Field label="Minutes (5–60)"><input className="input num" type="number" min={5} max={60} value={f.minutes} onChange={(e) => setF({ ...f, minutes: e.target.value })} /></Field>}
-    <Field label="Reason (recorded in the audit log)"><textarea className="input" rows={3} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="e.g. Customer ticket #1234" /></Field>
-    <div className="flex justify-end"><button className={act.kind === 'suspend' ? 'btn bg-danger text-white' : 'btn'} disabled={f.reason.trim().length < 5} onClick={submit}>Confirm</button></div></Modal>;
+    {act.kind === 'delete-agency' && <p className="text-sm text-danger mb-3">This permanently deletes the agency and all its data. This action cannot be undone.</p>}
+    {(isReasonRequired || act.kind === 'delete-agency') && <Field label="Reason (recorded in the audit log)"><textarea className="input" rows={3} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="e.g. Customer ticket #1234" /></Field>}
+    <div className="flex justify-end"><button className={['suspend', 'delete-agency'].includes(act.kind) ? 'btn bg-danger text-white' : 'btn'} disabled={!(isEditValid && isDeleteValid) || (isReasonRequired && f.reason.trim().length < 5)} onClick={submit}>Confirm</button></div></Modal>;
 }
 
 function Plans() {
