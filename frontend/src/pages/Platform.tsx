@@ -8,6 +8,13 @@ import { ThemeMenuButton } from '../components/ThemeToggle';
 
 const day = (d: any) => (d ? String(d).replace('T', ' ').slice(0, 16) : '—');
 const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api'];
+const MODULE_CODES: { code: string; label: string }[] = [
+  { code: 'crm', label: 'CRM (Leads, Quotes, Bookings, Clients)' },
+  { code: 'ticketing', label: 'Ticketing (Ticket Invoices, Refunds, Airlines)' },
+  { code: 'finance', label: 'Finance (Invoices, Payments, Suppliers, Reconciliation)' },
+  { code: 'accounting', label: 'Accounting (Ledger, Journals, Cash / Bank)' },
+  { code: 'insights', label: 'Insights & Automation (Reports, Automation, Integrations)' },
+];
 type Cap = 'read' | 'support' | 'billing' | 'suspend';
 interface Me { email: string; role: string; caps: Cap[] }
 const OpCtx = createContext<{ me: Me; guarded<T>(fn: () => Promise<T>): Promise<T> }>(null as any);
@@ -81,17 +88,44 @@ function Overview() {
 }
 
 type Act = { kind: 'extend-trial' | 'set-plan' | 'grant' | 'suspend' | 'reactivate' | 'support-session'; id: number; name: string };
+function NewAgencyModal({ plans, onClose, onDone }: { plans: any[]; onClose(): void; onDone(msg: string): void }) {
+  const { guarded } = useOp();
+  const [f, setF] = useState({ agencyName: '', adminName: '', adminEmail: '', adminPassword: '', planCode: plans[0]?.code ?? 'growth', baseCurrency: 'USD' });
+  const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true); setErr('');
+    try { await guarded(() => api('/platform/agencies', 'POST', f)); onDone(`Agency "${f.agencyName}" created with admin ${f.adminEmail}.`); }
+    catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const valid = f.agencyName.length >= 2 && f.adminName.length >= 2 && f.adminEmail.includes('@') && f.adminPassword.length >= 10;
+  return <Modal title="Create new agency" onClose={onClose}><Err e={err} />
+    <div className="grid grid-cols-2 gap-x-4">
+      <Field label="Agency name"><input className="input" value={f.agencyName} onChange={(e) => setF({ ...f, agencyName: e.target.value })} placeholder="Acme Travel" /></Field>
+      <Field label="Base currency"><input className="input num" maxLength={3} value={f.baseCurrency} onChange={(e) => setF({ ...f, baseCurrency: e.target.value.toUpperCase() })} placeholder="USD" /></Field>
+      <Field label="Admin full name"><input className="input" value={f.adminName} onChange={(e) => setF({ ...f, adminName: e.target.value })} placeholder="Jane Smith" /></Field>
+      <Field label="Admin email"><input className="input" type="email" value={f.adminEmail} onChange={(e) => setF({ ...f, adminEmail: e.target.value })} placeholder="jane@acme.travel" /></Field>
+      <Field label="Admin password (min 10 chars)"><input className="input" type="password" autoComplete="new-password" value={f.adminPassword} onChange={(e) => setF({ ...f, adminPassword: e.target.value })} /></Field>
+      <Field label="Plan"><select className="input" value={f.planCode} onChange={(e) => setF({ ...f, planCode: e.target.value })}>{plans.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}</select></Field>
+    </div>
+    <div className="flex justify-end mt-2"><button className="btn" disabled={busy || !valid} onClick={submit}>Create agency</button></div>
+  </Modal>;
+}
 function Agencies() {
   const [res, setRes] = useState<any>({ rows: [], total: 0 }); const [q, setQ] = useState(''); const [status, setStatus] = useState(''); const [page, setPage] = useState(1);
   const { me } = useOp(); const [notice, setNotice] = useState(''); const [detail, setDetail] = useState<any>(null); const [act, setAct] = useState<Act | null>(null); const [err, setErr] = useState('');
+  const [newAgency, setNewAgency] = useState(false); const [plans, setPlans] = useState<any[]>([]);
   const load = () => api(`/platform/agencies?page=${page}${q ? `&q=${encodeURIComponent(q)}` : ''}${status ? `&status=${status}` : ''}`).then(setRes).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [page, status]);
+  useEffect(() => { if (me.caps.includes('billing')) api('/platform/plans').then(setPlans); }, []);
   const open = async (id: number) => { try { setDetail(await api(`/platform/agencies/${id}`)); } catch (e: any) { setErr(e.message); } };
   return <>
     <Err e={err} />
     <form className="flex flex-wrap gap-2 mb-3" onSubmit={(e) => { e.preventDefault(); setPage(1); load(); }}>
       <div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted" /><input className="input pl-8 w-64" placeholder="Agency name or member email" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search agencies" /></div>
-      <select className="input w-44" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} aria-label="Status"><option value="">All statuses</option>{['trialing', 'active', 'past_due', 'grace', 'suspended', 'cancelled'].map((s) => <option key={s}>{s}</option>)}</select><button className="btn-ghost">Search</button></form>
+      <select className="input w-44" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} aria-label="Status"><option value="">All statuses</option>{['trialing', 'active', 'past_due', 'grace', 'suspended', 'cancelled'].map((s) => <option key={s}>{s}</option>)}</select><button className="btn-ghost">Search</button>
+      {me.caps.includes('billing') && <button type="button" className="btn ml-auto" onClick={() => setNewAgency(true)}>New agency</button>}
+    </form>
+    {newAgency && <NewAgencyModal plans={plans} onClose={() => setNewAgency(false)} onDone={(msg) => { setNewAgency(false); setNotice(msg); load(); }} />}
     <Table rows={res.rows} onRow={(r: any) => open(r.id)} empty="No agencies match" cols={[
       { h: 'Agency', render: (r: any) => <><div className="font-medium">{r.name}</div><div className="text-xs text-muted num">#{r.id} · created {String(r.created_at).slice(0, 10)}</div></> }, { h: 'Plan', render: (r: any) => r.plan_name ?? '—' },
       { h: 'Status', render: (r: any) => <><Pill s={r.status ?? 'cancelled'} />{!!r.platform_hold && <span className="text-xs text-danger ml-2">hold</span>}{!!r.is_manual && <span className="text-xs text-muted ml-2">invoiced</span>}</> },
@@ -146,10 +180,11 @@ function Plans() {
   const load = () => api('/platform/plans').then(setPlans); useEffect(() => { load(); }, []);
   const save = async () => {
     const n = (v: any) => (v === '' || v === null || v === undefined ? null : Number(v)); const { agencies, id, code, ...rest } = edit;
-    const body = { ...rest, price_monthly: Number(rest.price_monthly), price_yearly: Number(rest.price_yearly), trial_days: Number(rest.trial_days), sort: Number(rest.sort), max_seats: n(rest.max_seats), max_branches: n(rest.max_branches), max_bookings_month: n(rest.max_bookings_month), active: !!rest.active, features: rest.features };
+    const allowedMods = Array.isArray(rest.allowed_modules) && rest.allowed_modules.length > 0 ? rest.allowed_modules : null;
+    const body = { ...rest, price_monthly: Number(rest.price_monthly), price_yearly: Number(rest.price_yearly), trial_days: Number(rest.trial_days), sort: Number(rest.sort), max_seats: n(rest.max_seats), max_branches: n(rest.max_branches), max_bookings_month: n(rest.max_bookings_month), active: !!rest.active, features: rest.features, allowed_modules: allowedMods };
     try { if (edit.isNew) await guarded(() => api('/platform/plans', 'POST', { ...body, code: edit.code })); else await guarded(() => api(`/platform/plans/${id}`, 'PUT', { ...body, reason: edit.reason })); setEdit(null); setErr(''); load(); } catch (e: any) { setErr(e.message); }
   };
-  const blank = { isNew: true, code: '', name: '', description: '', price_monthly: 0, price_yearly: 0, trial_days: 14, max_seats: '', max_branches: '', max_bookings_month: '', features: ['portal'], support_level: 'email', stripe_price_monthly: '', stripe_price_yearly: '', active: true, sort: 10, reason: '' };
+  const blank = { isNew: true, code: '', name: '', description: '', price_monthly: 0, price_yearly: 0, trial_days: 14, max_seats: '', max_branches: '', max_bookings_month: '', features: ['portal'], allowed_modules: [] as string[], support_level: 'email', stripe_price_monthly: '', stripe_price_yearly: '', active: true, sort: 10, reason: '' };
   return <>
     <div className="flex justify-between items-center mb-3"><p className="text-sm text-muted">Plan changes apply to every agency on the plan immediately. Leave a limit empty for unlimited.</p>{canEdit && <button className="btn" onClick={() => setEdit(blank)}>New plan</button>}</div>
     <Table rows={plans} onRow={canEdit ? (p) => setEdit({ ...p, reason: '' }) : undefined} cols={[{ h: 'Plan', render: (p: any) => <><div className="font-medium">{p.name} <span className="text-xs text-muted num">{p.code}</span></div><div className="text-xs text-muted">{p.features.join(', ')}</div></> },
@@ -165,6 +200,7 @@ function Plans() {
         <Field label="Stripe price (monthly)"><input className="input num text-xs" value={edit.stripe_price_monthly ?? ''} onChange={(e) => setEdit({ ...edit, stripe_price_monthly: e.target.value })} /></Field><Field label="Stripe price (yearly)"><input className="input num text-xs" value={edit.stripe_price_yearly ?? ''} onChange={(e) => setEdit({ ...edit, stripe_price_yearly: e.target.value })} /></Field>
         <Field label="Sort"><input className="input num" type="number" value={edit.sort} onChange={(e) => setEdit({ ...edit, sort: e.target.value })} /></Field><Field label="Available to new customers"><label className="flex gap-2 items-center text-sm h-10"><input type="checkbox" checked={!!edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label></Field></div>
       <Field label="Features"><div className="flex flex-wrap gap-3">{FEATURES.map((f) => <label key={f} className="flex gap-1.5 items-center text-sm"><input type="checkbox" checked={edit.features.includes(f)} onChange={(e) => setEdit({ ...edit, features: e.target.checked ? [...edit.features, f] : edit.features.filter((x: string) => x !== f) })} />{f.replace(/_/g, ' ')}</label>)}</div></Field>
+      <Field label="Allowed modules"><p className="text-xs text-muted mb-2">Leave all unchecked to allow every module (full access). Check specific modules to restrict this plan.</p><div className="flex flex-col gap-2">{MODULE_CODES.map((m) => { const checked = Array.isArray(edit.allowed_modules) && edit.allowed_modules.includes(m.code); return (<label key={m.code} className="flex gap-2 items-center text-sm"><input type="checkbox" checked={checked} onChange={(e) => { const cur: string[] = Array.isArray(edit.allowed_modules) ? edit.allowed_modules : []; setEdit({ ...edit, allowed_modules: e.target.checked ? [...cur, m.code] : cur.filter((x: string) => x !== m.code) }); }} />{m.label}</label>); })}</div></Field>
       {!edit.isNew && <><div className="text-sm text-warn mb-2">{edit.agencies} agenc{edit.agencies === 1 ? 'y is' : 'ies are'} on this plan; changes apply to them immediately.</div><Field label="Reason (recorded in the audit log)"><input className="input" value={edit.reason} onChange={(e) => setEdit({ ...edit, reason: e.target.value })} /></Field></>}
       <div className="flex justify-end"><button className="btn" disabled={!edit.name || (!edit.isNew && edit.reason.trim().length < 5)} onClick={save}>{edit.isNew ? 'Create plan' : 'Save changes'}</button></div></Modal>}
   </>;

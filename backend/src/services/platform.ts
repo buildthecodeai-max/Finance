@@ -229,23 +229,56 @@ export async function revokeSupportSession(req: Request, sessionId: number, reas
 }
 
 /* ------------------------------------------------------------------ plans */
-export interface PlanIn { code?: string; name: string; description?: string | null; price_monthly: number; price_yearly: number; currency?: string; trial_days: number; max_seats: number | null; max_branches: number | null; max_bookings_month: number | null; features: string[]; support_level: string; stripe_price_monthly?: string | null; stripe_price_yearly?: string | null; active: boolean; sort: number }
+export const MODULE_CODES = ['crm', 'ticketing', 'finance', 'accounting', 'insights'] as const;
+export type ModuleCode = (typeof MODULE_CODES)[number];
+export interface PlanIn { code?: string; name: string; description?: string | null; price_monthly: number; price_yearly: number; currency?: string; trial_days: number; max_seats: number | null; max_branches: number | null; max_bookings_month: number | null; features: string[]; allowed_modules: string[] | null; support_level: string; stripe_price_monthly?: string | null; stripe_price_yearly?: string | null; active: boolean; sort: number }
 const checkFeatures = (f: string[]) => { const bad = f.filter((x) => !(FEATURES as readonly string[]).includes(x)); if (bad.length) throw new HttpError(400, `Unknown feature(s): ${bad.join(', ')}`); };
-export async function listPlans() { const [r]: any = await pool.query(`SELECT p.*, (SELECT COUNT(*) FROM subscriptions s WHERE s.plan_id = p.id) agencies FROM plans p ORDER BY p.sort, p.id`); return r.map((p: any) => ({ ...p, features: String(p.features).split(',').filter(Boolean) })); }
+const checkModules = (m: string[] | null) => { if (!m) return; const bad = m.filter((x) => !(MODULE_CODES as readonly string[]).includes(x)); if (bad.length) throw new HttpError(400, `Unknown module(s): ${bad.join(', ')}`); };
+const parseModules = (v: any): string[] | null => { if (v === null || v === undefined) return null; const s = String(v); return s === '' ? null : s.split(',').filter(Boolean); };
+export async function listPlans() {
+  const [r]: any = await pool.query(`SELECT p.*, (SELECT COUNT(*) FROM subscriptions s WHERE s.plan_id = p.id) agencies FROM plans p ORDER BY p.sort, p.id`);
+  return r.map((p: any) => ({ ...p, features: String(p.features).split(',').filter(Boolean), allowed_modules: parseModules(p.allowed_modules) }));
+}
 export async function createPlan(req: Request, b: PlanIn) {
-  if (!b.code || !/^[a-z][a-z0-9_-]{1,29}$/.test(b.code)) throw new HttpError(400, 'Plan code must be lowercase letters, digits, - or _'); checkFeatures(b.features);
-  try { const [r]: any = await pool.query('INSERT INTO plans (code, name, description, price_monthly, price_yearly, currency, trial_days, max_seats, max_branches, max_bookings_month, features, support_level, stripe_price_monthly, stripe_price_yearly, active, sort) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [b.code, b.name, b.description ?? null, b.price_monthly, b.price_yearly, b.currency ?? 'USD', b.trial_days, b.max_seats, b.max_branches, b.max_bookings_month, b.features.join(','), b.support_level, b.stripe_price_monthly ?? null, b.stripe_price_yearly ?? null, b.active ? 1 : 0, b.sort]);
+  if (!b.code || !/^[a-z][a-z0-9_-]{1,29}$/.test(b.code)) throw new HttpError(400, 'Plan code must be lowercase letters, digits, - or _');
+  checkFeatures(b.features); checkModules(b.allowed_modules);
+  try { const [r]: any = await pool.query('INSERT INTO plans (code, name, description, price_monthly, price_yearly, currency, trial_days, max_seats, max_branches, max_bookings_month, features, allowed_modules, support_level, stripe_price_monthly, stripe_price_yearly, active, sort) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [b.code, b.name, b.description ?? null, b.price_monthly, b.price_yearly, b.currency ?? 'USD', b.trial_days, b.max_seats, b.max_branches, b.max_bookings_month, b.features.join(','), b.allowed_modules ? b.allowed_modules.join(',') : null, b.support_level, b.stripe_price_monthly ?? null, b.stripe_price_yearly ?? null, b.active ? 1 : 0, b.sort]);
     await audit(req, 'plan_create', null, `${b.code}`); return r.insertId as number; } catch (e: any) { if (e.code === 'ER_DUP_ENTRY') throw new HttpError(409, 'A plan with that code already exists'); throw e; }
 }
 export async function updatePlan(req: Request, id: number, b: PlanIn, reasonIn: unknown) {
-  const reason = needReason(reasonIn); checkFeatures(b.features);
+  const reason = needReason(reasonIn); checkFeatures(b.features); checkModules(b.allowed_modules);
   const [[cur]]: any = await pool.query('SELECT * FROM plans WHERE id = ?', [id]); if (!cur) throw new HttpError(404, 'Plan not found');
-  await pool.query(`UPDATE plans SET name = ?, description = ?, price_monthly = ?, price_yearly = ?, trial_days = ?, max_seats = ?, max_branches = ?, max_bookings_month = ?, features = ?, support_level = ?, stripe_price_monthly = ?, stripe_price_yearly = ?, active = ?, sort = ? WHERE id = ?`,
-    [b.name, b.description ?? null, b.price_monthly, b.price_yearly, b.trial_days, b.max_seats, b.max_branches, b.max_bookings_month, b.features.join(','), b.support_level, b.stripe_price_monthly ?? null, b.stripe_price_yearly ?? null, b.active ? 1 : 0, b.sort, id]);
-  const diff = Object.entries({ price_monthly: b.price_monthly, price_yearly: b.price_yearly, max_seats: b.max_seats, max_branches: b.max_branches, max_bookings_month: b.max_bookings_month, features: b.features.join(','), active: b.active ? 1 : 0 }).filter(([k, v]) => String(cur[k]) !== String(v)).map(([k, v]) => `${k}: ${cur[k]} → ${v}`).join('; ');
+  await pool.query(`UPDATE plans SET name = ?, description = ?, price_monthly = ?, price_yearly = ?, trial_days = ?, max_seats = ?, max_branches = ?, max_bookings_month = ?, features = ?, allowed_modules = ?, support_level = ?, stripe_price_monthly = ?, stripe_price_yearly = ?, active = ?, sort = ? WHERE id = ?`,
+    [b.name, b.description ?? null, b.price_monthly, b.price_yearly, b.trial_days, b.max_seats, b.max_branches, b.max_bookings_month, b.features.join(','), b.allowed_modules ? b.allowed_modules.join(',') : null, b.support_level, b.stripe_price_monthly ?? null, b.stripe_price_yearly ?? null, b.active ? 1 : 0, b.sort, id]);
+  const diff = Object.entries({ price_monthly: b.price_monthly, price_yearly: b.price_yearly, max_seats: b.max_seats, max_branches: b.max_branches, max_bookings_month: b.max_bookings_month, features: b.features.join(','), allowed_modules: (b.allowed_modules ?? []).join(','), active: b.active ? 1 : 0 }).filter(([k, v]) => String((cur as any)[k] ?? '') !== String(v)).map(([k, v]) => `${k}: ${(cur as any)[k]} → ${v}`).join('; ');
   await audit(req, 'plan_update', null, `${cur.code}: ${diff || 'no material change'}`, reason);
   const [[n]]: any = await pool.query('SELECT COUNT(*) n FROM subscriptions WHERE plan_id = ?', [id]); return { agencies_affected: n.n };
+}
+
+/* ------------------------------------------------------------------ agency creation (platform operator) */
+export async function createAgency(req: Request, b: { agencyName: string; adminName: string; adminEmail: string; adminPassword: string; planCode: string; baseCurrency: string }) {
+  const bcrypt = await import('bcryptjs');
+  const { startTrial } = await import('./billing.js');
+  const { seedChart } = await import('./accounting.js');
+  const { Tenant } = await import('../db.js');
+  const [ex]: any = await pool.query('SELECT id FROM users WHERE email = ?', [b.adminEmail]);
+  if (ex.length) throw new HttpError(409, 'A user with that email already exists');
+  const c = await pool.getConnection();
+  let agencyId: number, userId: number;
+  try {
+    await c.beginTransaction();
+    const [a]: any = await c.query('INSERT INTO agencies (name, base_currency) VALUES (?,?)', [b.agencyName, b.baseCurrency]);
+    agencyId = a.insertId;
+    const [u]: any = await c.query('INSERT INTO users (email, name, password_hash) VALUES (?,?,?)', [b.adminEmail, b.adminName, await bcrypt.hash(b.adminPassword, 12)]);
+    userId = u.insertId;
+    await c.query('INSERT INTO memberships (agency_id, user_id, role) VALUES (?,?,"admin")', [agencyId, userId]);
+    await c.commit();
+  } catch (e) { await c.rollback(); throw e; } finally { c.release(); }
+  await seedChart(new Tenant(agencyId, { userId, ip: req.ip ?? 'platform' }));
+  await startTrial(agencyId, b.planCode || 'growth');
+  await audit(req, 'agency_create', agencyId, `${b.agencyName} / admin: ${b.adminEmail} / plan: ${b.planCode}`);
+  return { agencyId, userId };
 }
 
 /* ------------------------------------------------------------------ operator CLI helpers */

@@ -22,8 +22,9 @@ billingRouter.get('/subscription', async (req, res) => {
   res.json({
     subscription: { status: s.status, plan: { code: s.plan_code, name: s.plan_name, support_level: s.support_level }, interval: s.billing_interval, trial_ends_at: s.trial_ends_at, current_period_end: s.current_period_end, grace_until: s.grace_until,
       cancel_at_period_end: !!s.cancel_at_period_end, pending_plan: pending ?? null, pending_interval: s.pending_interval, manual: !!s.is_manual, has_payment_method: !!s.stripe_customer_id },
-    limits: { seats: s.max_seats, branches: s.max_branches, bookings: s.max_bookings_month }, features: String(s.features).split(',').filter(Boolean), usage: await B.usage(a),
-    banner: B.banner(s), read_only: !B.FULL_ACCESS.includes(s.status), online_billing: B.gateway.enabled(),
+    limits: { seats: s.max_seats, branches: s.max_branches, bookings: s.max_bookings_month }, features: String(s.features).split(',').filter(Boolean),
+    allowed_modules: s.allowed_modules ? String(s.allowed_modules).split(',').filter(Boolean) : null,
+    usage: await B.usage(a), banner: B.banner(s), read_only: !B.FULL_ACCESS.includes(s.status), online_billing: B.gateway.enabled(),
   });
 });
 

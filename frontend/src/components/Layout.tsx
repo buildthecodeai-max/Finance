@@ -15,19 +15,20 @@ interface Item { to: string; label: string; icon: ReactNode; roles?: Role[] }
 const I = (C: any) => <C size={17} strokeWidth={1.8} />;
 const FINANCE: Role[] = ['admin', 'finance_manager', 'viewer'];
 
-const GROUPS: { title: string; items: Item[] }[] = [
-  { title: 'Overview', items: [{ to: '/', label: 'Dashboard', icon: I(LayoutDashboard) }, { to: '/operations', label: 'Operations', icon: I(CalendarClock) }] },
-  { title: 'Sales', items: [{ to: '/leads', label: 'Leads', icon: I(Target) }, { to: '/quotes', label: 'Quotes', icon: I(FileSignature) }, { to: '/bookings', label: 'Bookings', icon: I(Briefcase) }, { to: '/clients', label: 'Clients', icon: I(Users) }] },
-  { title: 'Ticketing', items: [{ to: '/ticket-invoices', label: 'Ticket Invoices', icon: I(Ticket) }, { to: '/refunds', label: 'Refunds', icon: I(Undo2) }, { to: '/ticket-search', label: 'Ticket Search', icon: I(Search) }, { to: '/airlines', label: 'Airlines', icon: I(Plane) }, { to: '/sale-reports', label: 'Sale Reports', icon: I(TrendingUp), roles: FINANCE }] },
-  { title: 'Finance', items: [{ to: '/finance', label: 'Overview', icon: I(LineChart), roles: FINANCE }, { to: '/invoices', label: 'Invoices', icon: I(FileText) }, { to: '/client-receipts', label: 'Client Receipts', icon: I(HandCoins), roles: FINANCE }, { to: '/credit-notes', label: 'Credit Notes & Refunds', icon: I(FileMinus), roles: FINANCE },
+// module: which package module gates this group. null = always visible (Overview, Administration).
+const GROUPS: { title: string; module: string | null; items: Item[] }[] = [
+  { title: 'Overview', module: null, items: [{ to: '/', label: 'Dashboard', icon: I(LayoutDashboard) }, { to: '/operations', label: 'Operations', icon: I(CalendarClock) }] },
+  { title: 'Sales', module: 'crm', items: [{ to: '/leads', label: 'Leads', icon: I(Target) }, { to: '/quotes', label: 'Quotes', icon: I(FileSignature) }, { to: '/bookings', label: 'Bookings', icon: I(Briefcase) }, { to: '/clients', label: 'Clients', icon: I(Users) }] },
+  { title: 'Ticketing', module: 'ticketing', items: [{ to: '/ticket-invoices', label: 'Ticket Invoices', icon: I(Ticket) }, { to: '/refunds', label: 'Refunds', icon: I(Undo2) }, { to: '/ticket-search', label: 'Ticket Search', icon: I(Search) }, { to: '/airlines', label: 'Airlines', icon: I(Plane) }, { to: '/sale-reports', label: 'Sale Reports', icon: I(TrendingUp), roles: FINANCE }] },
+  { title: 'Finance', module: 'finance', items: [{ to: '/finance', label: 'Overview', icon: I(LineChart), roles: FINANCE }, { to: '/invoices', label: 'Invoices', icon: I(FileText) }, { to: '/client-receipts', label: 'Client Receipts', icon: I(HandCoins), roles: FINANCE }, { to: '/credit-notes', label: 'Credit Notes & Refunds', icon: I(FileMinus), roles: FINANCE },
     { to: '/payments', label: 'Payments', icon: I(CreditCard) }, { to: '/statements', label: 'Statements', icon: I(ScrollText), roles: FINANCE }, { to: '/client-portal', label: 'Client Portal', icon: I(Users), roles: FINANCE },
     { to: '/supplier-bills', label: 'Supplier Bills', icon: I(Truck), roles: FINANCE }, { to: '/payment-runs', label: 'Payment Runs', icon: I(Banknote), roles: FINANCE }, { to: '/suppliers', label: 'Suppliers', icon: I(Building2) }, { to: '/commissions', label: 'Commissions', icon: I(Percent) },
     { to: '/reconciliation', label: 'Bank Reconciliation', icon: I(ArrowLeftRight), roles: FINANCE }, { to: '/exchange-rates', label: 'Exchange Rates', icon: I(Coins), roles: FINANCE }] },
-  { title: 'Accounting', items: [{ to: '/accounts', label: 'Accounts', icon: I(BookOpen), roles: FINANCE }, { to: '/ledger', label: 'Ledger', icon: I(Library), roles: FINANCE }, { to: '/receipts', label: 'Cash Receipts', icon: I(ArrowDownToLine), roles: FINANCE },
+  { title: 'Accounting', module: 'accounting', items: [{ to: '/accounts', label: 'Accounts', icon: I(BookOpen), roles: FINANCE }, { to: '/ledger', label: 'Ledger', icon: I(Library), roles: FINANCE }, { to: '/receipts', label: 'Cash Receipts', icon: I(ArrowDownToLine), roles: FINANCE },
     { to: '/payment-vouchers', label: 'Cash Payments', icon: I(ArrowUpFromLine), roles: FINANCE }, { to: '/journal', label: 'Journal Voucher', icon: I(NotebookPen), roles: FINANCE },
     { to: '/cash-bank', label: 'Cash / Bank', icon: I(Wallet), roles: FINANCE }, { to: '/cheque-format', label: 'Cheque Format', icon: I(Banknote), roles: FINANCE }] },
-  { title: 'Insights & Automation', items: [{ to: '/reports', label: 'Reports', icon: I(BarChart3) }, { to: '/automation', label: 'Automation', icon: I(CalendarClock), roles: FINANCE }, { to: '/integrations', label: 'Integrations', icon: I(ArrowLeftRight), roles: FINANCE }] },
-  { title: 'Administration', items: [{ to: '/settings', label: 'Settings', icon: I(Settings) }, { to: '/team', label: 'Team & Branches', icon: I(Users), roles: ['admin', 'finance_manager'] }, { to: '/billing', label: 'Billing', icon: I(CreditCard), roles: ['admin'] }, { to: '/audit', label: 'Audit Log', icon: I(ScrollText), roles: ['admin', 'finance_manager'] }] },
+  { title: 'Insights & Automation', module: 'insights', items: [{ to: '/reports', label: 'Reports', icon: I(BarChart3) }, { to: '/automation', label: 'Automation', icon: I(CalendarClock), roles: FINANCE }, { to: '/integrations', label: 'Integrations', icon: I(ArrowLeftRight), roles: FINANCE }] },
+  { title: 'Administration', module: null, items: [{ to: '/settings', label: 'Settings', icon: I(Settings) }, { to: '/team', label: 'Team & Branches', icon: I(Users), roles: ['admin', 'finance_manager'] }, { to: '/billing', label: 'Billing', icon: I(CreditCard), roles: ['admin'] }, { to: '/audit', label: 'Audit Log', icon: I(ScrollText), roles: ['admin', 'finance_manager'] }] },
 ];
 const FLAT = GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.title })));
 const findItem = (p: string) => FLAT.find((i) => i.to === p);
@@ -93,7 +94,7 @@ function GlobalSearch() {
 }
 
 /* ---------- sidebar ---------- */
-function SidebarBody({ collapsed, onNavigate, onCollapse }: { collapsed: boolean; onNavigate?(): void; onCollapse?(): void }) {
+function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { collapsed: boolean; onNavigate?(): void; onCollapse?(): void; allowedModules?: string[] | null }) {
   const { agency, agencies, switchAgency } = useAuth();
   const role = agency?.role ?? 'viewer';
   return (
@@ -114,6 +115,8 @@ function SidebarBody({ collapsed, onNavigate, onCollapse }: { collapsed: boolean
         </div>)}
       <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-4" aria-label="Main">
         {GROUPS.map((g) => {
+          // null module = always visible; otherwise check against allowed_modules (null list = all allowed)
+          if (g.module !== null && allowedModules != null && !allowedModules.includes(g.module)) return null;
           const items = g.items.filter((i) => !i.roles || i.roles.includes(role));
           if (!items.length) return null;
           return (
@@ -153,10 +156,10 @@ export default function Layout() {
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:btn" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
       {/* desktop sidebar */}
       <aside className={`hidden lg:block fixed inset-y-0 left-0 z-40 bg-surface border-r border-line transition-[width] duration-200 ${collapsed ? 'w-[68px]' : 'w-64'}`}>
-        <SidebarBody collapsed={collapsed} onCollapse={() => setCollapsed((c) => !c)} />
+        <SidebarBody collapsed={collapsed} onCollapse={() => setCollapsed((c) => !c)} allowedModules={bill?.allowed_modules ?? null} />
       </aside>
       {/* mobile drawer */}
-      {mobile && <div className="lg:hidden fixed inset-0 z-50 flex"><div className="w-72 max-w-[85vw] bg-surface border-r border-line shadow-pop"><SidebarBody collapsed={false} onNavigate={() => setMobile(false)} /></div><button aria-label="Close menu" className="flex-1 bg-black/50 backdrop-blur-sm" onClick={() => setMobile(false)} /></div>}
+      {mobile && <div className="lg:hidden fixed inset-0 z-50 flex"><div className="w-72 max-w-[85vw] bg-surface border-r border-line shadow-pop"><SidebarBody collapsed={false} onNavigate={() => setMobile(false)} allowedModules={bill?.allowed_modules ?? null} /></div><button aria-label="Close menu" className="flex-1 bg-black/50 backdrop-blur-sm" onClick={() => setMobile(false)} /></div>}
 
       <div className={`transition-[padding] duration-200 ${collapsed ? 'lg:pl-[68px]' : 'lg:pl-64'}`}>
         <header className="sticky top-0 z-30 h-14 flex items-center gap-3 px-4 md:px-8 bg-bg/80 backdrop-blur border-b border-line">

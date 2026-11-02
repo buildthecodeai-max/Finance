@@ -35,7 +35,7 @@ export const gateway = {
 
 /* ------------------------------------------------------------------ reading state */
 export async function getSub(agencyId: number) {
-  const [[s]]: any = await pool.query(`SELECT s.*, p.code plan_code, p.name plan_name, p.price_monthly, p.price_yearly, p.currency, p.max_seats, p.max_branches, p.max_bookings_month, p.features, p.support_level, p.trial_days
+  const [[s]]: any = await pool.query(`SELECT s.*, p.code plan_code, p.name plan_name, p.price_monthly, p.price_yearly, p.currency, p.max_seats, p.max_branches, p.max_bookings_month, p.features, p.allowed_modules, p.support_level, p.trial_days
     FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.agency_id = ?`, [agencyId]);
   return s as any | undefined;
 }
