@@ -23,21 +23,21 @@ platformRouter.get('/system', async (_req, res) => { const [hb]: any = await poo
 platformRouter.get('/agencies', async (req, res) => res.json(await P.listAgencies(parse(z.object({ q: z.string().max(100).optional(), status: z.string().max(20).optional(), plan: z.string().max(30).optional(), page: z.coerce.number().int().min(1).optional() }), req.query))));
 platformRouter.get('/agencies/:id', async (req, res) => { const id = idParam(req), d = await P.agencyDetail(id); await P.audit(req, 'view_agency', id); res.json(d); });   // viewing member emails is itself audited
 platformRouter.post('/agencies/:id/extend-trial', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ days: z.number().int().min(1).max(60) }), req.body); res.json(await P.extendTrial(req, idParam(req), b.days, b.reason)); });
-platformRouter.post('/agencies/:id/set-plan', P.needs('billing'), P.stepUp, async (req, res) => { const b = parse(Reason.extend({ plan: z.string(), interval: Interval.default('monthly') }), req.body); await P.setPlan(req, idParam(req), b.plan, b.interval, b.reason); res.json({ ok: true }); });
-platformRouter.post('/agencies/:id/grant', P.needs('billing'), P.stepUp, async (req, res) => { const b = parse(Reason.extend({ plan: z.string(), interval: Interval.default('yearly'), until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }), req.body); await P.grant(req, idParam(req), b.plan, b.interval, b.until, b.reason); res.json({ ok: true }); });
-platformRouter.post('/agencies/:id/suspend', P.needs('suspend'), P.stepUp, async (req, res) => {
+platformRouter.post('/agencies/:id/set-plan', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ plan: z.string(), interval: Interval.default('monthly') }), req.body); await P.setPlan(req, idParam(req), b.plan, b.interval, b.reason); res.json({ ok: true }); });
+platformRouter.post('/agencies/:id/grant', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ plan: z.string(), interval: Interval.default('yearly'), until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }), req.body); await P.grant(req, idParam(req), b.plan, b.interval, b.until, b.reason); res.json({ ok: true }); });
+platformRouter.post('/agencies/:id/suspend', P.needs('suspend'), async (req, res) => {
   const reason = parse(Reason, req.body).reason, id = idParam(req);
   if (!config.platformTwoPerson) { await P.suspend(req, id, reason); return void res.json({ ok: true, status: 'suspended' }); }
   res.status(202).json(await P.requestSuspend(req, id, reason));   // pending until a second admin approves
 });
 platformRouter.get('/approvals', P.needs('suspend'), async (req, res) => res.json(await P.listApprovals(typeof req.query.status === 'string' ? req.query.status : undefined)));
-platformRouter.post('/approvals/:id/approve', P.needs('suspend'), P.stepUp, async (req, res) => { await P.approveSuspend(req, idParam(req), parse(z.object({ note: z.string().max(300).optional() }), req.body).note); res.json({ ok: true, status: 'suspended' }); });
+platformRouter.post('/approvals/:id/approve', P.needs('suspend'), async (req, res) => { await P.approveSuspend(req, idParam(req), parse(z.object({ note: z.string().max(300).optional() }), req.body).note); res.json({ ok: true, status: 'suspended' }); });
 platformRouter.post('/approvals/:id/reject', P.needs('suspend'), async (req, res) => { await P.rejectSuspend(req, idParam(req), parse(Reason, req.body).reason); res.json({ ok: true }); });
 platformRouter.post('/approvals/:id/cancel', P.needs('suspend'), async (req, res) => { await P.cancelSuspend(req, idParam(req)); res.json({ ok: true }); });
-platformRouter.post('/agencies/:id/reactivate', P.needs('suspend'), P.stepUp, async (req, res) => { await P.reactivate(req, idParam(req), parse(Reason, req.body).reason); res.json({ ok: true }); });
-platformRouter.post('/agencies/:id/support-session', P.needs('support'), P.stepUp, async (req, res) => { const b = parse(Reason.extend({ minutes: z.number().int().min(5).max(60).default(30) }), req.body); res.status(201).json(await P.startSupportSession(req, idParam(req), b.reason, b.minutes)); });
+platformRouter.post('/agencies/:id/reactivate', P.needs('suspend'), async (req, res) => { await P.reactivate(req, idParam(req), parse(Reason, req.body).reason); res.json({ ok: true }); });
+platformRouter.post('/agencies/:id/support-session', P.needs('support'), async (req, res) => { const b = parse(Reason.extend({ minutes: z.number().int().min(5).max(60).default(30) }), req.body); res.status(201).json(await P.startSupportSession(req, idParam(req), b.reason, b.minutes)); });
 platformRouter.post('/support-sessions/:id/revoke', P.needs('support'), async (req, res) => { await P.revokeSupportSession(req, idParam(req), parse(Reason, req.body).reason); res.json({ ok: true }); });
-platformRouter.post('/agencies/:id/access-workspace', P.needs('support'), P.stepUp, async (req, res) => {
+platformRouter.post('/agencies/:id/access-workspace', P.needs('support'), async (req, res) => {
   const id = idParam(req);
   const [[admin]]: any = await pool.query(
     `SELECT u.id, u.name, u.email FROM users u JOIN memberships m ON m.user_id = u.id WHERE m.agency_id = ? AND m.role = 'admin' ORDER BY u.id LIMIT 1`,
@@ -55,10 +55,10 @@ const Plan = z.object({ code: z.string().optional(), name: z.string().min(2).max
   max_seats: z.number().int().min(1).nullable(), max_branches: z.number().int().min(1).nullable(), max_bookings_month: z.number().int().min(1).nullable(), features: z.array(z.string()), allowed_modules: z.array(z.string()).nullable().default(null), support_level: z.string().min(2).max(30), stripe_price_monthly: z.string().max(80).nullish(), stripe_price_yearly: z.string().max(80).nullish(), active: z.boolean(), sort: z.number().int() });
 
 const NewAgency = z.object({ agencyName: z.string().min(2).max(120), adminName: z.string().min(2).max(80), adminEmail: z.string().email(), adminPassword: z.string().min(10).max(100), planCode: z.string().min(2).max(30).default('growth'), baseCurrency: z.string().length(3).default('USD') });
-platformRouter.post('/agencies', P.needs('billing'), P.stepUp, async (req, res) => { const b = parse(NewAgency, req.body); res.status(201).json(await P.createAgency(req, b)); });
+platformRouter.post('/agencies', P.needs('billing'), async (req, res) => { const b = parse(NewAgency, req.body); res.status(201).json(await P.createAgency(req, b)); });
 platformRouter.get('/plans', async (_req, res) => res.json(await P.listPlans()));
-platformRouter.post('/plans', P.needs('billing'), P.stepUp, async (req, res) => res.status(201).json({ id: await P.createPlan(req, parse(Plan, req.body) as P.PlanIn) }));
-platformRouter.put('/plans/:id', P.needs('billing'), P.stepUp, async (req, res) => { const b = parse(Plan.extend({ reason: z.string() }), req.body); const { reason, ...plan } = b; res.json(await P.updatePlan(req, idParam(req), plan as P.PlanIn, reason)); });
+platformRouter.post('/plans', P.needs('billing'), async (req, res) => res.status(201).json({ id: await P.createPlan(req, parse(Plan, req.body) as P.PlanIn) }));
+platformRouter.put('/plans/:id', P.needs('billing'), async (req, res) => { const b = parse(Plan.extend({ reason: z.string() }), req.body); const { reason, ...plan } = b; res.json(await P.updatePlan(req, idParam(req), plan as P.PlanIn, reason)); });
 
 platformRouter.get('/audit', async (_req, res) => res.json((await pool.query(`SELECT a.id, a.action, a.agency_id, ag.name agency_name, a.detail, a.reason, a.ip, a.created_at, u.email admin_email FROM platform_audit_log a JOIN users u ON u.id = a.admin_user_id LEFT JOIN agencies ag ON ag.id = a.agency_id ORDER BY a.id DESC LIMIT 300`))[0]));
 platformRouter.get('/security-events', async (_req, res) => res.json((await pool.query(`SELECT e.id, e.agency_id, ag.name agency_name, e.event, e.detail, e.ip, e.created_at FROM security_events e LEFT JOIN agencies ag ON ag.id = e.agency_id ORDER BY e.id DESC LIMIT 300`))[0]));

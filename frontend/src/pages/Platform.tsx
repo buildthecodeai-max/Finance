@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Building2, Clock, DollarSign, Plane, Search, ShieldAlert, Users } from 'lucide-react';
 import { api, money } from '../api';
@@ -26,18 +26,10 @@ export default function Platform() {
   const { user, ready, logout } = useAuth(); const nav = useNavigate();
   const [tab, setTab] = useState<Tab>('dashboard'); const [need2fa, setNeed2fa] = useState(false);
   const [me, setMe] = useState<Me | null>(null); const [pending, setPending] = useState(0);
-  const [askCode, setAskCode] = useState<null | { resolve(ok: boolean): void }>(null);
   useEffect(() => { if (tab) refreshPending(); }, [tab, me]);
   const refreshPending = () => { if (me?.caps.includes('suspend')) api('/platform/approvals?status=pending').then((r) => setPending(r.length)).catch(() => {}); };
   useEffect(() => { if (user?.is_platform_admin) api('/platform/me').then(setMe).catch((e) => e.data?.code === 'platform_2fa_required' ? setNeed2fa(true) : null); }, [user]);
-  /** Run a risky call; if the server wants a fresh authenticator code, ask for it once and retry. */
-  const guarded = async <T,>(fn: () => Promise<T>): Promise<T> => {
-    try { return await fn(); } catch (e: any) {
-      if (e.data?.code !== 'step_up_required') throw e;
-      const ok = await new Promise<boolean>((resolve) => setAskCode({ resolve }));
-      if (!ok) throw new Error('Confirmation cancelled.'); return fn();
-    }
-  };
+  const guarded = async <T,>(fn: () => Promise<T>): Promise<T> => fn();
   if (!ready) return <div className="min-h-screen grid place-items-center"><div className="h-8 w-8 rounded-full border-2 border-line border-t-accent animate-spin" role="status" aria-label="Loading" /></div>;
   if (!user) return <Navigate to="/login" replace />;
   if (!user.is_platform_admin) return <Navigate to="/" replace />;
@@ -53,18 +45,10 @@ export default function Platform() {
           <div className="flex flex-wrap gap-2 mb-5" role="tablist">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'btn' : 'btn-ghost'} onClick={() => setTab(k)}>{l}</button>)}</div>
           {tab === 'dashboard' && <Dashboard onNavigate={setTab} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <Operators />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}</></OpCtx.Provider>}
       </div>
-      {askCode && <StepUpModal onResult={(ok) => { askCode.resolve(ok); setAskCode(null); }} />}
     </div>
   );
 }
 
-function StepUpModal({ onResult }: { onResult(ok: boolean): void }) {
-  const [code, setCode] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const ref = useRef<HTMLInputElement>(null);
-  const go = async () => { setBusy(true); try { await api('/platform/step-up', 'POST', { code: code.trim() }); onResult(true); } catch (e: any) { setErr(e.message); setCode(''); ref.current?.focus(); } finally { setBusy(false); } };
-  return <Modal title="Confirm it's you" onClose={() => onResult(false)}><p className="text-sm text-muted mb-3">This action is high-risk. Enter the current 6-digit code from your authenticator app. You won't be asked again for 5 minutes.</p><Err e={err} />
-    <input ref={ref} className="input num tracking-widest text-lg w-44" inputMode="numeric" autoComplete="one-time-code" maxLength={8} placeholder="123456" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && code.length >= 6 && go()} aria-label="Authenticator code" />
-    <div className="flex justify-end mt-4"><button className="btn" disabled={busy || code.trim().length < 6} onClick={go}>Confirm</button></div></Modal>;
-}
 
 function TwoFactorGate({ onDone }: { onDone(): void }) {
   const [s, setS] = useState<any>(null); const [code, setCode] = useState(''); const [err, setErr] = useState('');
