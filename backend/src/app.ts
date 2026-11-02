@@ -80,8 +80,18 @@ app.use('/api/v1', v1Router);
 app.use('/api/platform', platformRouter);
 app.use('/api/public/quotes', publicQuotesRouter); // token-authenticated, rate-limited, no session // OAuth redirect target (state-signed)
 
+const apiLimit = rateLimit({
+  windowMs: 60_000,
+  limit: process.env.NODE_ENV === 'test' ? 5000 : 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.ctx?.userId ?? req.ip ?? 'anon'),
+  skip: (req) => req.method === 'GET' && req.path.startsWith('/dashboard'),
+});
+
 const api = express.Router();
 api.use(authenticate);
+api.use(apiLimit);
 api.use(subscriptionGuard);
 api.use('/billing', billingRouter);
 api.use('/dashboard', dashboardRouter);
