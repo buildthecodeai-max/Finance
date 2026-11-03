@@ -33,17 +33,69 @@ export default function Platform() {
   if (!ready) return <div className="min-h-screen grid place-items-center"><div className="h-8 w-8 rounded-full border-2 border-line border-t-accent animate-spin" role="status" aria-label="Loading" /></div>;
   if (!user) return <Navigate to="/login" replace />;
   if (!user.is_platform_admin) return <Navigate to="/" replace />;
-  const tabs: [Tab, string][] = [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies'], ['plans', 'Plans'], ['audit', 'Operator audit'], ['security', 'Security events'], ['system', 'System'], ...(me?.caps.includes('suspend') ? [['approvals', pending ? `Approvals (${pending})` : 'Approvals'] as [Tab, string], ['operators', 'Operators'] as [Tab, string]] : [])];
+
+  // Sidebar nav groups (desktop)
+  const navGroups: { label: string; items: [Tab, string][] }[] = me ? [
+    { label: 'Main', items: [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies']] },
+    { label: 'Operations', items: [['plans', 'Plans'], ['audit', 'Operator audit'], ...(me.caps.includes('suspend') ? [['approvals', 'Approvals'], ['operators', 'Operators']] as [Tab, string][] : [])] },
+    { label: 'System', items: [['security', 'Security events'], ['system', 'System']] },
+  ] : [];
+
+  // Mobile flat tab list
+  const allTabs: [Tab, string][] = [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies'], ['plans', 'Plans'], ['audit', 'Operator audit'], ['security', 'Security events'], ['system', 'System'], ...(me?.caps.includes('suspend') ? [['approvals', 'Approvals'], ['operators', 'Operators']] as [Tab, string][] : [])];
+
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-line bg-surface/80 backdrop-blur px-4 md:px-8 h-14 flex items-center justify-between">
-        <div className="flex items-center gap-2"><div className="h-7 w-7 rounded-lg bg-accent text-accent-ink grid place-items-center"><Plane size={15} /></div><span className="text-sm font-semibold">Platform console</span><span className="text-xs text-muted hidden sm:inline">· {user.email}</span>{me && <span className="pill bg-surface2 text-muted capitalize">{me.role}</span>}</div>
+    <div className="min-h-screen flex flex-col">
+      <header className="border-b border-line bg-surface/80 backdrop-blur px-4 md:px-8 h-14 flex items-center justify-between shrink-0 sticky top-0 z-30">
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-lg bg-indigo-500 text-white grid place-items-center"><Plane size={15} /></div>
+          <span className="text-sm font-semibold">Platform console</span>
+          <span className="text-xs text-muted hidden sm:inline">· {user.email}</span>
+          {me && <span className="pill bg-surface2 text-muted capitalize">{me.role}</span>}
+        </div>
         <div className="flex items-center gap-2"><button className="btn-ghost" onClick={() => nav('/')}>Workspace</button><ThemeMenuButton /><button className="btn-ghost" onClick={async () => { await logout(); nav('/login'); }}>Sign out</button></div>
       </header>
-      <div className="max-w-[1300px] mx-auto px-4 md:px-8 py-6">
-        {need2fa ? <TwoFactorGate onDone={() => { setNeed2fa(false); api('/platform/me').then(setMe); }} /> : !me ? <div className="skeleton h-40" /> : <OpCtx.Provider value={{ me, guarded }}><>
-          <div className="flex flex-wrap gap-2 mb-5" role="tablist">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'btn' : 'btn-ghost'} onClick={() => setTab(k)}>{l}</button>)}</div>
-          {tab === 'dashboard' && <Dashboard onNavigate={setTab} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <Operators />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}</></OpCtx.Provider>}
+
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar (desktop) */}
+        {me && !need2fa && (
+          <nav className="w-52 shrink-0 border-r border-line py-4 px-2 hidden md:flex flex-col overflow-y-auto">
+            {navGroups.map((group) => (
+              <div key={group.label} className="mb-4">
+                <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{group.label}</div>
+                {group.items.map(([k, l]) => (
+                  <button key={k} role="tab" aria-selected={tab === k}
+                    className={`w-full text-left flex items-center justify-between rounded-lg px-3 py-2 text-sm mb-0.5 transition-colors ${tab === k ? 'bg-indigo-500/10 text-indigo-500 font-medium' : 'text-muted hover:bg-surface2 hover:text-fg'}`}
+                    onClick={() => setTab(k)}>
+                    <span>{l}</span>
+                    {k === 'approvals' && pending > 0 && (
+                      <span className="min-w-[1.1rem] h-4 px-1 text-[10px] font-bold rounded-full bg-danger text-white flex items-center justify-center leading-none">{pending}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+        )}
+
+        {/* Content */}
+        <main className="flex-1 min-w-0 overflow-auto">
+          <div className="max-w-[1200px] mx-auto px-4 md:px-6 py-6">
+            {need2fa ? <TwoFactorGate onDone={() => { setNeed2fa(false); api('/platform/me').then(setMe); }} />
+              : !me ? <div className="skeleton h-40" />
+              : <OpCtx.Provider value={{ me, guarded }}>
+                {/* Mobile tab strip */}
+                <div className="flex flex-wrap gap-2 mb-5 md:hidden" role="tablist">
+                  {allTabs.map(([k, l]) => (
+                    <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'btn' : 'btn-ghost'} onClick={() => setTab(k)}>
+                      {l}{k === 'approvals' && pending > 0 && <span className="ml-1 min-w-[1rem] h-4 px-0.5 text-[9px] font-bold rounded-full bg-danger text-white inline-flex items-center justify-center">{pending}</span>}
+                    </button>
+                  ))}
+                </div>
+                {tab === 'dashboard' && <Dashboard onNavigate={setTab} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <Operators />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
+              </OpCtx.Provider>}
+          </div>
+        </main>
       </div>
     </div>
   );
@@ -123,23 +175,63 @@ function Agencies() {
 }
 
 function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: any; me: Me; onClose(): void; onAct(a: Act): void; onRefresh(): void }) {
-  return <Modal title={detail.agency.name} wide onClose={onClose}>
-    <div className="grid gap-4 md:grid-cols-3 mb-4">
-      <div className="card"><div className="text-xs text-muted">Subscription</div>{detail.subscription ? <><div className="mt-1"><Pill s={detail.subscription.status} /> <span className="font-medium ml-1">{detail.subscription.plan_name}</span> <span className="text-xs text-muted">{detail.subscription.interval}</span></div>
-        <dl className="text-xs mt-2 space-y-0.5 text-muted"><div>Trial ends: <span className="num text-fg">{day(detail.subscription.trial_ends_at)}</span></div><div>Period ends: <span className="num text-fg">{day(detail.subscription.current_period_end)}</span></div>{detail.subscription.manual && <div>Invoiced customer (no card)</div>}{detail.subscription.platform_hold && <div className="text-danger">Operator hold: {detail.subscription.hold_reason}</div>}</dl></> : '—'}</div>
-      <div className="card"><div className="text-xs text-muted">Usage</div><div className="text-sm mt-1">{detail.usage.seats} members · {detail.usage.branches} branches · {detail.usage.bookings} bookings this month</div><div className="text-xs text-muted mt-2">Last active {day(detail.last_active)} · {detail.requests_30d} requests / 30 d</div></div>
-      <div className="card"><div className="text-xs text-muted">Health</div><div className="text-sm mt-1">{detail.open_critical_exceptions} critical exceptions · {detail.failed_emails_7d} failed emails (7 d)</div></div></div>
-    <div className="flex flex-wrap gap-2 mb-4">{([['extend-trial', 'Extend trial', 'billing'], ['set-plan', 'Set plan', 'billing'], ['grant', 'Grant invoiced access', 'billing'], ['support-session', 'Open support session (read-only)', 'support']] as const).filter(([, , c]) => me.caps.includes(c)).map(([k, l]) => <button key={k} className="btn-ghost" onClick={() => onAct({ kind: k, id: detail.agency.id, name: detail.agency.name })}>{l}</button>)}
-      {me.caps.includes('billing') && <button className="btn-ghost" onClick={() => onAct({ kind: 'edit-agency', id: detail.agency.id, name: detail.agency.name, data: { name: detail.agency.name, base_currency: detail.agency.base_currency ?? 'USD', tax_label: detail.agency.tax_label ?? 'TAX' } })}>Edit</button>}
-      {me.caps.includes('support') && <button className="btn" onClick={() => onAct({ kind: 'access-workspace', id: detail.agency.id, name: detail.agency.name })}>Access workspace</button>}
-      {me.caps.includes('suspend') && (detail.subscription?.platform_hold ? <button className="btn" onClick={() => onAct({ kind: 'reactivate', id: detail.agency.id, name: detail.agency.name })}>Release hold</button> : <button className="btn-ghost text-danger" onClick={() => onAct({ kind: 'suspend', id: detail.agency.id, name: detail.agency.name })}>Request suspension</button>)}
-      {me.caps.includes('suspend') && <button className="btn-ghost text-danger" onClick={() => onAct({ kind: 'delete-agency', id: detail.agency.id, name: detail.agency.name })}>Delete</button>}
-      {me.role === 'readonly' && <span className="text-xs text-muted self-center">Your operator role is read-only.</span>}</div>
-    <div className="grid gap-4 md:grid-cols-2"><div><div className="font-medium text-sm mb-1">Members</div><Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => m.role }, { h: '2FA', render: (m: any) => (m.totp_enabled ? '✓' : '—') }]} /></div>
-      <div><div className="font-medium text-sm mb-1">Billing events</div><Table rows={detail.billing_events.map((m: any, i: number) => ({ ...m, id: i }))} empty="None" cols={[{ h: 'When', render: (e: any) => <span className="text-xs num">{day(e.created_at)}</span> }, { h: 'Event', render: (e: any) => <>{e.kind}<div className="text-xs text-muted">{e.detail}</div></> }]} /></div></div>
-    <div className="font-medium text-sm mt-4 mb-1">Support access history</div>
-    <Table rows={detail.support_sessions} empty="No support sessions" cols={[{ h: 'Operator', render: (s: any) => s.admin_email }, { h: 'Reason', render: (s: any) => s.reason }, { h: 'Expires', render: (s: any) => <span className="text-xs num">{day(s.expires_at)}</span> },
-      { h: '', render: (s: any) => (s.revoked_at ? <Pill s="void" /> : new Date(s.expires_at) > new Date() ? me.caps.includes('support') ? <button className="btn-ghost" onClick={async () => { const reason = prompt('Reason for ending this session:'); if (reason) { await api(`/platform/support-sessions/${s.id}/revoke`, 'POST', { reason }); onRefresh(); } }}>End</button> : '' : '') }]} />
+  const ag = detail.agency;
+  return <Modal title={ag.name} wide onClose={onClose}>
+    <div className="flex gap-5">
+      {/* Left: data */}
+      <div className="flex-1 min-w-0 space-y-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="card"><div className="text-xs text-muted">Subscription</div>{detail.subscription ? <><div className="mt-1"><Pill s={detail.subscription.status} /> <span className="font-medium ml-1">{detail.subscription.plan_name}</span> <span className="text-xs text-muted">{detail.subscription.interval}</span></div>
+            <dl className="text-xs mt-2 space-y-0.5 text-muted"><div>Trial ends: <span className="num text-fg">{day(detail.subscription.trial_ends_at)}</span></div><div>Period ends: <span className="num text-fg">{day(detail.subscription.current_period_end)}</span></div>{detail.subscription.manual && <div>Invoiced customer (no card)</div>}{detail.subscription.platform_hold && <div className="text-danger">Hold: {detail.subscription.hold_reason}</div>}</dl></> : '—'}</div>
+          <div className="card"><div className="text-xs text-muted">Usage</div><div className="text-sm mt-1">{detail.usage.seats} members · {detail.usage.branches} branches · {detail.usage.bookings} bookings this month</div><div className="text-xs text-muted mt-2">Last active {day(detail.last_active)} · {detail.requests_30d} req / 30 d</div></div>
+          <div className="card"><div className="text-xs text-muted">Health</div><div className="text-sm mt-1">{detail.open_critical_exceptions} critical exceptions · {detail.failed_emails_7d} failed emails (7 d)</div></div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div><div className="font-medium text-sm mb-1">Members</div><Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => m.role }, { h: '2FA', render: (m: any) => (m.totp_enabled ? '✓' : '—') }]} /></div>
+          <div><div className="font-medium text-sm mb-1">Billing events</div><Table rows={detail.billing_events.map((m: any, i: number) => ({ ...m, id: i }))} empty="None" cols={[{ h: 'When', render: (e: any) => <span className="text-xs num">{day(e.created_at)}</span> }, { h: 'Event', render: (e: any) => <>{e.kind}<div className="text-xs text-muted">{e.detail}</div></> }]} /></div>
+        </div>
+        <div><div className="font-medium text-sm mb-1">Support access history</div>
+          <Table rows={detail.support_sessions} empty="No support sessions" cols={[{ h: 'Operator', render: (s: any) => s.admin_email }, { h: 'Reason', render: (s: any) => s.reason }, { h: 'Expires', render: (s: any) => <span className="text-xs num">{day(s.expires_at)}</span> },
+            { h: '', render: (s: any) => (s.revoked_at ? <Pill s="void" /> : new Date(s.expires_at) > new Date() ? me.caps.includes('support') ? <button className="btn-ghost" onClick={async () => { const reason = prompt('Reason for ending this session:'); if (reason) { await api(`/platform/support-sessions/${s.id}/revoke`, 'POST', { reason }); onRefresh(); } }}>End</button> : '' : '') }]} />
+        </div>
+      </div>
+
+      {/* Right: action panel */}
+      <div className="w-48 shrink-0 space-y-5">
+        {(me.caps.includes('billing') || me.caps.includes('support')) && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5 px-1">Billing</div>
+            <div className="flex flex-col gap-0.5">
+              {me.caps.includes('billing') && detail.subscription?.status === 'trialing' && <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'extend-trial', id: ag.id, name: ag.name })}>Extend trial</button>}
+              {me.caps.includes('billing') && <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'set-plan', id: ag.id, name: ag.name })}>Set plan</button>}
+              {me.caps.includes('billing') && <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'grant', id: ag.id, name: ag.name })}>Grant invoiced access</button>}
+              {me.caps.includes('billing') && <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'edit-agency', id: ag.id, name: ag.name, data: { name: ag.name, base_currency: ag.base_currency ?? 'USD', tax_label: ag.tax_label ?? 'TAX' } })}>Edit agency</button>}
+            </div>
+          </div>
+        )}
+        {me.caps.includes('support') && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5 px-1">Workspace</div>
+            <div className="flex flex-col gap-0.5">
+              <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'support-session', id: ag.id, name: ag.name })}>Open support session</button>
+              <button className="w-full btn text-sm" onClick={() => onAct({ kind: 'access-workspace', id: ag.id, name: ag.name })}>Access workspace</button>
+            </div>
+          </div>
+        )}
+        {me.caps.includes('suspend') && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-danger mb-1.5 px-1">Danger zone</div>
+            <div className="flex flex-col gap-0.5">
+              {detail.subscription?.platform_hold
+                ? <button className="w-full btn text-sm" onClick={() => onAct({ kind: 'reactivate', id: ag.id, name: ag.name })}>Release hold</button>
+                : <button className="w-full btn-ghost text-left text-sm !justify-start text-danger" onClick={() => onAct({ kind: 'suspend', id: ag.id, name: ag.name })}>Request suspension</button>}
+              <button className="w-full btn-ghost text-left text-sm !justify-start text-danger" onClick={() => onAct({ kind: 'delete-agency', id: ag.id, name: ag.name })}>Delete agency</button>
+            </div>
+          </div>
+        )}
+        {me.role === 'readonly' && <p className="text-xs text-muted px-1">Read-only operator role.</p>}
+      </div>
+    </div>
   </Modal>;
 }
 
@@ -153,6 +245,7 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
   const [detail, setDetail] = useState<any>(null); const [act, setAct] = useState<Act | null>(null);
   const [notice, setNotice] = useState(''); const [newAgency, setNewAgency] = useState(false);
   const [plans, setPlans] = useState<any[]>([]); const [err, setErr] = useState('');
+  const [openMenu, setOpenMenu] = useState<number | null>(null);
 
   const loadAgencies = (qs = q, st = status) =>
     api(`/platform/agencies?${qs ? `q=${encodeURIComponent(qs)}&` : ''}${st ? `status=${st}&` : ''}`).then(setRes).catch((e: any) => setErr(e.message));
@@ -188,7 +281,7 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
       {/* KPI strip */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {kpis.map((k) => (
-          <div key={k.label} className={`card ${k.alert ? 'border-warn/40 bg-warn/5' : ''}`}>
+          <div key={k.label} className={`card ${k.alert ? 'border-warn/40 bg-warn/5 border-l-4 !border-l-warn' : ''}`}>
             <div className="flex items-center gap-1.5 text-xs text-muted mb-1"><k.icon size={13} className={k.alert ? 'text-warn' : ''} />{k.label}</div>
             <div className={`text-2xl font-semibold num ${k.alert ? 'text-warn' : ''}`}>{k.value ?? <span className="block h-7 w-16 skeleton rounded" />}</div>
             <div className="text-[11px] text-muted mt-0.5">{k.sub}</div>
@@ -201,6 +294,9 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
         <div className="rounded-lg border border-warn/30 bg-warn/5 px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-1.5">
           <AlertTriangle size={15} className="text-warn shrink-0" />
           {alerts.map((a) => <span key={a} className="text-sm text-warn">{a}</span>)}
+          {(o?.pending_approvals || o?.platform_holds) && (
+            <button className="ml-auto text-xs font-medium text-warn underline underline-offset-2 shrink-0" onClick={() => onNavigate('approvals')}>Review →</button>
+          )}
         </div>
       )}
 
@@ -229,14 +325,22 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
             { h: 'Seats', right: true, render: (r: any) => r.seats },
             { h: 'Last active', render: (r: any) => <span className="text-xs num text-muted">{day(r.last_active)}</span> },
             { h: '', render: (r: any) => (
-              <div className="flex gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
-                {me.caps.includes('billing') && r.status === 'trialing' && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'extend-trial', id: r.id, name: r.name })}>Extend trial</button>}
-                {me.caps.includes('billing') && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'set-plan', id: r.id, name: r.name })}>Set plan</button>}
-                {me.caps.includes('support') && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'support-session', id: r.id, name: r.name })}>Support</button>}
-                {me.caps.includes('support') && <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => setAct({ kind: 'access-workspace', id: r.id, name: r.name })}>Access</button>}
-                {me.caps.includes('suspend') && (r.platform_hold
-                  ? <button className="btn-ghost !py-0.5 !px-2 text-xs text-accent" onClick={() => setAct({ kind: 'reactivate', id: r.id, name: r.name })}>Release</button>
-                  : <button className="btn-ghost !py-0.5 !px-2 text-xs text-danger" onClick={() => setAct({ kind: 'suspend', id: r.id, name: r.name })}>Suspend</button>)}
+              <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
+                <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => open(r.id)}>View</button>
+                <div className="relative">
+                  <button className="btn-ghost !py-0.5 !px-2 text-xs font-bold tracking-widest" onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === r.id ? null : r.id); }}>⋯</button>
+                  {openMenu === r.id && (
+                    <div className="absolute right-0 top-full mt-1 w-44 rounded-lg border border-line bg-surface shadow-pop z-20 py-1" onMouseLeave={() => setOpenMenu(null)}>
+                      {me.caps.includes('billing') && r.status === 'trialing' && <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2" onClick={() => { setOpenMenu(null); setAct({ kind: 'extend-trial', id: r.id, name: r.name }); }}>Extend trial</button>}
+                      {me.caps.includes('billing') && <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2" onClick={() => { setOpenMenu(null); setAct({ kind: 'set-plan', id: r.id, name: r.name }); }}>Set plan</button>}
+                      {me.caps.includes('support') && <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2" onClick={() => { setOpenMenu(null); setAct({ kind: 'support-session', id: r.id, name: r.name }); }}>Support session</button>}
+                      {me.caps.includes('support') && <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2" onClick={() => { setOpenMenu(null); setAct({ kind: 'access-workspace', id: r.id, name: r.name }); }}>Access workspace</button>}
+                      {me.caps.includes('suspend') && (r.platform_hold
+                        ? <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2 text-accent" onClick={() => { setOpenMenu(null); setAct({ kind: 'reactivate', id: r.id, name: r.name }); }}>Release hold</button>
+                        : <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2 text-danger" onClick={() => { setOpenMenu(null); setAct({ kind: 'suspend', id: r.id, name: r.name }); }}>Suspend</button>)}
+                    </div>
+                  )}
+                </div>
               </div>
             )},
           ]} />

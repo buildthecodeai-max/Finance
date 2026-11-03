@@ -7,7 +7,7 @@ const TONE: Record<Tone, string> = {
   success: 'bg-success/15 text-success', warn: 'bg-warn/15 text-warn', danger: 'bg-danger/15 text-danger', info: 'bg-info/15 text-info', neutral: 'bg-muted/15 text-muted',
 };
 const STATUS_TONE: Record<string, Tone> = {
-  paid: 'success', closed: 'success', approved: 'success', accepted: 'success', converted: 'success', confirmed: 'success', ticketed: 'success', done: 'success', in_service: 'success', travel_completed: 'success', won: 'success', cleared: 'success', reconciled: 'success', matched: 'success', posted: 'success', issued: 'success', received: 'success',
+  paid: 'success', closed: 'success', approved: 'success', accepted: 'success', converted: 'success', confirmed: 'success', ticketed: 'success', done: 'success', in_service: 'success', travel_completed: 'success', won: 'success', cleared: 'success', reconciled: 'success', matched: 'success', posted: 'success', issued: 'success', received: 'success', active: 'success',
   draft: 'warn', trialing: 'info', grace: 'warn', past_due: 'warn', suspended: 'danger', critical: 'danger', warn: 'warn', info: 'info', validated: 'info', processing: 'info', failed: 'danger', reviewed: 'warn', sent: 'warn', accrued: 'warn', pending: 'warn', requested: 'warn', waitlisted: 'warn', enquiry: 'warn', quoted: 'warn', awaiting_client: 'warn', tentative: 'warn', unmatched: 'warn', pending_approval: 'warn',
   overdue: 'danger', void: 'danger', declined: 'danger', expired: 'danger', cancelled: 'danger', lost: 'danger', refunded: 'danger', voided: 'danger', rejected: 'danger', reversed: 'danger',
   partially_paid: 'info', credited: 'info', eligible: 'info', submitted: 'info', exported: 'info', changes_requested: 'info', on_hold: 'info', in_progress: 'info',
