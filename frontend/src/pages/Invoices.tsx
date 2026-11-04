@@ -106,6 +106,7 @@ export default function Invoices() {
         { h: '', render: (r) => <div className="flex gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
           {finance && r.status === 'draft' && <button className="btn-ghost" onClick={() => act(() => api(`/invoices/${r.id}/status`, 'POST', { status: 'reviewed' }))}>Mark reviewed</button>}
           {finance && r.status === 'reviewed' && <button className="btn" onClick={() => act(() => api(`/invoices/${r.id}/send`, 'POST'))}>Send</button>}
+          <button className="btn-ghost" onClick={() => setOpenId(r.id)}>View</button>
           {r.status !== 'draft' && <button className="btn-ghost" onClick={() => act(async () => window.open((await api(`/invoices/${r.id}/pdf-url`)).url))}>PDF</button>}</div> },
       ]} />
       {creating && <InvoiceForm onDone={() => { setCreating(false); load(); }} />}

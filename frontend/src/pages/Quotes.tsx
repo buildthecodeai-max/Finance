@@ -21,7 +21,8 @@ export function QuoteList() {
       <Table rows={rows} onRow={(r) => nav(`/quotes/${r.id}`)} cols={[
         { h: 'Quote', render: (r) => <span className="num">{r.quote_no}</span> }, { h: 'Title', render: (r) => r.title }, { h: 'Client / lead', render: (r) => r.client_name ?? r.lead_name ?? '—' },
         { h: 'Status', render: (r) => <Pill s={r.status} /> }, { h: 'Ver', render: (r) => `v${r.current_version}` }, { h: 'Valid until', render: (r) => r.valid_until ?? '—' },
-        { h: 'From', right: true, render: (r) => (r.from_total != null ? money(r.from_total, r.currency) : '—') }, { h: 'Margin', right: true, render: (r) => (r.margin_pct != null ? `${r.margin_pct}%` : '—') }]} />
+        { h: 'From', right: true, render: (r) => (r.from_total != null ? money(r.from_total, r.currency) : '—') }, { h: 'Margin', right: true, render: (r) => (r.margin_pct != null ? `${r.margin_pct}%` : '—') },
+        { h: '', render: (r) => <div className="flex gap-1 justify-end" onClick={(e) => e.stopPropagation()}><button className="btn-ghost" onClick={() => nav(`/quotes/${r.id}`)}>View</button></div> }]} />
     </Page>
   );
 }
