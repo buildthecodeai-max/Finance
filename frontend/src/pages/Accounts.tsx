@@ -73,11 +73,19 @@ function LedgerPanel({ accountId, onClose }: { accountId: number; onClose: () =>
   );
 }
 
+const NATURES = [
+  { key: 'asset', label: 'Assets' }, { key: 'liability', label: 'Liabilities' }, { key: 'equity', label: 'Equity' },
+  { key: 'income', label: 'Income' }, { key: 'expense', label: 'Expenses' },
+];
+
 export default function Accounts() {
   const { can } = useAuth();
   const types = useList('/accounting/types');
   const branches = useList('/accounting/branches');
   const [type, setType] = useState<number | null>(null);
+  const [nature, setNature] = useState<string | null>(null);
+  const subTypes = nature ? types.filter((t: any) => t.nature === nature) : [];
+  const pickNature = (n: string | null) => { setNature(n); setType(null); };
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<any[]>([]);
   const [edit, setEdit] = useState<any>(null);
@@ -86,9 +94,13 @@ export default function Accounts() {
   const [openLedger, setOpenLedger] = useState<number | null>(null);
 
   const load = () =>
-    api(`/accounting/accounts?${type ? `type=${type}&` : ''}${q ? `q=${encodeURIComponent(q)}` : ''}`).then(setRows);
+    api(`/accounting/accounts?${type ? `type=${type}&` : ''}${q ? `q=${encodeURIComponent(q)}` : ''}`).then((r: any[]) => {
+      // a category with no sub-type chosen shows every account whose type belongs to it
+      const codes = new Set(subTypes.map((t: any) => t.code));
+      setRows(!type && nature ? r.filter((a) => codes.has(a.type_code)) : r);
+    });
 
-  useEffect(() => { load(); }, [type, q]);
+  useEffect(() => { load(); }, [type, nature, q, types.length]);
 
   const save = async () => {
     try {
@@ -118,29 +130,30 @@ export default function Accounts() {
 
   return (
     <Page title="Accounts & Ledger">
-      <div className="grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] gap-4">
-        {/* type sidebar */}
-        <div className="card p-0 overflow-hidden h-fit hidden md:block">
-          <div className="px-3 py-2 text-xs text-muted uppercase">Account type</div>
-          <button
-            className={`block w-full text-left px-3 py-1.5 text-sm ${type === null ? 'bg-accent/15 text-accent' : 'hover:bg-surface2'}`}
-            onClick={() => setType(null)}>All accounts</button>
-          {types.map((t: any) => (
-            <button key={t.code}
-              className={`flex justify-between w-full text-left px-3 py-1.5 text-sm ${type === t.code ? 'bg-accent/15 text-accent' : 'hover:bg-surface2'}`}
-              onClick={() => setType(t.code)}>
-              <span><span className="num text-muted mr-2">{t.code}</span>{t.name}</span>
-              <span className="text-muted">{t.n}</span>
-            </button>
-          ))}
+      <div>
+        {/* main categories: the five accounting natures, with an optional sub-type picker */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <div role="tablist" aria-label="Account category" className="flex flex-wrap gap-1.5">
+            {[{ key: null, label: 'All' }, ...NATURES].map((n) => {
+              const count = n.key ? types.filter((t: any) => t.nature === n.key).reduce((s: number, t: any) => s + Number(t.n), 0) : types.reduce((s: number, t: any) => s + Number(t.n), 0);
+              const on = nature === n.key;
+              return (
+                <button key={n.label} role="tab" aria-selected={on} onClick={() => pickNature(n.key)}
+                  className={`px-3 py-1.5 rounded-lg text-sm border ${on ? 'bg-accent/10 text-accent border-accent/40' : 'border-line hover:bg-surface2'}`}>
+                  {n.label} <span className="text-muted ml-1">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          {subTypes.length > 1 && (
+            <select className="input h-9 py-1 w-auto" aria-label="Account sub-type" value={type ?? ''} onChange={(e) => setType(e.target.value ? Number(e.target.value) : null)}>
+              <option value="">All {NATURES.find((n) => n.key === nature)?.label.toLowerCase()} accounts</option>
+              {subTypes.map((t: any) => <option key={t.code} value={t.code}>{t.name} ({t.n})</option>)}
+            </select>
+          )}
         </div>
 
-        {/* main table */}
         <div>
-          <select className="input md:hidden mb-3" aria-label="Account type" value={type ?? ''} onChange={(e) => setType(e.target.value ? Number(e.target.value) : null)}>
-            <option value="">All accounts</option>
-            {types.map((t: any) => <option key={t.code} value={t.code}>{t.code} — {t.name} ({t.n})</option>)}
-          </select>
           <input className="input max-w-xs mb-3" placeholder="Filter by name or code…" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="card p-0 overflow-x-auto">
             <table className="w-full text-sm">
@@ -190,7 +203,7 @@ export default function Accounts() {
               </tbody>
             </table>
           </div>
-          {w && <div className="mt-4"><button className="btn" onClick={() => setEdit({ type_code: type ?? 320, opening_dr: 0, opening_cr: 0 })}><Plus size={15} /> New account</button></div>}
+          {w && <div className="mt-4"><button className="btn" onClick={() => setEdit({ type_code: type ?? subTypes[0]?.code ?? 320, opening_dr: 0, opening_cr: 0 })}><Plus size={15} /> New account</button></div>}
         </div>
       </div>
 
