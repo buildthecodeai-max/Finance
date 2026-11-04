@@ -119,7 +119,7 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
   const role = agency?.role ?? 'viewer';
   const isPlatformAdmin = !!user?.is_platform_admin;
   const nav = useNavigate();
-  const canSwitch = agencies.length > 1 || isPlatformAdmin || role === 'admin';
+  const canSwitch = agencies.length > 1 || isPlatformAdmin;
   return (
     <div className="flex h-full flex-col">
       <div className={`flex items-center h-14 shrink-0 px-4 border-b border-line ${collapsed ? 'justify-center' : 'justify-between'}`}>
@@ -144,18 +144,13 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
                       <span className="text-[11px] text-muted capitalize">{a.role.replace('_', ' ')}</span>
                     </MenuBtn>
                   ))}
-                  {(isPlatformAdmin || role === 'admin') && (
+                  {isPlatformAdmin && (
                     <>
                       {agencies.length > 0 && <div className="border-t border-line my-1" />}
-                      <MenuBtn onClick={() => { close(); nav('/settings'); }}>
-                        <Settings size={14} className="text-muted" /><span className="flex-1 truncate">Agency settings</span>
+                      <MenuBtn onClick={() => { close(); nav('/platform'); }}>
+                        <ShieldCheck size={14} className="text-muted" /><span className="flex-1 truncate">Platform console</span>
+                        <span className="text-[11px] text-muted">Switch workspace</span>
                       </MenuBtn>
-                      {isPlatformAdmin && (
-                        <MenuBtn onClick={() => { close(); nav('/platform'); }}>
-                          <ShieldCheck size={14} className="text-muted" /><span className="flex-1 truncate">Platform console</span>
-                          <span className="text-[11px] text-muted">Switch workspace</span>
-                        </MenuBtn>
-                      )}
                     </>
                   )}
                 </>
