@@ -115,11 +115,8 @@ function GlobalSearch() {
 
 /* ---------- sidebar ---------- */
 function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { collapsed: boolean; onNavigate?(): void; onCollapse?(): void; allowedModules?: string[] | null }) {
-  const { user, agency, agencies, switchAgency } = useAuth();
+  const { agency, agencies, switchAgency } = useAuth();
   const role = agency?.role ?? 'viewer';
-  const isPlatformAdmin = !!user?.is_platform_admin;
-  const nav = useNavigate();
-  const canSwitch = agencies.length > 1 || isPlatformAdmin;
   return (
     <div className="flex h-full flex-col">
       <div className={`flex items-center h-14 shrink-0 px-4 border-b border-line ${collapsed ? 'justify-center' : 'justify-between'}`}>
@@ -130,31 +127,9 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
       </div>
       {!collapsed && (
         <div className="px-3 pt-3">
-          {canSwitch ? (
-            <Popover align="left" width="w-64" trigger={(_o, t) => (
-              <button onClick={t} className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface2/50 px-2.5 py-2 text-left text-sm hover:bg-surface2">
-                <span className="flex-1 truncate font-medium">{agency?.name}</span>
-                <ChevronsUpDown size={14} className="text-muted" />
-              </button>)}>
-              {(close) => (
-                <>
-                  {agencies.map((a) => (
-                    <MenuBtn key={a.id} active={a.id === agency?.id} onClick={() => { close(); switchAgency(a.id); }}>
-                      <span className="flex-1 truncate">{a.name}</span>
-                      <span className="text-[11px] text-muted capitalize">{a.role.replace('_', ' ')}</span>
-                    </MenuBtn>
-                  ))}
-                  {isPlatformAdmin && (
-                    <>
-                      {agencies.length > 0 && <div className="border-t border-line my-1" />}
-                      <MenuBtn onClick={() => { close(); nav('/platform'); }}>
-                        <ShieldCheck size={14} className="text-muted" /><span className="flex-1 truncate">Platform console</span>
-                        <span className="text-[11px] text-muted">Switch workspace</span>
-                      </MenuBtn>
-                    </>
-                  )}
-                </>
-              )}
+          {agencies.length > 1 ? (
+            <Popover align="left" width="w-60" trigger={(_o, t) => <button onClick={t} className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface2/50 px-2.5 py-2 text-left text-sm hover:bg-surface2"><span className="flex-1 truncate font-medium">{agency?.name}</span><ChevronsUpDown size={14} className="text-muted" /></button>}>
+              {(close) => agencies.map((a) => <MenuBtn key={a.id} active={a.id === agency?.id} onClick={() => { close(); switchAgency(a.id); }}><span className="flex-1 truncate">{a.name}</span><span className="text-[11px] text-muted capitalize">{a.role.replace('_', ' ')}</span></MenuBtn>)}
             </Popover>
           ) : <div className="rounded-lg border border-line bg-surface2/50 px-2.5 py-2 text-sm font-medium truncate">{agency?.name}</div>}
         </div>)}
