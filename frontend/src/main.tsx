@@ -82,7 +82,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Route path="reconciliation" element={<Recon />} />
       <Route path="airlines" element={<Airlines />} />
       <Route path="accounts" element={<Accounts />} />
-      <Route path="ledger" element={<Navigate to="/accounts?tab=ledger" replace />} />
+      <Route path="ledger" element={<Navigate to="/accounts" replace />} />
       <Route path="cash-bank" element={<CashBank />} />
       <Route path="journal" element={<Journal />} />
       <Route path="receipts" element={<Vouchers kind="receipt" />} />

@@ -1,123 +1,234 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Num, Page, Table } from '../components/ui';
 import { today, useAccounts, useList } from '../lookup';
-import { Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 
-function AccountsTab({ onDrillDown }: { onDrillDown: (id: number) => void }) {
-  const { can } = useAuth();
-  const types = useList('/accounting/types'); const branches = useList('/accounting/branches');
-  const [type, setType] = useState<number | null>(null); const [q, setQ] = useState('');
-  const [rows, setRows] = useState<any[]>([]); const [edit, setEdit] = useState<any>(null); const [xfer, setXfer] = useState<any>(null); const [err, setErr] = useState('');
-  const load = () => api(`/accounting/accounts?${type ? `type=${type}&` : ''}${q ? `q=${encodeURIComponent(q)}` : ''}`).then(setRows);
-  useEffect(() => { load(); }, [type, q]);
-  const save = async () => {
-    try {
-      const b = { type_code: edit.type_code, name: edit.name, branch_id: edit.branch_id ? Number(edit.branch_id) : null, city: edit.city || null, opening_dr: Number(edit.opening_dr) || 0, opening_cr: Number(edit.opening_cr) || 0, opening_date: edit.opening_date || null, details: edit.details || null };
-      edit.id ? await api(`/accounting/accounts/${edit.id}`, 'PUT', b) : await api('/accounting/accounts', 'POST', b);
-      setEdit(null); setErr(''); load();
-    } catch (e: any) { setErr(e.message); }
-  };
-  const del = async (r: any) => { if (confirm(`Delete ${r.name}?`)) try { await api(`/accounting/accounts/${r.id}`, 'DELETE'); load(); } catch (e: any) { alert(e.message); } };
-  const w = can('admin', 'finance_manager');
-  return (
-    <>
-      <div className="grid grid-cols-[240px_1fr] gap-4">
-        <div className="card p-0 overflow-hidden h-fit"><div className="px-3 py-2 text-xs text-muted uppercase">Account type</div>
-          <button className={`block w-full text-left px-3 py-1.5 text-sm ${type === null ? 'bg-accent/15 text-accent' : 'hover:bg-surface2'}`} onClick={() => setType(null)}>All accounts</button>
-          {types.map((t) => <button key={t.code} className={`flex justify-between w-full text-left px-3 py-1.5 text-sm ${type === t.code ? 'bg-accent/15 text-accent' : 'hover:bg-surface2'}`} onClick={() => setType(t.code)}>
-            <span><span className="num text-muted mr-2">{t.code}</span>{t.name}</span><span className="text-muted">{t.n}</span></button>)}</div>
-        <div>
-          <input className="input max-w-xs mb-3" placeholder="Filter by name or code…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <Table rows={rows} cols={[
-            { h: 'Code', render: (r) => <span className="num">{r.code}</span> },
-            { h: 'Name', render: (r) => <button className="text-accent hover:underline text-left" onClick={() => onDrillDown(r.id)}>{r.name}</button> },
-            { h: 'Branch', render: (r) => r.branch }, { h: 'City/Category', render: (r) => r.city },
-            { h: 'Opening Dr', right: true, render: (r) => (r.opening_dr ? money(r.opening_dr) : '-') },
-            { h: 'Opening Cr', right: true, render: (r) => (r.opening_cr ? money(r.opening_cr) : '-') },
-            { h: 'Balance', right: true, render: (r) => `${money(Math.abs(r.balance))} ${r.balance < 0 ? 'Cr' : 'Dr'}` },
-            { h: '', render: (r) => <div className="flex gap-2 justify-end"><button className="text-accent text-sm" onClick={() => setEdit({ ...r })}>Edit</button>
-              {w && !r.sys_key && <><button className="text-muted text-sm" onClick={() => setXfer({ ...r, to: r.type_code })}>Transfer</button><button className="text-danger text-sm" onClick={() => del(r)} aria-label="Remove"><X size={14} /></button></>}</div> }]} />
-        </div>
-      </div>
-      {w && <div className="mt-4"><button className="btn" onClick={() => setEdit({ type_code: type ?? 320, opening_dr: 0, opening_cr: 0 })}><Plus size={15} /> New account</button></div>}
-      {edit && <Modal title={edit.id ? `Account ${edit.code}` : 'New account'} onClose={() => setEdit(null)}>
-        <Err e={err} />
-        <Field label="Account type"><select className="input" disabled={!!edit.id} value={edit.type_code} onChange={(e) => setEdit({ ...edit, type_code: Number(e.target.value) })}>{types.map((t) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}</select></Field>
-        <Field label="Name"><input className="input" value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Branch"><select className="input" value={edit.branch_id ?? ''} onChange={(e) => setEdit({ ...edit, branch_id: e.target.value })}><option value="">—</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
-          <Field label="City / Category"><input className="input" value={edit.city ?? ''} onChange={(e) => setEdit({ ...edit, city: e.target.value })} /></Field>
-          <Field label="Opening Dr"><Num v={edit.opening_dr} set={(v) => setEdit({ ...edit, opening_dr: v })} /></Field>
-          <Field label="Opening Cr"><Num v={edit.opening_cr} set={(v) => setEdit({ ...edit, opening_cr: v })} /></Field>
-          <Field label="Opening date"><input className="input num" type="date" value={edit.opening_date ?? ''} onChange={(e) => setEdit({ ...edit, opening_date: e.target.value })} /></Field>
-        </div>
-        <Field label="Details"><textarea className="input" value={edit.details ?? ''} onChange={(e) => setEdit({ ...edit, details: e.target.value })} /></Field>
-        {w && <div className="flex justify-end"><button className="btn" onClick={save}>Save</button></div>}</Modal>}
-      {xfer && <Modal title={`Transfer ${xfer.name}`} onClose={() => setXfer(null)}>
-        <p className="text-sm text-muted mb-3">Moves the account to another account type and re-issues its code in that range.</p>
-        <select className="input mb-3" value={xfer.to} onChange={(e) => setXfer({ ...xfer, to: Number(e.target.value) })}>{types.map((t) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}</select>
-        <div className="flex justify-end"><button className="btn" onClick={async () => { try { await api(`/accounting/accounts/${xfer.id}/transfer`, 'POST', { type_code: xfer.to }); setXfer(null); load(); } catch (e: any) { alert(e.message); } }}>Transfer</button></div></Modal>}
-    </>
-  );
-}
-
-function LedgerTab({ initialAccountId }: { initialAccountId?: string }) {
+function LedgerPanel({ accountId, onClose }: { accountId: number; onClose: () => void }) {
   const accounts = useAccounts([]);
-  const [id, setId] = useState(initialAccountId ?? '');
+  const acc = accounts.find((a: any) => a.id === accountId);
   const [from, setFrom] = useState(`${new Date().getFullYear()}-01-01`);
   const [to, setTo] = useState(today());
-  const [d, setD] = useState<any>(null); const [err, setErr] = useState('');
-  useEffect(() => { if (initialAccountId) setId(initialAccountId); }, [initialAccountId]);
-  const run = async () => { try { setErr(''); setD(await api(`/accounting/ledger?account_id=${id}&from=${from}&to=${to}`)); } catch (e: any) { setErr(e.message); } };
-  useEffect(() => { if (id) run(); }, [id]);
+  const [d, setD] = useState<any>(null);
+  const [err, setErr] = useState('');
+  const run = async () => {
+    try { setErr(''); setD(await api(`/accounting/ledger?account_id=${accountId}&from=${from}&to=${to}`)); }
+    catch (e: any) { setErr(e.message); }
+  };
+  useEffect(() => { run(); }, [accountId]);
   const bal = (n: number) => `${money(Math.abs(n))} ${n < 0 ? 'Cr' : 'Dr'}`;
   return (
-    <>
-      <div className="card flex flex-wrap gap-3 items-end mb-4">
-        <div className="min-w-72"><div className="text-xs text-muted mb-1">Account</div>
-          <select className="input" value={id} onChange={(e) => setId(e.target.value)}>
-            <option value="">Select…</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}</select></div>
-        <div><div className="text-xs text-muted mb-1">From</div><input className="input num" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-        <div><div className="text-xs text-muted mb-1">To</div><input className="input num" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
-        <button className="btn" disabled={!id} onClick={run}>Show</button>
-      </div>
-      {err && <div className="text-danger text-sm mb-3">{err}</div>}
-      {d && <><h3 className="font-bold mb-2">{d.account.code} — {d.account.name}</h3>
-        <Table rows={[{ id: -1, narration: 'Opening balance', balance: d.opening } as any, ...d.rows]} cols={[
-          { h: 'Date', render: (r: any) => <span className="num">{r.entry_date}</span> }, { h: 'Voucher', render: (r: any) => r.voucher_no }, { h: 'Narration', render: (r: any) => r.narration },
-          { h: 'Debit', right: true, render: (r: any) => (r.debit ? money(r.debit) : '') }, { h: 'Credit', right: true, render: (r: any) => (r.credit ? money(r.credit) : '') },
-          { h: 'Balance', right: true, render: (r: any) => bal(r.balance) }]} />
-        <div className="text-right mt-2 num">Closing: <b>{bal(d.closing)}</b></div></>}
-    </>
+    <tr>
+      <td colSpan={99} className="p-0 bg-surface2">
+        <div className="border-t border-line p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-sm">{acc ? `${acc.code} — ${acc.name}` : 'Ledger'}</h4>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-sm">
+                <input className="input num py-1 px-2 h-8 text-xs w-32" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+                <span className="text-muted">—</span>
+                <input className="input num py-1 px-2 h-8 text-xs w-32" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                <button className="btn py-1 px-3 h-8 text-xs" onClick={run}>Show</button>
+              </div>
+              <button className="text-muted hover:text-fg" onClick={onClose} aria-label="Close"><X size={16} /></button>
+            </div>
+          </div>
+          {err && <div className="text-danger text-sm mb-2">{err}</div>}
+          {d ? (
+            <>
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-line">
+                  <th className="text-left py-1 pr-3 font-medium text-muted text-xs">Date</th>
+                  <th className="text-left py-1 pr-3 font-medium text-muted text-xs">Voucher</th>
+                  <th className="text-left py-1 pr-3 font-medium text-muted text-xs">Narration</th>
+                  <th className="text-right py-1 pr-3 font-medium text-muted text-xs">Debit</th>
+                  <th className="text-right py-1 pr-3 font-medium text-muted text-xs">Credit</th>
+                  <th className="text-right py-1 font-medium text-muted text-xs">Balance</th>
+                </tr></thead>
+                <tbody>
+                  <tr className="border-b border-line/50 italic text-muted">
+                    <td colSpan={3} className="py-1 pr-3 text-xs">Opening balance</td>
+                    <td /><td />
+                    <td className="text-right py-1 num text-xs">{bal(d.opening)}</td>
+                  </tr>
+                  {d.rows.map((r: any) => (
+                    <tr key={r.id} className="border-b border-line/30 hover:bg-surface">
+                      <td className="py-1 pr-3 num text-xs">{r.entry_date}</td>
+                      <td className="py-1 pr-3 text-xs">{r.voucher_no}</td>
+                      <td className="py-1 pr-3 text-xs">{r.narration}</td>
+                      <td className="text-right py-1 pr-3 num text-xs">{r.debit ? money(r.debit) : ''}</td>
+                      <td className="text-right py-1 pr-3 num text-xs">{r.credit ? money(r.credit) : ''}</td>
+                      <td className="text-right py-1 num text-xs">{bal(r.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="text-right mt-2 num text-sm font-semibold">Closing: {bal(d.closing)}</div>
+            </>
+          ) : !err && <div className="text-muted text-xs py-2">Loading…</div>}
+        </div>
+      </td>
+    </tr>
   );
 }
 
 export default function Accounts() {
-  const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'ledger' ? 'ledger' : 'accounts';
-  const [drillAccountId, setDrillAccountId] = useState<string | undefined>();
+  const { can } = useAuth();
+  const types = useList('/accounting/types');
+  const branches = useList('/accounting/branches');
+  const [type, setType] = useState<number | null>(null);
+  const [q, setQ] = useState('');
+  const [rows, setRows] = useState<any[]>([]);
+  const [edit, setEdit] = useState<any>(null);
+  const [xfer, setXfer] = useState<any>(null);
+  const [err, setErr] = useState('');
+  const [openLedger, setOpenLedger] = useState<number | null>(null);
 
-  const switchTab = (t: string) => setParams(t === 'accounts' ? {} : { tab: t });
+  const load = () =>
+    api(`/accounting/accounts?${type ? `type=${type}&` : ''}${q ? `q=${encodeURIComponent(q)}` : ''}`).then(setRows);
 
-  const handleDrillDown = (id: number) => {
-    setDrillAccountId(String(id));
-    switchTab('ledger');
+  useEffect(() => { load(); }, [type, q]);
+
+  const save = async () => {
+    try {
+      const b = {
+        type_code: edit.type_code, name: edit.name,
+        branch_id: edit.branch_id ? Number(edit.branch_id) : null,
+        city: edit.city || null,
+        opening_dr: Number(edit.opening_dr) || 0,
+        opening_cr: Number(edit.opening_cr) || 0,
+        opening_date: edit.opening_date || null,
+        details: edit.details || null,
+      };
+      edit.id ? await api(`/accounting/accounts/${edit.id}`, 'PUT', b) : await api('/accounting/accounts', 'POST', b);
+      setEdit(null); setErr(''); load();
+    } catch (e: any) { setErr(e.message); }
   };
+
+  const del = async (r: any) => {
+    if (confirm(`Delete ${r.name}?`))
+      try { await api(`/accounting/accounts/${r.id}`, 'DELETE'); load(); }
+      catch (e: any) { alert(e.message); }
+  };
+
+  const w = can('admin', 'finance_manager');
+
+  const toggleLedger = (id: number) => setOpenLedger((prev) => (prev === id ? null : id));
 
   return (
     <Page title="Accounts & Ledger">
-      <div className="flex gap-1 border-b border-line mb-5">
-        {(['accounts', 'ledger'] as const).map((t) => (
-          <button key={t} onClick={() => switchTab(t)}
-            className={`px-4 py-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${tab === t ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-fg'}`}>
-            {t === 'accounts' ? 'Chart of Accounts' : 'General Ledger'}
-          </button>))}
+      <div className="grid grid-cols-[240px_1fr] gap-4">
+        {/* type sidebar */}
+        <div className="card p-0 overflow-hidden h-fit">
+          <div className="px-3 py-2 text-xs text-muted uppercase">Account type</div>
+          <button
+            className={`block w-full text-left px-3 py-1.5 text-sm ${type === null ? 'bg-accent/15 text-accent' : 'hover:bg-surface2'}`}
+            onClick={() => setType(null)}>All accounts</button>
+          {types.map((t: any) => (
+            <button key={t.code}
+              className={`flex justify-between w-full text-left px-3 py-1.5 text-sm ${type === t.code ? 'bg-accent/15 text-accent' : 'hover:bg-surface2'}`}
+              onClick={() => setType(t.code)}>
+              <span><span className="num text-muted mr-2">{t.code}</span>{t.name}</span>
+              <span className="text-muted">{t.n}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* main table */}
+        <div>
+          <input className="input max-w-xs mb-3" placeholder="Filter by name or code…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="card p-0 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-line">
+                <th className="text-left px-3 py-2 font-medium text-muted text-xs w-6" />
+                <th className="text-left px-3 py-2 font-medium text-muted text-xs">Code</th>
+                <th className="text-left px-3 py-2 font-medium text-muted text-xs">Name</th>
+                <th className="text-left px-3 py-2 font-medium text-muted text-xs">Branch</th>
+                <th className="text-left px-3 py-2 font-medium text-muted text-xs">City</th>
+                <th className="text-right px-3 py-2 font-medium text-muted text-xs">Opening Dr</th>
+                <th className="text-right px-3 py-2 font-medium text-muted text-xs">Opening Cr</th>
+                <th className="text-right px-3 py-2 font-medium text-muted text-xs">Balance</th>
+                <th className="px-3 py-2" />
+              </tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <>
+                    <tr key={r.id} className={`border-b border-line/50 hover:bg-surface2 ${openLedger === r.id ? 'bg-surface2' : ''}`}>
+                      <td className="px-3 py-2 w-6">
+                        <button className="text-muted hover:text-accent" onClick={() => toggleLedger(r.id)} title="View ledger" aria-label="Toggle ledger">
+                          {openLedger === r.id ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 num">{r.code}</td>
+                      <td className="px-3 py-2">
+                        <button className="text-accent hover:underline text-left font-medium" onClick={() => toggleLedger(r.id)}>{r.name}</button>
+                      </td>
+                      <td className="px-3 py-2 text-muted">{r.branch}</td>
+                      <td className="px-3 py-2 text-muted">{r.city}</td>
+                      <td className="px-3 py-2 num text-right">{r.opening_dr ? money(r.opening_dr) : '—'}</td>
+                      <td className="px-3 py-2 num text-right">{r.opening_cr ? money(r.opening_cr) : '—'}</td>
+                      <td className="px-3 py-2 num text-right font-medium">{`${money(Math.abs(r.balance))} ${r.balance < 0 ? 'Cr' : 'Dr'}`}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex gap-2 justify-end">
+                          <button className="text-accent text-xs hover:underline" onClick={() => setEdit({ ...r })}>Edit</button>
+                          {w && !r.sys_key && <>
+                            <button className="text-muted text-xs hover:underline" onClick={() => setXfer({ ...r, to: r.type_code })}>Transfer</button>
+                            <button className="text-danger text-xs" onClick={() => del(r)} aria-label="Remove"><X size={13} /></button>
+                          </>}
+                        </div>
+                      </td>
+                    </tr>
+                    {openLedger === r.id && <LedgerPanel key={`l-${r.id}`} accountId={r.id} onClose={() => setOpenLedger(null)} />}
+                  </>
+                ))}
+                {rows.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-muted text-sm">No accounts found</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {w && <div className="mt-4"><button className="btn" onClick={() => setEdit({ type_code: type ?? 320, opening_dr: 0, opening_cr: 0 })}><Plus size={15} /> New account</button></div>}
+        </div>
       </div>
-      {tab === 'accounts' && <AccountsTab onDrillDown={handleDrillDown} />}
-      {tab === 'ledger' && <LedgerTab initialAccountId={drillAccountId} />}
+
+      {edit && (
+        <Modal title={edit.id ? `Account ${edit.code}` : 'New account'} onClose={() => setEdit(null)}>
+          <Err e={err} />
+          <Field label="Account type">
+            <select className="input" disabled={!!edit.id} value={edit.type_code} onChange={(e) => setEdit({ ...edit, type_code: Number(e.target.value) })}>
+              {types.map((t: any) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Name"><input className="input" value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Branch">
+              <select className="input" value={edit.branch_id ?? ''} onChange={(e) => setEdit({ ...edit, branch_id: e.target.value })}>
+                <option value="">—</option>{branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </Field>
+            <Field label="City / Category"><input className="input" value={edit.city ?? ''} onChange={(e) => setEdit({ ...edit, city: e.target.value })} /></Field>
+            <Field label="Opening Dr"><Num v={edit.opening_dr} set={(v) => setEdit({ ...edit, opening_dr: v })} /></Field>
+            <Field label="Opening Cr"><Num v={edit.opening_cr} set={(v) => setEdit({ ...edit, opening_cr: v })} /></Field>
+            <Field label="Opening date"><input className="input num" type="date" value={edit.opening_date ?? ''} onChange={(e) => setEdit({ ...edit, opening_date: e.target.value })} /></Field>
+          </div>
+          <Field label="Details"><textarea className="input" value={edit.details ?? ''} onChange={(e) => setEdit({ ...edit, details: e.target.value })} /></Field>
+          {w && <div className="flex justify-end"><button className="btn" onClick={save}>Save</button></div>}
+        </Modal>
+      )}
+
+      {xfer && (
+        <Modal title={`Transfer ${xfer.name}`} onClose={() => setXfer(null)}>
+          <p className="text-sm text-muted mb-3">Moves the account to another account type and re-issues its code in that range.</p>
+          <select className="input mb-3" value={xfer.to} onChange={(e) => setXfer({ ...xfer, to: Number(e.target.value) })}>
+            {types.map((t: any) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}
+          </select>
+          <div className="flex justify-end">
+            <button className="btn" onClick={async () => {
+              try { await api(`/accounting/accounts/${xfer.id}/transfer`, 'POST', { type_code: xfer.to }); setXfer(null); load(); }
+              catch (e: any) { alert(e.message); }
+            }}>Transfer</button>
+          </div>
+        </Modal>
+      )}
     </Page>
   );
 }
