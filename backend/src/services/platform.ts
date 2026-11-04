@@ -16,7 +16,7 @@ export const ROLE_CAPS: Record<OperatorRole, Cap[]> = { readonly: ['read'], supp
 export const STEP_UP_MINUTES = 5;
 declare module 'express-serve-static-core' { interface Request { platform?: { userId: number; email: string; role: OperatorRole; caps: Cap[] } } }
 const sqlTime = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ');
-const needReason = (r: unknown): string => { const s = String(r ?? '').trim(); if (s.length < 5) throw new HttpError(400, 'A reason (5+ characters) is required — it is recorded in the audit log.'); return s.slice(0, 300); };
+const needReason = (r: unknown): string => String(r ?? '').trim().slice(0, 300);
 export { needReason };
 
 /**
