@@ -48,7 +48,7 @@ export default function Platform() {
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-line bg-surface/80 backdrop-blur px-4 md:px-8 h-14 flex items-center justify-between shrink-0 sticky top-0 z-30">
         <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-lg bg-indigo-500 text-white grid place-items-center"><Plane size={15} /></div>
+          <div className="h-8 w-8 rounded-lg bg-accent text-accent-ink grid place-items-center shrink-0"><Plane size={17} strokeWidth={2.2} /></div>
           <span className="text-sm font-semibold">Platform console</span>
           <span className="text-xs text-muted hidden sm:inline">· {user.email}</span>
           {me && <span className="pill bg-surface2 text-muted capitalize">{me.role}</span>}
@@ -63,13 +63,13 @@ export default function Platform() {
       <div className="flex flex-1 min-h-0">
         {/* Sidebar (desktop) */}
         {me && !need2fa && (
-          <nav className="w-52 shrink-0 border-r border-line py-4 px-2 hidden md:flex flex-col overflow-y-auto">
+          <nav className="w-52 shrink-0 bg-surface border-r border-line py-4 px-2 hidden md:flex flex-col overflow-y-auto">
             {navGroups.map((group) => (
               <div key={group.label} className="mb-4">
                 <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{group.label}</div>
                 {group.items.map(([k, l]) => (
                   <button key={k} role="tab" aria-selected={tab === k}
-                    className={`w-full text-left flex items-center justify-between rounded-lg px-3 py-2 text-sm mb-0.5 transition-colors ${tab === k ? 'bg-indigo-500/10 text-indigo-500 font-medium' : 'text-muted hover:bg-surface2 hover:text-fg'}`}
+                    className={`w-full text-left flex items-center justify-between rounded-lg px-3 py-2 text-sm mb-0.5 transition-colors ${tab === k ? 'bg-accent/10 text-accent font-medium' : 'text-muted hover:bg-surface2 hover:text-fg'}`}
                     onClick={() => setTab(k)}>
                     <span>{l}</span>
                     {k === 'approvals' && pending > 0 && (
