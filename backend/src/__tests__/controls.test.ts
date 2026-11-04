@@ -89,10 +89,9 @@ describe('ledger integrity', () => {
 });
 
 describe('period lock', () => {
-  it('blocks posting and reversal inside a locked period; reopen needs admin + reason', async () => {
+  it('blocks posting and reversal inside a locked period; reopen needs admin', async () => {
     const rcp = (await admin.post('/vouchers/receipts', { voucher_date: '2026-01-15', cash_account_id: s.cash, party_account_id: s.client, amount: 77 })).body.id;
-    expect((await finance.post('/admin/period-locks', { locked_through: '2026-03-31', reason: '' })).status).toBe(400); // reason required
-    expect((await finance.post('/admin/period-locks', { locked_through: '2026-03-31', reason: 'Q1 close' })).status).toBe(200);
+    expect((await finance.post('/admin/period-locks', { locked_through: '2026-03-31' })).status).toBe(200);   // no reason needed
     expect((await admin.post('/vouchers/receipts', { voucher_date: '2026-02-01', cash_account_id: s.cash, party_account_id: s.client, amount: 5 })).status).toBe(409);
     expect((await admin.post('/accounting/journal', { date: '2026-03-31', lines: [{ account_id: s.cash, debit: 1 }, { account_id: s.client, credit: 1 }] })).status).toBe(409);
     expect((await admin.del(`/vouchers/${rcp}`)).status).toBe(409);

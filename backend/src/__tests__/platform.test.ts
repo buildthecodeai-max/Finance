@@ -20,14 +20,10 @@ async function operator(opts: { twofa?: boolean; role?: OperatorRole } = {}) {
 const sub = async (a: Api) => (await sql('SELECT * FROM subscriptions WHERE agency_id = ?', [a.agencyId]))[0];
 
 let op: { token: string; email: string; id: number; secret: string }, op2: { token: string; email: string; id: number; secret: string }, A: Api, B: Api;
-/** fresh authenticator code → step-up (valid 5 min) */
-const codeFor = (o: { secret: string }, ahead = 0) => { const prev = authenticator.options; authenticator.options = { ...prev, epoch: Date.now() + ahead * 30000 }; const code = authenticator.generate(o.secret); authenticator.options = prev; return code; };
-const stepCall = (o: { token: string }, code: string) => call(o.token, 'POST', '/platform/step-up', { code });
-const up = async (o: { token: string; secret: string }, ahead = 0) => stepCall(o, codeFor(o, ahead));
 const P = (method: string, path: string, body?: unknown) => call(op.token, method, `/platform${path}`, body);
 /** two-person suspension: op requests, op2 approves */
 const suspendBoth = async (agencyId: number, reason: string) => { const r = await P('POST', `/agencies/${agencyId}/suspend`, { reason }); expect(r.status).toBe(202); const a = await call(op2.token, 'POST', `/platform/approvals/${r.body.approval_id}/approve`, {}); expect(a.status).toBe(200); return r.body.approval_id as number; };
-beforeAll(async () => { await boot(); base = apiBase().replace(/\/api$/, ''); op = await operator(); await up(op); op2 = await operator(); await up(op2); A = await newAgency('PlatA'); B = await newAgency('PlatB'); });
+beforeAll(async () => { await boot(); base = apiBase().replace(/\/api$/, ''); op = await operator(); op2 = await operator(); A = await newAgency('PlatA'); B = await newAgency('PlatB'); });
 afterAll(shutdown);
 
 describe('operator access', () => {
@@ -59,10 +55,9 @@ describe('overview and directory', () => {
 });
 
 describe('actions on an agency', () => {
-  it('every action needs a reason and leaves an audit trail; operator suspension survives payments until released', async () => {
+  it('every action leaves an audit trail without needing a reason; operator suspension survives payments until released', async () => {
     const X = await newAgency('PlatAct'); const id = X.agencyId;
-    for (const [path, body] of [['extend-trial', { days: 5 }], ['suspend', {}], ['set-plan', { plan: 'starter' }], ['grant', { plan: 'scale', until: '2099-01-01' }]] as const) expect((await P('POST', `/agencies/${id}/${path}`, body)).status, path).toBe(400);
-    const e = await P('POST', `/agencies/${id}/extend-trial`, { days: 10, reason: 'Waiting on their accountant' }); expect(e.status).toBe(200);
+    const e = await P('POST', `/agencies/${id}/extend-trial`, { days: 10 }); expect(e.status).toBe(200);
     expect((new Date(String((await sub(X)).trial_ends_at).replace(' ', 'T') + 'Z').getTime() - Date.now()) / 86400_000).toBeGreaterThan(23);                 // 14 + 10
     expect((await P('POST', `/agencies/${id}/set-plan`, { plan: 'starter', reason: 'Downgrade requested by phone' })).status).toBe(200); expect((await sub(X)).plan_id).toBeTruthy();
     expect((await P('POST', `/agencies/${id}/grant`, { plan: 'scale', interval: 'yearly', until: '2020-01-01', reason: 'x'.repeat(8) })).status).toBe(400);   // past date
@@ -80,6 +75,22 @@ describe('actions on an agency', () => {
     expect((await sql("SELECT COUNT(*) n FROM billing_events WHERE agency_id = ? AND kind IN ('platform_suspended','platform_reactivated','trial_extended')", [id]))[0].n).toBe(3);
     expect((await X.get('/admin/security-events')).body.some((e: any) => e.event === 'platform_suspended')).toBe(true);                                       // the customer can see it too
   });
+  it('deleting an agency removes every row it owns and its sole-member users, keeps other agencies intact, and keeps the audit trail', async () => {
+    const X = await newAgency('PlatDel'), Y = await newAgency('PlatDelKeep'), id = X.agencyId;
+    await X.post('/clients', { name: 'Goes With The Agency', currency: 'USD' }); await Y.post('/clients', { name: 'Stays Put', currency: 'USD' });
+    expect((await sql('SELECT COUNT(*) n FROM accounts WHERE agency_id = ?', [id]))[0].n).toBeGreaterThan(0);   // registration seeds a chart of accounts
+    const r = await P('DELETE', `/agencies/${id}`); expect(r.status).toBe(200);
+    for (const [t, col] of [['agencies', 'id'], ['clients', 'agency_id'], ['accounts', 'agency_id'], ['memberships', 'agency_id'], ['subscriptions', 'agency_id']]) expect((await sql(`SELECT COUNT(*) n FROM \`${t}\` WHERE \`${col}\` = ?`, [id]))[0].n, t).toBe(0);
+    expect((await sql('SELECT COUNT(*) n FROM users WHERE id = ?', [X.userId]))[0].n).toBe(0);                  // only belonged to the deleted agency
+    expect((await Y.get('/clients')).body.some((c: any) => c.name === 'Stays Put')).toBe(true);                   // neighbours untouched
+    expect((await sql("SELECT COUNT(*) n FROM platform_audit_log WHERE agency_id = ? AND action = 'delete_agency'", [id]))[0].n).toBe(1);   // evidence survives
+    expect((await P('DELETE', `/agencies/${id}`)).status).toBe(404);
+  });
+  it('agency actions work when the request carries no reason key and deleting works with no request body at all', async () => {
+    const X = await newAgency('NoReasonKey');
+    expect((await P('POST', `/agencies/${X.agencyId}/extend-trial`, { days: 2 })).status).toBe(200);
+    expect((await P('DELETE', `/agencies/${X.agencyId}`)).status).toBe(200);
+  });
   it('the operator audit log is append-only', async () => {
     await expect(sql('UPDATE platform_audit_log SET reason = ? WHERE id > 0', ['tamper'])).rejects.toThrow(/append-only/); await expect(sql('DELETE FROM platform_audit_log WHERE id > 0')).rejects.toThrow(/append-only/);
   });
@@ -88,7 +99,6 @@ describe('actions on an agency', () => {
 describe('support sessions', () => {
   it('are read-only, scoped to one agency, visible to and revocable by the customer, and cannot touch credentials', async () => {
     const X = await newAgency('PlatSup'), Y = await newAgency('PlatSupOther'); const mgr = await addMember(X, 'finance_manager'); await X.post('/clients', { name: 'Seen By Support', currency: 'USD' });
-    expect((await P('POST', `/agencies/${X.agencyId}/support-session`, {})).status).toBe(400);
     const s = (await P('POST', `/agencies/${X.agencyId}/support-session`, { reason: 'Customer reported missing invoice', minutes: 20 })).body; expect(s.token).toBeTruthy();
     const sup = (m: string, path: string, agency = X.agencyId, body?: unknown) => call(s.token, m, path, body, { 'x-agency-id': String(agency) });
     const list = await sup('GET', '/clients'); expect(list.status).toBe(200); expect(list.body.some((c: any) => c.name === 'Seen By Support')).toBe(true);
@@ -109,14 +119,13 @@ describe('support sessions', () => {
 });
 
 describe('plan management', () => {
-  it('creates and edits plans with reasons, validates features, and changes take effect for agencies on the plan', async () => {
+  it('creates and edits plans without a reason, validates features, and changes take effect for agencies on the plan', async () => {
     const code = `tp-${rnd()}`, body = { code, name: 'Test Plan', description: 'x', price_monthly: 10, price_yearly: 100, trial_days: 7, max_seats: 2, max_branches: 1, max_bookings_month: 5, features: ['portal'], support_level: 'email', active: true, sort: 50 };
     expect((await P('POST', '/plans', { ...body, features: ['teleportation'] })).status).toBe(400); expect((await P('POST', '/plans', { ...body, code: 'Bad Code!' })).status).toBe(400);
     const id = (await P('POST', '/plans', body)).body.id; expect((await P('POST', '/plans', body)).status).toBe(409);
     const T1 = await newAgency('PlatPlan'); await P('POST', `/agencies/${T1.agencyId}/set-plan`, { plan: code, reason: 'Pilot customer plan' });
     expect((await T1.get('/billing/subscription')).body.limits.seats).toBe(2); expect((await T1.get('/automation/rules')).status).toBe(402);
-    expect((await P('PUT', `/plans/${id}`, { ...body, max_seats: 9, features: ['portal', 'automation'] })).status).toBe(400);                                  // reason required
-    const u = await P('PUT', `/plans/${id}`, { ...body, max_seats: 9, features: ['portal', 'automation'], reason: 'Pilot extended to automation' }); expect(u.status).toBe(200); expect(u.body.agencies_affected).toBe(1);
+    const u = await P('PUT', `/plans/${id}`, { ...body, max_seats: 9, features: ['portal', 'automation'] }); expect(u.status).toBe(200); expect(u.body.agencies_affected).toBe(1);
     expect((await T1.get('/billing/subscription')).body.limits.seats).toBe(9); expect((await T1.get('/automation/rules')).status).toBe(200);
     const plan = (await P('GET', '/plans')).body.find((p: any) => p.code === code); expect(plan).toMatchObject({ agencies: 1, max_seats: 9 }); expect((await call(A.token, 'GET', '/platform/plans')).status).toBe(404);
     expect((await P('GET', '/audit')).body.find((a: any) => a.action === 'plan_update' && /max_seats: 2 → 9/.test(a.detail))).toBeTruthy();
@@ -131,7 +140,7 @@ describe('operator roles', () => {
     const attempts: [string, string, string, unknown][] = [['read', 'GET', '/overview', undefined], ['detail', 'GET', `/agencies/${id}`, undefined], ['trial', 'POST', `/agencies/${id}/extend-trial`, { days: 2, reason: 'role matrix test' }],
       ['plan', 'POST', `/agencies/${id}/set-plan`, { plan: 'growth', reason: 'role matrix test' }], ['support', 'POST', `/agencies/${id}/support-session`, { reason: 'role matrix test' }], ['suspend', 'POST', `/agencies/${id}/suspend`, { reason: 'role matrix test' }], ['operators', 'GET', '/operators', undefined]];
     for (const role of ['readonly', 'support', 'billing', 'admin'] as OperatorRole[]) {
-      const o = await operator({ role }); await up(o); results[role] = {};
+      const o = await operator({ role }); results[role] = {};
       for (const [k, m, path, body] of attempts) results[role][k] = (await call(o.token, m, `/platform${path}`, body)).status;
       if (role === 'admin') await call(o.token, 'POST', `/platform/agencies/${id}/reactivate`, { reason: 'release after matrix test' });
     }
@@ -153,27 +162,7 @@ describe('operator roles', () => {
   });
 });
 
-describe('step-up re-authentication', () => {
-  it('risky actions need a fresh authenticator code, wrong or reused codes are refused, and it expires', async () => {
-    const o = await operator({ role: 'admin' }), X = await newAgency('StepUp'), id = X.agencyId, run = (p: string, body: unknown) => call(o.token, 'POST', `/platform/agencies/${id}/${p}`, body);
-    const need = await run('suspend', { reason: 'step up required first' }); expect(need.status).toBe(403); expect(need.body.code).toBe('step_up_required'); expect((await sub(X)).status).toBe('trialing');
-    expect((await call(o.token, 'POST', '/platform/step-up', { code: '000000' })).status).toBe(401);
-    expect((await run('extend-trial', { days: 1, reason: 'low risk needs no step-up' })).status).toBe(200);              // extending a trial is not a step-up action
-    const c0 = codeFor(o); expect((await stepCall(o, c0)).status).toBe(200); expect((await run('suspend', { reason: 'now confirmed with code' })).status).toBe(202);   // accepted: waits for a second operator
-    expect((await stepCall(o, c0)).status).toBe(401);                                                                      // the very same code cannot be used twice
-    expect((await up(o, 1)).status).toBe(200);                                                                              // next time step is fine
-    await sql('UPDATE users SET platform_stepup_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 6 MINUTE) WHERE id = ?', [o.id]);
-    expect((await run('reactivate', { reason: 'confirmation has expired' })).body.code).toBe('step_up_required');
-    const log = (await P('GET', '/audit')).body.filter((a: any) => a.admin_email === o.email).map((a: any) => a.action); expect(log).toContain('step_up_ok'); expect(log).toContain('step_up_failed');
-  });
-  it('locks step-up after five wrong codes; plan edits and support sessions are also step-up protected', async () => {
-    const o = await operator({ role: 'admin' }); for (let i = 0; i < 5; i++) expect((await call(o.token, 'POST', '/platform/step-up', { code: '111111' })).status).toBe(401);
-    expect((await up(o)).status).toBe(429);
-    const o2 = await operator({ role: 'admin' }), X = await newAgency('StepUp2');
-    expect((await call(o2.token, 'POST', '/platform/plans', { code: `s-${rnd()}`, name: 'Nope', price_monthly: 1, price_yearly: 1, trial_days: 1, max_seats: 1, max_branches: 1, max_bookings_month: 1, features: [], support_level: 'email', active: true, sort: 1 })).body.code).toBe('step_up_required');
-    expect((await call(o2.token, 'POST', `/platform/agencies/${X.agencyId}/support-session`, { reason: 'needs confirmation' })).body.code).toBe('step_up_required');
-    expect((await call(o2.token, 'POST', `/platform/agencies/${X.agencyId}/grant`, { plan: 'scale', until: '2099-01-01', reason: 'needs confirmation' })).body.code).toBe('step_up_required');
-  });
+describe('two-factor sign-in', () => {
   it('an authenticator code can also be used only once at sign-in', async () => {
     const email = `tp-${rnd()}@t.dev`, reg = await call(null, 'POST', '/auth/register', { agencyName: `TP ${rnd()}`, name: 'Totp Person', email, password: PASSWORD }), tok = reg.body.accessToken;
     const s = await call(tok, 'POST', '/auth/2fa/setup', {}); await call(tok, 'POST', '/auth/2fa/enable', { code: authenticator.generate(s.body.secret) });
@@ -189,7 +178,6 @@ describe('two-person approval for suspensions', () => {
     expect((await sub(X)).status).toBe('trialing'); expect((await X.post('/clients', { name: 'Still works', currency: 'USD' })).status).toBe(201);          // nothing happened to the customer yet
     expect((await P('POST', `/agencies/${id}/suspend`, { reason: 'duplicate request here' })).status).toBe(409);
     const self = await P('POST', `/approvals/${req.body.approval_id}/approve`, {}); expect(self.status).toBe(403); expect(self.body.code).toBe('self_approval');
-    const o3 = await operator({ role: 'admin' }); const noStep = await call(o3.token, 'POST', `/platform/approvals/${req.body.approval_id}/approve`, {}); expect(noStep.body.code).toBe('step_up_required');
     expect((await call(op2.token, 'GET', '/platform/approvals?status=pending')).body.some((a: any) => a.id === req.body.approval_id && a.agency_id === id && a.requested_by_email === op.email)).toBe(true);
     const ok = await call(op2.token, 'POST', `/platform/approvals/${req.body.approval_id}/approve`, { note: 'Evidence reviewed' }); expect(ok.status).toBe(200);
     expect(await sub(X)).toMatchObject({ status: 'suspended', platform_hold: 1 }); expect((await X.post('/clients', { name: 'Blocked', currency: 'USD' })).status).toBe(402);
@@ -198,9 +186,8 @@ describe('two-person approval for suspensions', () => {
     expect(trail.find((a: any) => a.action === 'suspend_approved').detail).toContain(`requested by ${op.email}, approved by ${op2.email}`);
     expect((await P('GET', '/overview')).body).toHaveProperty('pending_approvals');
   });
-  it('can be rejected (reason required) or cancelled by the requester only; expired requests cannot be approved', async () => {
+  it('can be rejected or cancelled by the requester only; expired requests cannot be approved', async () => {
     const X = await newAgency('TwoPersonRej'), id = X.agencyId; const r1 = (await P('POST', `/agencies/${id}/suspend`, { reason: 'First attempt at suspension' })).body.approval_id;
-    expect((await call(op2.token, 'POST', `/platform/approvals/${r1}/reject`, {})).status).toBe(400);
     expect((await P('POST', `/approvals/${r1}/reject`, { reason: 'my own request' })).status).toBe(403);
     expect((await call(op2.token, 'POST', `/platform/approvals/${r1}/reject`, { reason: 'Not enough evidence yet' })).status).toBe(200); expect((await sub(X)).status).toBe('trialing');
     expect((await call(op2.token, 'GET', '/platform/approvals?status=rejected')).body.find((a: any) => a.id === r1).decision_note).toBe('Not enough evidence yet');
@@ -211,8 +198,8 @@ describe('two-person approval for suspensions', () => {
     const late = await call(op2.token, 'POST', `/platform/approvals/${r3}/approve`, {}); expect(late.status).toBe(409); expect(late.body.error).toMatch(/expired/); expect((await sub(X)).status).toBe('trialing');
   });
   it('is role-limited, and two approvers racing execute it once', async () => {
-    const X = await newAgency('TwoPersonRace'), id = X.agencyId, o3 = await operator({ role: 'admin' }); await up(o3);
-    const billing = await operator({ role: 'billing' }); await up(billing); const ro = await operator({ role: 'readonly' });
+    const X = await newAgency('TwoPersonRace'), id = X.agencyId, o3 = await operator({ role: 'admin' });
+    const billing = await operator({ role: 'billing' }); const ro = await operator({ role: 'readonly' });
     const r = (await P('POST', `/agencies/${id}/suspend`, { reason: 'Race condition check request' })).body.approval_id;
     expect((await call(billing.token, 'POST', `/platform/approvals/${r}/approve`, {})).status).toBe(403); expect((await call(ro.token, 'GET', '/platform/approvals')).status).toBe(403);
     const res = await Promise.all([op2, o3].map((o) => call(o.token, 'POST', `/platform/approvals/${r}/approve`, {}))); expect(res.map((x) => x.status).sort()).toEqual([200, 409]);

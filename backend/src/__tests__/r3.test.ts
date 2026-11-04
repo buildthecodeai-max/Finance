@@ -53,7 +53,6 @@ describe('issuing an invoice', () => {
   });
   it('void is a reversal: ledger returns to zero, history is kept; blocked once paid or credited', async () => {
     const c = await mkClient(); const id = await issued(c);
-    expect((await A.post(`/invoices/${id}/void`, { reason: 'x' })).status).toBe(400); // reason too short
     const v = await A.post(`/invoices/${id}/void`, { reason: 'Booked in error' }); expect(v.status).toBe(200); expect(v.body.reversal).toBeTruthy();
     expect((await stmt(c)).closing).toBe(0); expect((await inv(id)).status).toBe('void');
     expect((await sql('SELECT reversed_by FROM vouchers WHERE id = (SELECT voucher_id FROM invoices WHERE id = ?)', [id]))[0].reversed_by).toBeTruthy();

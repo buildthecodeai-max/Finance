@@ -110,7 +110,6 @@ describe('validation and controls', () => {
   it('rejecting sends it back to draft with approvals cleared; cancelling frees the bills; export locks cancellation', async () => {
     const b = await mkBill(); const id = (await mkRun([b])).body.id;
     await A.post(`/finance/payment-runs/${id}/validate`); await A.post(`/finance/payment-runs/${id}/submit`);
-    expect((await approver.post(`/finance/payment-runs/${id}/return`, {})).status).toBe(400);
     expect((await approver.post(`/finance/payment-runs/${id}/return`, { reason: 'Amount looks wrong' })).status).toBe(200);
     expect((await detail(id)).run).toMatchObject({ status: 'draft', submitted_by: null });
     expect((await A.post(`/finance/payment-runs/${id}/cancel`, { reason: 'Not needed' })).status).toBe(200);

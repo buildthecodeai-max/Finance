@@ -12,10 +12,9 @@ import { idParam, parse } from './util.js';
 /** Operator console API. Not tenant-scoped: no X-Agency-Id, separate auth, everything audited. */
 export const platformRouter = Router();
 platformRouter.use(rateLimit({ windowMs: 60_000, limit: process.env.NODE_ENV === 'test' ? 5000 : 120 }), P.platformAuth);
-const Interval = z.enum(['monthly', 'yearly']), Reason = z.object({ reason: z.string() });
+const Interval = z.enum(['monthly', 'yearly']), Reason = z.object({ reason: z.string().optional().default('') });
 
 platformRouter.get('/me', (req, res) => res.json({ ok: true, email: req.platform!.email, role: req.platform!.role, caps: req.platform!.caps }));
-platformRouter.post('/step-up', async (req, res) => res.json(await P.performStepUp(req, parse(z.object({ code: z.string().min(6).max(8) }), req.body).code)));
 platformRouter.get('/operators', P.needs('suspend'), async (_req, res) => res.json(await P.listOperators()));
 platformRouter.get('/overview', async (_req, res) => res.json(await P.overview()));
 platformRouter.get('/system', async (_req, res) => { const [hb]: any = await pool.query("SELECT k, v, updated_at FROM system_state WHERE k LIKE 'hb:%'"); res.json({ health: await health(), heartbeats: hb }); });
@@ -31,15 +30,9 @@ platformRouter.put('/agencies/:id', P.needs('billing'), async (req, res) => {
 });
 platformRouter.delete('/agencies/:id', P.needs('suspend'), async (req, res) => {
   const id = idParam(req);
-  const b = parse(Reason, req.body);
-  const [[ag]]: any = await pool.query('SELECT name FROM agencies WHERE id=?', [id]);
-  if (!ag) throw new HttpError(404, 'Agency not found');
-  // Delete child rows before removing the agency (cascade that MySQL won't do automatically)
-  for (const t of ['memberships', 'subscriptions', 'billing_events', 'support_sessions', 'platform_audit_log', 'security_events', 'system_state']) {
-    try { await pool.query(`DELETE FROM ${t} WHERE agency_id=?`, [id]); } catch { /* table may not have agency_id — skip */ }
-  }
-  await pool.query('DELETE FROM agencies WHERE id=?', [id]);
-  await P.audit(req, 'delete_agency', id, `deleted "${ag.name}"`, b.reason);
+  const b = parse(Reason, req.body ?? {});
+  const r = await P.deleteAgency(id);
+  await P.audit(req, 'delete_agency', id, `deleted "${r.name}": ${r.rows} rows in ${r.tables} tables, ${r.users} users removed`, b.reason);
   res.json({ ok: true });
 });
 platformRouter.post('/agencies/:id/extend-trial', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ days: z.number().int().min(1).max(60) }), req.body); res.json(await P.extendTrial(req, idParam(req), b.days, b.reason)); });
@@ -78,7 +71,7 @@ const NewAgency = z.object({ agencyName: z.string().min(2).max(120), adminName: 
 platformRouter.post('/agencies', P.needs('billing'), async (req, res) => { const b = parse(NewAgency, req.body); res.status(201).json(await P.createAgency(req, b)); });
 platformRouter.get('/plans', async (_req, res) => res.json(await P.listPlans()));
 platformRouter.post('/plans', P.needs('billing'), async (req, res) => res.status(201).json({ id: await P.createPlan(req, parse(Plan, req.body) as P.PlanIn) }));
-platformRouter.put('/plans/:id', P.needs('billing'), async (req, res) => { const b = parse(Plan.extend({ reason: z.string() }), req.body); const { reason, ...plan } = b; res.json(await P.updatePlan(req, idParam(req), plan as P.PlanIn, reason)); });
+platformRouter.put('/plans/:id', P.needs('billing'), async (req, res) => { const b = parse(Plan.extend({ reason: z.string().optional().default('') }), req.body); const { reason, ...plan } = b; res.json(await P.updatePlan(req, idParam(req), plan as P.PlanIn, reason)); });
 
 platformRouter.get('/audit', async (_req, res) => res.json((await pool.query(`SELECT a.id, a.action, a.agency_id, ag.name agency_name, a.detail, a.reason, a.ip, a.created_at, u.email admin_email FROM platform_audit_log a JOIN users u ON u.id = a.admin_user_id LEFT JOIN agencies ag ON ag.id = a.agency_id ORDER BY a.id DESC LIMIT 300`))[0]));
 platformRouter.get('/security-events', async (_req, res) => res.json((await pool.query(`SELECT e.id, e.agency_id, ag.name agency_name, e.event, e.detail, e.ip, e.created_at FROM security_events e LEFT JOIN agencies ag ON ag.id = e.agency_id ORDER BY e.id DESC LIMIT 300`))[0]));

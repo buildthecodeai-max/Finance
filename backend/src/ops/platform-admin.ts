@@ -6,7 +6,7 @@
  *
  * Roles:  readonly = look at everything (audited) · support = + read-only customer sessions · billing = + trials, plans, invoiced access
  *         admin    = everything, including suspending / releasing a customer.
- * Risky actions also need a fresh authenticator code (step-up). The user must already exist and must enable 2FA before the console opens.
+ * The user must already exist and must enable 2FA before the console opens.
  */
 import 'dotenv/config';
 import { pool } from '../db.js';

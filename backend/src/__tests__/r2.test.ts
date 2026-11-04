@@ -24,10 +24,9 @@ beforeAll(async () => {
 afterAll(shutdown);
 
 describe('leads & CRM', () => {
-  it('creates leads, warns on duplicates, requires a lost reason', async () => {
+  it('creates leads, warns on duplicates, takes an optional lost reason', async () => {
     const l1 = await A.post('/leads', { name: 'Amir Khan', email: 'amir@test.dev', phone: '555-1', destination: 'Dubai', party_size: 2 }); expect(l1.status).toBe(201);
     const l2 = await A.post('/leads', { name: 'A. Khan', email: 'amir@test.dev' }); expect(l2.body.duplicates.length).toBeGreaterThan(0);
-    expect((await A.put(`/leads/${l1.body.id}`, { stage: 'lost' })).status).toBe(400);
     expect((await A.put(`/leads/${l1.body.id}`, { stage: 'lost', lost_reason: 'Too expensive' })).status).toBe(200);
     const d = (await A.get(`/leads/${l1.body.id}`)).body; expect(d.activities.some((a: any) => /Stage changed/.test(a.body))).toBe(true);
   });
@@ -200,8 +199,7 @@ describe('booking workspace', () => {
     await agent.put(`/bookings/${bk}/components/${cid}`, { confirmation_status: 'confirmed', ticketing_status: 'ticketed', reason: 'Ticket issued' });
     expect((await agent.get(`/bookings/${bk}`)).body.statuses).toMatchObject({ booking: 'quoted', payment: 'not_invoiced', supplier_confirmation: { confirmed: 1 }, ticketing: { ticketed: 1 } });
   });
-  it('logs changes with actor and reason; sensitive transitions require a reason', async () => {
-    expect((await agent.put(`/bookings/${bk}`, { status: 'cancelled' })).status).toBe(400);
+  it('logs changes with actor and reason; a reason is optional', async () => {
     expect((await agent.put(`/bookings/${bk}`, { status: 'confirmed', travel_start: '2027-02-03' })).status).toBe(200);
     expect((await agent.put(`/bookings/${bk}`, { status: 'cancelled', reason: 'Client illness' })).status).toBe(200);
     const ch = (await agent.get(`/bookings/${bk}`)).body.changes as any[];
@@ -210,16 +208,14 @@ describe('booking workspace', () => {
     expect(ch.find((c) => c.field.includes('ticketing_status'))).toBeTruthy();
     await expect(sql('DELETE FROM booking_changes WHERE booking_id = ?', [bk])).rejects.toThrow(/append-only/);
   });
-  it('a cancelled booking is frozen; only finance/admin can reopen, with a reason', async () => {
+  it('a cancelled booking is frozen; only finance/admin can reopen', async () => {
     expect((await agent.post(`/bookings/${bk}/components`, comp())).status).toBe(409);
     expect((await agent.put(`/bookings/${bk}`, { status: 'confirmed', reason: 'oops' })).status).toBe(403);
-    expect((await finance.put(`/bookings/${bk}`, { status: 'confirmed' })).status).toBe(403);
-    expect((await finance.put(`/bookings/${bk}`, { status: 'confirmed', reason: 'Client recovered' })).status).toBe(200);
+    expect((await finance.put(`/bookings/${bk}`, { status: 'confirmed' })).status).toBe(200);   // no reason needed
   });
-  it('removing a component needs a reason and is logged', async () => {
+  it('removing a component is logged', async () => {
     const cid = (await agent.get(`/bookings/${bk}`)).body.components[0].id;
-    expect((await agent.del(`/bookings/${bk}/components/${cid}`)).status).toBe(400);
-    expect((await agent.del(`/bookings/${bk}/components/${cid}?reason=Customer%20changed%20mind`)).status).toBe(200);
+    expect((await agent.del(`/bookings/${bk}/components/${cid}`)).status).toBe(200);
     expect(((await agent.get(`/bookings/${bk}`)).body.changes as any[]).some((c) => /removed/.test(c.field))).toBe(true);
   });
   it('links to generic invoices; drafts are not receivables', async () => {

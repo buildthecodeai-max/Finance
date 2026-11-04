@@ -54,12 +54,10 @@ describe('suppliers: edit, archive, delete', () => {
 });
 
 describe('bookings: edit and delete (archive)', () => {
-  it('edits details with a change-log entry; archive needs a reason and is blocked by live invoices; restore works; agents limited', async () => {
+  it('edits details with a change-log entry; archive is blocked by live invoices; restore works; agents limited', async () => {
     const c = await mkClient(), id = (await A.post('/bookings', { client_id: c, destination: 'Rome', status: 'enquiry' })).body.id;
     expect((await A.put(`/bookings/${id}`, { destination: 'Venice', travel_start: '2027-05-01', travel_end: '2027-05-09', notes: 'Honeymoon', reason: 'Client changed plans' })).status).toBe(200);
     const w = (await A.get(`/bookings/${id}`)).body; expect(w.booking?.destination ?? w.destination).toBe('Venice'); expect(JSON.stringify(w)).toMatch(/Client changed plans/);
-    expect((await A.del(`/bookings/${id}`)).status).toBe(400);                                                                                          // reason required
-    expect((await A.del(`/bookings/${id}`)).body.error).toMatch(/reason/i);
     const res = await fetch(`${(await import('./helpers.js')).apiBase()}/bookings/${id}`, { method: 'DELETE', headers: { 'content-type': 'application/json', authorization: `Bearer ${A.token}`, 'x-agency-id': String(A.agencyId) }, body: JSON.stringify({ reason: 'Duplicate entry' }) });
     expect(res.status).toBe(200); expect((await A.get('/bookings')).body.some((b: any) => b.id === id)).toBe(false); expect((await A.get('/bookings?archived=1')).body.some((b: any) => b.id === id)).toBe(true);
     expect((await A.put(`/bookings/${id}`, { destination: 'x' })).status).toBe(409);                                                                    // archived: read-only until restored

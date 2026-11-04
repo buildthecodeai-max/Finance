@@ -19,6 +19,8 @@ export const config = {
   metricsToken: process.env.METRICS_TOKEN ?? '',
   /** Suspending a customer needs a second operator's approval. Turn off only for single-operator installations. */
   platformTwoPerson: process.env.PLATFORM_TWO_PERSON !== 'false',
+  /** Local-dev convenience: with NODE_ENV=test the 2FA prompts are skipped. The test suite sets ENFORCE_2FA=true to exercise the real controls. */
+  skip2fa: process.env.NODE_ENV === 'test' && process.env.ENFORCE_2FA !== 'true',
   r2: {
     accountId: process.env.R2_ACCOUNT_ID ?? '',
     accessKeyId: process.env.R2_ACCESS_KEY_ID ?? '',

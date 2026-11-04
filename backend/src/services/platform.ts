@@ -13,7 +13,6 @@ export type OperatorRole = 'readonly' | 'support' | 'billing' | 'admin';
 export type Cap = 'read' | 'support' | 'billing' | 'suspend';
 /** What each operator role may do. Roles are assigned only from the server CLI. */
 export const ROLE_CAPS: Record<OperatorRole, Cap[]> = { readonly: ['read'], support: ['read', 'support'], billing: ['read', 'billing'], admin: ['read', 'support', 'billing', 'suspend'] };
-export const STEP_UP_MINUTES = 5;
 declare module 'express-serve-static-core' { interface Request { platform?: { userId: number; email: string; role: OperatorRole; caps: Cap[] } } }
 const sqlTime = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ');
 const needReason = (r: unknown): string => String(r ?? '').trim().slice(0, 300);
@@ -30,7 +29,7 @@ export async function platformAuth(req: Request, _res: Response, next: NextFunct
     if (p.sup) throw new HttpError(403, 'Support sessions cannot use the platform console');
     const [[u]]: any = await pool.query('SELECT id, email, is_platform_admin, platform_role, totp_enabled FROM users WHERE id = ?', [Number(p.sub)]);
     if (!u?.is_platform_admin || !u.platform_role) throw new HttpError(404, 'Not found');   // indistinguishable from a route that does not exist
-    if (!u.totp_enabled && process.env.NODE_ENV !== 'test') throw Object.assign(new HttpError(403, 'Turn on two-factor authentication for your account before using the platform console.'), { code: 'platform_2fa_required' });
+    if (!u.totp_enabled && !config.skip2fa) throw Object.assign(new HttpError(403, 'Turn on two-factor authentication for your account before using the platform console.'), { code: 'platform_2fa_required' });
     req.platform = { userId: u.id, email: u.email, role: u.platform_role, caps: ROLE_CAPS[u.platform_role as OperatorRole] };
     next();
   } catch (e) { next(e); }
@@ -44,16 +43,6 @@ export const needs = (cap: Cap) => async (req: Request, _res: Response, next: Ne
     throw Object.assign(new HttpError(403, `Your operator role (${req.platform!.role}) cannot do this.`), { code: 'platform_role_forbidden' });
   } catch (e) { next(e); }
 };
-/** High-risk actions need a TOTP code entered within the last few minutes — a stolen browser session alone is not enough. */
-export const stepUp = async (req: Request, _res: Response, next: NextFunction) => {
-  try {
-    if (process.env.NODE_ENV === 'test') return next();
-    const [[u]]: any = await pool.query('SELECT TIMESTAMPDIFF(SECOND, platform_stepup_at, UTC_TIMESTAMP()) age FROM users WHERE id = ?', [req.platform!.userId]);
-    if (u?.age == null || u.age > STEP_UP_MINUTES * 60) throw Object.assign(new HttpError(403, 'Confirm with your authenticator code to continue.'), { code: 'step_up_required' });
-    next();
-  } catch (e) { next(e); }
-};
-
 /**
  * Verify a TOTP code and refuse replays: a code (time step) can be used once, even inside its 30-second window.
  * Returns false for wrong or already-used codes.
@@ -68,14 +57,47 @@ export async function verifyTotp(userId: number, code: string): Promise<boolean>
   const [r]: any = await pool.query('UPDATE users SET totp_last_step = ? WHERE id = ? AND (totp_last_step IS NULL OR totp_last_step < ?)', [step, userId, step]);   // atomic: concurrent reuse loses
   return r.affectedRows === 1;
 }
-export async function performStepUp(req: Request, code: string) {
-  const [[f]]: any = await pool.query(`SELECT COUNT(*) n FROM platform_audit_log WHERE admin_user_id = ? AND action = 'step_up_failed' AND created_at > DATE_SUB(NOW(), INTERVAL 10 MINUTE)`, [req.platform!.userId]);
-  if (f.n >= 5) throw new HttpError(429, 'Too many wrong codes. Wait 10 minutes.');
-  if (!(await verifyTotp(req.platform!.userId, code))) { await audit(req, 'step_up_failed', null); throw new HttpError(401, 'That code is wrong or was already used. Wait for the next code.'); }
-  await pool.query('UPDATE users SET platform_stepup_at = UTC_TIMESTAMP() WHERE id = ?', [req.platform!.userId]);
-  await audit(req, 'step_up_ok', null); return { valid_for_minutes: STEP_UP_MINUTES };
+/** Append-only by database trigger: kept after an agency is deleted, as evidence of what happened. */
+const RETAINED_ON_DELETE = new Set(['audit_log', 'security_events', 'period_locks', 'booking_changes', 'platform_audit_log']);
+
+/**
+ * Permanently delete an agency and every tenant row that carries its agency_id, in one transaction.
+ * Tenant isolation is enforced in application code (only `memberships` has a real FK), so the table list is read from the schema
+ * rather than hard-coded; a table added later is covered automatically. Users who belonged only to this agency are removed too
+ * (never platform operators). Any failure rolls everything back and is reported, never swallowed.
+ */
+export async function deleteAgency(id: number): Promise<{ name: string; tables: number; rows: number; users: number }> {
+  const [[ag]]: any = await pool.query('SELECT name FROM agencies WHERE id = ?', [id]);
+  if (!ag) throw new HttpError(404, 'Agency not found');
+  const [found]: any = await pool.query(
+    `SELECT DISTINCT c.TABLE_NAME AS t FROM information_schema.COLUMNS c
+     JOIN information_schema.TABLES x ON x.TABLE_SCHEMA = c.TABLE_SCHEMA AND x.TABLE_NAME = c.TABLE_NAME AND x.TABLE_TYPE = 'BASE TABLE'
+     WHERE c.TABLE_SCHEMA = DATABASE() AND c.COLUMN_NAME = 'agency_id'`);
+  const tables: string[] = found.map((r: any) => r.t).filter((t: string) => !RETAINED_ON_DELETE.has(t));
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [members]: any = await conn.query('SELECT DISTINCT user_id FROM memberships WHERE agency_id = ?', [id]);
+    let rows = 0;
+    for (const t of tables) { const [r]: any = await conn.query(`DELETE FROM \`${t}\` WHERE agency_id = ?`, [id]); rows += r.affectedRows; }
+    let users = 0;
+    if (members.length) {
+      const [orphans]: any = await conn.query(
+        `SELECT u.id FROM users u WHERE u.id IN (?) AND u.is_platform_admin = 0 AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id)`, [members.map((m: any) => m.user_id)]);
+      const ids = orphans.map((o: any) => o.id);
+      if (ids.length) {
+        await conn.query('DELETE FROM refresh_tokens WHERE user_id IN (?)', [ids]);
+        await conn.query('DELETE FROM password_resets WHERE user_id IN (?)', [ids]);
+        const [u]: any = await conn.query('DELETE FROM users WHERE id IN (?)', [ids]); users = u.affectedRows;
+      }
+    }
+    await conn.query('DELETE FROM agencies WHERE id = ?', [id]);
+    await conn.commit();
+    return { name: ag.name, tables: tables.length, rows, users };
+  } catch (e) { await conn.rollback(); throw e; }
+  finally { conn.release(); }
 }
-export async function listOperators() { const [r]: any = await pool.query('SELECT email, name, platform_role role, totp_enabled, platform_stepup_at FROM users WHERE is_platform_admin = 1 ORDER BY platform_role, email'); return r; }
+export async function listOperators() { const [r]: any = await pool.query('SELECT email, name, platform_role role, totp_enabled FROM users WHERE is_platform_admin = 1 ORDER BY platform_role, email'); return r; }
 
 export async function audit(req: Request, action: string, agencyId: number | null, detail?: string | null, reason?: string | null) {
   await pool.query('INSERT INTO platform_audit_log (admin_user_id, action, agency_id, detail, reason, ip) VALUES (?,?,?,?,?,?)', [req.platform!.userId, action, agencyId, detail?.slice(0, 600) ?? null, reason ?? null, req.ip ?? null]);

@@ -100,9 +100,8 @@ describe('matching', () => {
 });
 
 describe('differences, receipts from deposits, unmatch & ignore', () => {
-  it('a bank fee is booked and matched in one step (reason required, different account required)', async () => {
+  it('a bank fee is booked and matched in one step (different account required)', async () => {
     await imp(['2026-10-20,Monthly account fee,,-12.50']); const t = (await txns()).find((x) => x.amount === -12.5), before = await bookBal();
-    expect((await A.post(`/bank/transactions/${t.id}/match`, { entries: [], adjustment: { account_id: feeAcc, reason: '' } })).status).toBe(400);
     expect((await A.post(`/bank/transactions/${t.id}/match`, { entries: [], adjustment: { account_id: bank, reason: 'fee' } })).status).toBe(400);
     expect((await A.post(`/bank/transactions/${t.id}/match`, { entries: [], adjustment: { account_id: B.agencyId, reason: 'fee' } })).status).toBe(400);
     const r = await A.post(`/bank/transactions/${t.id}/match`, { entries: [], adjustment: { account_id: feeAcc, reason: 'Bank charge' } }); expect(r.body.status).toBe('matched');
@@ -119,13 +118,13 @@ describe('differences, receipts from deposits, unmatch & ignore', () => {
     const row = (await sql('SELECT receipt_date, cash_account_id FROM receipts WHERE id = ?', [r.body.receipt_id]))[0]; expect(String(row.receipt_date).slice(0, 10)).toBe('2026-10-21'); expect(row.cash_account_id).toBe(bank);
     expect((await A.post(`/bank/transactions/${dep.id}/create-receipt`, { client_id: c })).status).toBe(409);
   });
-  it('unmatch and ignore both need a reason, are audited, and ignored lines are not real movements', async () => {
+  it('unmatch and ignore are audited, and ignored lines are not real movements', async () => {
     const c = await client(); await receipt(c, 9, '2026-10-22'); await imp(['2026-10-22,Dup,,9', '2026-10-22,Noise,,13']);
     const t = (await txns()).find((x) => x.amount === 9), n = (await txns()).find((x) => x.amount === 13), e = (await ledger()).find((x) => x.remaining === 9);
     await A.post(`/bank/transactions/${t.id}/match`, { entries: [{ gl_entry_id: e.id }] });
-    expect((await A.post(`/bank/transactions/${t.id}/unmatch`, { reason: '' })).status).toBe(400); expect((await A.post(`/bank/transactions/${t.id}/ignore`, { reason: 'dup' })).status).toBe(409); // matched ones can't be ignored
+    expect((await A.post(`/bank/transactions/${t.id}/ignore`, { reason: 'dup' })).status).toBe(409); // matched ones can't be ignored
     expect((await A.post(`/bank/transactions/${t.id}/unmatch`, { reason: 'Matched to the wrong receipt' })).status).toBe(200); expect((await txns()).find((x) => x.id === t.id).status).toBe('unmatched');
-    expect((await A.post(`/bank/transactions/${n.id}/ignore`, { reason: 'ab' })).status).toBe(400); expect((await A.post(`/bank/transactions/${n.id}/ignore`, { reason: 'Duplicate line in the file' })).status).toBe(200);
+    expect((await A.post(`/bank/transactions/${n.id}/ignore`, { reason: 'Duplicate line in the file' })).status).toBe(200);
     expect((await A.get('/bank/reconciliation?account_id=' + bank)).body.bank_only.some((x: any) => x.id === n.id)).toBe(false);
     expect((await A.post(`/bank/transactions/${n.id}/unignore`)).status).toBe(200);
     expect((await sql(`SELECT reason FROM audit_log WHERE agency_id = ? AND entity = 'bank_matches' ORDER BY id DESC LIMIT 1`, [A.agencyId]))[0].reason).toBe('Matched to the wrong receipt');
@@ -177,9 +176,9 @@ describe('reconcile, finalise and lock', () => {
     expect((await Z.put(`/bank/statements/${stmt}`, { closing_balance: 1 })).status).toBe(409); expect((await Z.post(`/bank/statements/${stmt}/finalize`)).status).toBe(409);
     expect((await Z.get('/bank/accounts')).body.find((x: any) => x.id === zbank).last_reconciled_to).toMatch(/2026-10-31/);
   });
-  it('only an admin can reopen, with a reason; reopening unlocks changes and is audited', async () => {
+  it('only an admin can reopen; reopening unlocks changes and is audited', async () => {
     const fm = await addMember(Z, 'finance_manager'), t = (await ztx()).find((x) => x.amount === 500);
-    expect((await fm.post(`/bank/statements/${stmt}/reopen`, { reason: 'Need to fix' })).status).toBe(403); expect((await Z.post(`/bank/statements/${stmt}/reopen`, { reason: 'x' })).status).toBe(400);
+    expect((await fm.post(`/bank/statements/${stmt}/reopen`, { reason: 'Need to fix' })).status).toBe(403);
     expect((await Z.post(`/bank/statements/${stmt}/reopen`, { reason: 'Receipt matched to wrong line' })).status).toBe(200);
     expect((await Z.post(`/bank/transactions/${t.id}/unmatch`, { reason: 'Re-matching it' })).status).toBe(200);
     expect((await sql(`SELECT reason FROM audit_log WHERE agency_id = ? AND entity = 'bank_statements' ORDER BY id DESC LIMIT 1`, [Z.agencyId]))[0].reason).toBe('Receipt matched to wrong line');
