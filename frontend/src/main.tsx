@@ -17,7 +17,6 @@ const Reports = lazy(() => import('./pages/Reports'));
 const Recon = lazy(() => import('./pages/Recon'));
 const Airlines = lazy(() => import('./pages/Airlines'));
 const Accounts = lazy(() => import('./pages/Accounts'));
-const Ledger = lazy(() => import('./pages/Ledger'));
 const CashBank = lazy(() => import('./pages/CashBank'));
 const Journal = lazy(() => import('./pages/Journal'));
 const Vouchers = lazy(() => import('./pages/Vouchers'));
@@ -83,7 +82,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Route path="reconciliation" element={<Recon />} />
       <Route path="airlines" element={<Airlines />} />
       <Route path="accounts" element={<Accounts />} />
-      <Route path="ledger" element={<Ledger />} />
+      <Route path="ledger" element={<Navigate to="/accounts?tab=ledger" replace />} />
       <Route path="cash-bank" element={<CashBank />} />
       <Route path="journal" element={<Journal />} />
       <Route path="receipts" element={<Vouchers kind="receipt" />} />

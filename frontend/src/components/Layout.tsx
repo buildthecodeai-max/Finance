@@ -37,8 +37,7 @@ const GROUPS: { title: string; module: string | string[] | null; items: Item[] }
     { to: '/receipts', label: 'Cash Receipts', icon: I(ArrowDownToLine), roles: FINANCE },
     { to: '/payment-vouchers', label: 'Cash Payments', icon: I(ArrowUpFromLine), roles: FINANCE },
     // General Ledger
-    { to: '/accounts', label: 'Chart of Accounts', icon: I(BookOpen), roles: FINANCE },
-    { to: '/ledger', label: 'General Ledger', icon: I(Library), roles: FINANCE },
+    { to: '/accounts', label: 'Accounts & Ledger', icon: I(BookOpen), roles: FINANCE },
     { to: '/journal', label: 'Journal Voucher', icon: I(NotebookPen), roles: FINANCE },
     // Other
     { to: '/suppliers', label: 'Suppliers', icon: I(Building2) },
