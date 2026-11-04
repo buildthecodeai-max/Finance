@@ -104,8 +104,14 @@ export async function deleteAgency(id: number): Promise<{ name: string; tables: 
 }
 export async function listOperators() { const [r]: any = await pool.query('SELECT email, name, platform_role role, totp_enabled FROM users WHERE is_platform_admin = 1 ORDER BY platform_role, email'); return r; }
 
-export async function audit(req: Request, action: string, agencyId: number | null, detail?: string | null, reason?: string | null) {
-  await pool.query('INSERT INTO platform_audit_log (admin_user_id, action, agency_id, detail, reason, ip) VALUES (?,?,?,?,?,?)', [req.platform!.userId, action, agencyId, detail?.slice(0, 600) ?? null, reason ?? null, req.ip ?? null]);
+/** The subscription fields worth showing in an audit before/after diff. */
+const subState = (s: any) => s && ({ status: s.status, plan_id: s.plan_id, billing_interval: s.billing_interval, trial_ends_at: s.trial_ends_at, platform_hold: !!s.platform_hold, is_manual: !!s.is_manual });
+
+/** Append-only record of an operator action: who (id + role), what, which agency, before/after state, and request metadata. The reason is optional. */
+export async function audit(req: Request, action: string, agencyId: number | null, detail?: string | null, reason?: string | null, state?: { before?: unknown; after?: unknown }) {
+  const json = (v: unknown) => (v === undefined || v === null ? null : JSON.stringify(v));
+  await pool.query('INSERT INTO platform_audit_log (admin_user_id, action, agency_id, detail, reason, ip, actor_role, user_agent, before_json, after_json) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [req.platform!.userId, action, agencyId, detail?.slice(0, 600) ?? null, reason || null, req.ip ?? null, req.platform!.role, String(req.headers['user-agent'] ?? '').slice(0, 200) || null, json(state?.before), json(state?.after)]);
 }
 async function agencyOrThrow(id: number) { const [[a]]: any = await pool.query('SELECT id, name, base_currency, created_at FROM agencies WHERE id = ?', [id]); if (!a) throw new HttpError(404, 'Agency not found'); return a; }
 async function admins(agencyId: number) { const [r]: any = await pool.query(`SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.agency_id = ? AND m.role = 'admin'`, [agencyId]); return r.map((x: any) => x.email as string); }
@@ -160,28 +166,31 @@ export async function agencyDetail(id: number) {
 export async function extendTrial(req: Request, id: number, days: number, reasonIn: unknown) {
   const reason = needReason(reasonIn); await agencyOrThrow(id); const s = await getSub(id); if (!s) throw new HttpError(404, 'No subscription');
   if (s.platform_hold) throw new HttpError(409, 'Release the hold first');
+  const before = subState(s);
   const base = s.trial_ends_at && new Date(`${String(s.trial_ends_at).replace(' ', 'T')}Z`) > new Date() ? new Date(`${String(s.trial_ends_at).replace(' ', 'T')}Z`) : new Date(), end = new Date(base.getTime() + days * 86400_000);
   await pool.query(`UPDATE subscriptions SET status = 'trialing', trial_ends_at = ?, grace_until = NULL WHERE agency_id = ? AND (status IN ('trialing','grace','suspended') )`, [sqlTime(end), id]);
   if ((await getSub(id)).status !== 'trialing') throw new HttpError(409, 'Only trialing, grace or suspended workspaces can have their trial extended');
-  await bev(id, 'trial_extended', `+${days} days (${reason})`, req.platform!.userId); await audit(req, 'extend_trial', id, `+${days}d → ${sqlTime(end)}`, reason);
+  await bev(id, 'trial_extended', `+${days} days (${reason})`, req.platform!.userId); await audit(req, 'extend_trial', id, `+${days}d → ${sqlTime(end)}`, reason, { before, after: subState(await getSub(id)) });
   return { trial_ends_at: sqlTime(end) };
 }
 export async function setPlan(req: Request, id: number, planCode: string, interval: 'monthly' | 'yearly', reasonIn: unknown) {
   const reason = needReason(reasonIn); await agencyOrThrow(id);
   const [[p]]: any = await pool.query('SELECT id FROM plans WHERE code = ?', [planCode]); if (!p) throw new HttpError(400, 'Unknown plan');
+  const before = subState(await getSub(id));
   await pool.query('UPDATE subscriptions SET plan_id = ?, billing_interval = ?, pending_plan_id = NULL, pending_interval = NULL WHERE agency_id = ?', [p.id, interval, id]);
-  await bev(id, 'plan_set_by_operator', `${planCode} ${interval} (${reason})`, req.platform!.userId); await audit(req, 'set_plan', id, `${planCode} ${interval}`, reason);
+  await bev(id, 'plan_set_by_operator', `${planCode} ${interval} (${reason})`, req.platform!.userId); await audit(req, 'set_plan', id, `${planCode} ${interval}`, reason, { before, after: subState(await getSub(id)) });
 }
 export async function grant(req: Request, id: number, planCode: string, interval: 'monthly' | 'yearly', until: string, reasonIn: unknown) {
   const reason = needReason(reasonIn); await agencyOrThrow(id); const d = new Date(`${until}T23:59:59Z`);
   if (Number.isNaN(d.getTime()) || d.getTime() < Date.now()) throw new HttpError(400, 'The end date must be in the future');
-  await grantManual(id, planCode, interval, d); await audit(req, 'grant_manual', id, `${planCode} ${interval} until ${until}`, reason);
+  const before = subState(await getSub(id));
+  await grantManual(id, planCode, interval, d); await audit(req, 'grant_manual', id, `${planCode} ${interval} until ${until}`, reason, { before, after: subState(await getSub(id)) });
 }
 export async function suspend(req: Request, id: number, reasonIn: unknown) {
-  const reason = needReason(reasonIn); await agencyOrThrow(id);
+  const reason = needReason(reasonIn); await agencyOrThrow(id); const before = subState(await getSub(id));
   await pool.query(`UPDATE subscriptions SET status = 'suspended', platform_hold = 1, hold_reason = ? WHERE agency_id = ?`, [reason, id]);
   await pool.query(`UPDATE support_sessions SET revoked_at = UTC_TIMESTAMP(), revoked_by = ? WHERE agency_id = ? AND revoked_at IS NULL`, [req.platform!.userId, id]).catch(() => {});
-  await bev(id, 'platform_suspended', reason, req.platform!.userId); await audit(req, 'suspend', id, null, reason);
+  await bev(id, 'platform_suspended', reason, req.platform!.userId); await audit(req, 'suspend', id, null, reason, { before, after: subState(await getSub(id)) });
   await sec(id, req.platform!.userId, req.ip, 'platform_suspended', reason);
 }
 /* ------------------------------------------------------------------ two-person approval */
@@ -234,10 +243,10 @@ export async function cancelSuspend(req: Request, id: number) {
 
 export async function reactivate(req: Request, id: number, reasonIn: unknown) {
   const reason = needReason(reasonIn); await agencyOrThrow(id); const s = await getSub(id); if (!s?.platform_hold) throw new HttpError(409, 'This workspace has no operator hold');
-  const paid = s.stripe_subscription_id || s.is_manual;
+  const paid = s.stripe_subscription_id || s.is_manual; const before = subState(s);
   await pool.query(`UPDATE subscriptions SET platform_hold = 0, hold_reason = NULL, status = ?, grace_until = ?, trial_ends_at = IF(? = 'trialing', ?, trial_ends_at) WHERE agency_id = ?`,
     [paid ? 'active' : 'trialing', null, paid ? 'active' : 'trialing', sqlTime(new Date(Date.now() + 7 * 86400_000)), id]);
-  await bev(id, 'platform_reactivated', reason, req.platform!.userId); await audit(req, 'reactivate', id, paid ? 'active' : 'trialing +7d', reason);
+  await bev(id, 'platform_reactivated', reason, req.platform!.userId); await audit(req, 'reactivate', id, paid ? 'active' : 'trialing +7d', reason, { before, after: subState(await getSub(id)) });
 }
 
 /* ------------------------------------------------------------------ support sessions: read-only, time-boxed, visible to the customer */
@@ -277,10 +286,12 @@ export async function createPlan(req: Request, b: PlanIn) {
 export async function updatePlan(req: Request, id: number, b: PlanIn, reasonIn: unknown) {
   const reason = needReason(reasonIn); checkFeatures(b.features); checkModules(b.allowed_modules);
   const [[cur]]: any = await pool.query('SELECT * FROM plans WHERE id = ?', [id]); if (!cur) throw new HttpError(404, 'Plan not found');
+  const planState = (r: any) => ({ name: r.name, price_monthly: Number(r.price_monthly), price_yearly: Number(r.price_yearly), trial_days: r.trial_days, max_seats: r.max_seats, max_branches: r.max_branches, max_bookings_month: r.max_bookings_month, features: String(r.features ?? ''), allowed_modules: r.allowed_modules ?? null, active: !!r.active });
   await pool.query(`UPDATE plans SET name = ?, description = ?, price_monthly = ?, price_yearly = ?, trial_days = ?, max_seats = ?, max_branches = ?, max_bookings_month = ?, features = ?, allowed_modules = ?, support_level = ?, stripe_price_monthly = ?, stripe_price_yearly = ?, active = ?, sort = ? WHERE id = ?`,
     [b.name, b.description ?? null, b.price_monthly, b.price_yearly, b.trial_days, b.max_seats, b.max_branches, b.max_bookings_month, b.features.join(','), b.allowed_modules ? b.allowed_modules.join(',') : null, b.support_level, b.stripe_price_monthly ?? null, b.stripe_price_yearly ?? null, b.active ? 1 : 0, b.sort, id]);
   const diff = Object.entries({ price_monthly: b.price_monthly, price_yearly: b.price_yearly, max_seats: b.max_seats, max_branches: b.max_branches, max_bookings_month: b.max_bookings_month, features: b.features.join(','), allowed_modules: (b.allowed_modules ?? []).join(','), active: b.active ? 1 : 0 }).filter(([k, v]) => String((cur as any)[k] ?? '') !== String(v)).map(([k, v]) => `${k}: ${(cur as any)[k]} → ${v}`).join('; ');
-  await audit(req, 'plan_update', null, `${cur.code}: ${diff || 'no material change'}`, reason);
+  const [[next]]: any = await pool.query('SELECT * FROM plans WHERE id = ?', [id]);
+  await audit(req, 'plan_update', null, `${cur.code}: ${diff || 'no material change'}`, reason, { before: planState(cur), after: planState(next) });
   const [[n]]: any = await pool.query('SELECT COUNT(*) n FROM subscriptions WHERE plan_id = ?', [id]); return { agencies_affected: n.n };
 }
 

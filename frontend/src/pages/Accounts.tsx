@@ -118,9 +118,9 @@ export default function Accounts() {
 
   return (
     <Page title="Accounts & Ledger">
-      <div className="grid grid-cols-[240px_1fr] gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] gap-4">
         {/* type sidebar */}
-        <div className="card p-0 overflow-hidden h-fit">
+        <div className="card p-0 overflow-hidden h-fit hidden md:block">
           <div className="px-3 py-2 text-xs text-muted uppercase">Account type</div>
           <button
             className={`block w-full text-left px-3 py-1.5 text-sm ${type === null ? 'bg-accent/15 text-accent' : 'hover:bg-surface2'}`}
@@ -137,8 +137,12 @@ export default function Accounts() {
 
         {/* main table */}
         <div>
+          <select className="input md:hidden mb-3" aria-label="Account type" value={type ?? ''} onChange={(e) => setType(e.target.value ? Number(e.target.value) : null)}>
+            <option value="">All accounts</option>
+            {types.map((t: any) => <option key={t.code} value={t.code}>{t.code} — {t.name} ({t.n})</option>)}
+          </select>
           <input className="input max-w-xs mb-3" placeholder="Filter by name or code…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <div className="card p-0 overflow-hidden">
+          <div className="card p-0 overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="border-b border-line">
                 <th className="text-left px-3 py-2 font-medium text-muted text-xs w-6" />

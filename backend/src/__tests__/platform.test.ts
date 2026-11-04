@@ -91,6 +91,16 @@ describe('actions on an agency', () => {
     expect((await P('POST', `/agencies/${X.agencyId}/extend-trial`, { days: 2 })).status).toBe(200);
     expect((await P('DELETE', `/agencies/${X.agencyId}`)).status).toBe(200);
   });
+  it('audit records carry the actor id and role, request metadata and before/after state, with no reason supplied', async () => {
+    const X = await newAgency('AuditCtx'), json = (v: any) => (typeof v === 'string' ? JSON.parse(v) : v);
+    expect((await P('POST', `/agencies/${X.agencyId}/set-plan`, { plan: 'starter' })).status).toBe(200);
+    const row = (await sql("SELECT * FROM platform_audit_log WHERE agency_id = ? AND action = 'set_plan' ORDER BY id DESC LIMIT 1", [X.agencyId]))[0];
+    expect(row).toMatchObject({ admin_user_id: op.id, actor_role: 'admin', reason: null }); expect(row.user_agent).toBeTruthy();
+    expect(json(row.after_json).plan_id).not.toBe(json(row.before_json).plan_id);
+    await X.post('/clients', { name: 'Audited Client', currency: 'USD' });
+    const t = (await sql("SELECT * FROM audit_log WHERE agency_id = ? AND entity = 'clients' ORDER BY id DESC LIMIT 1", [X.agencyId]))[0];
+    expect(t).toMatchObject({ user_id: X.userId, actor_role: 'admin', action: 'create' }); expect(t.after_json).toBeTruthy();
+  });
   it('the operator audit log is append-only', async () => {
     await expect(sql('UPDATE platform_audit_log SET reason = ? WHERE id > 0', ['tamper'])).rejects.toThrow(/append-only/); await expect(sql('DELETE FROM platform_audit_log WHERE id > 0')).rejects.toThrow(/append-only/);
   });

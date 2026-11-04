@@ -10,7 +10,7 @@ export const pool: Pool = mysql.createPool({
   dateStrings: true,
 });
 
-export interface Actor { userId: number | null; ip?: string | null }
+export interface Actor { userId: number | null; ip?: string | null; role?: string | null; ua?: string | null }
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 const ident = (s: string) => {
@@ -160,11 +160,11 @@ export class Tenant {
 
   private async audit(action: string, entity: string, entityId: number, before: any, after: any, reason?: string) {
     await this.conn.query(
-      `INSERT INTO audit_log (agency_id, user_id, ip, action, entity, entity_id, before_json, after_json, reason)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO audit_log (agency_id, user_id, ip, action, entity, entity_id, before_json, after_json, reason, actor_role, user_agent)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [
         this.agencyId, this.actor.userId, this.actor.ip ?? null, action, entity, entityId,
-        before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, reason ?? null,
+        before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, reason || null, this.actor.role ?? null, this.actor.ua ?? null,
       ],
     );
   }

@@ -24,15 +24,18 @@ platformRouter.get('/agencies/:id', async (req, res) => { const id = idParam(req
 platformRouter.put('/agencies/:id', P.needs('billing'), async (req, res) => {
   const id = idParam(req);
   const b = parse(z.object({ name: z.string().min(2).max(120), base_currency: z.string().length(3), tax_label: z.string().min(1).max(10), timezone: z.string().max(50).optional() }), req.body);
+  const [[before]]: any = await pool.query('SELECT name, base_currency, tax_label, timezone FROM agencies WHERE id=?', [id]);
+  if (!before) throw new HttpError(404, 'Agency not found');
   await pool.query('UPDATE agencies SET name=?, base_currency=?, tax_label=?, timezone=COALESCE(?,timezone) WHERE id=?', [b.name, b.base_currency.toUpperCase(), b.tax_label, b.timezone ?? null, id]);
-  await P.audit(req, 'edit_agency', id, `name="${b.name}" currency=${b.base_currency}`);
+  const [[after]]: any = await pool.query('SELECT name, base_currency, tax_label, timezone FROM agencies WHERE id=?', [id]);
+  await P.audit(req, 'edit_agency', id, `name="${b.name}" currency=${b.base_currency}`, null, { before, after });
   res.json({ ok: true });
 });
 platformRouter.delete('/agencies/:id', P.needs('suspend'), async (req, res) => {
   const id = idParam(req);
   const b = parse(Reason, req.body ?? {});
   const r = await P.deleteAgency(id);
-  await P.audit(req, 'delete_agency', id, `deleted "${r.name}": ${r.rows} rows in ${r.tables} tables, ${r.users} users removed`, b.reason);
+  await P.audit(req, 'delete_agency', id, `deleted "${r.name}": ${r.rows} rows in ${r.tables} tables, ${r.users} users removed`, b.reason, { before: { name: r.name }, after: { deleted: true, rows: r.rows, tables: r.tables, users: r.users } });
   res.json({ ok: true });
 });
 platformRouter.post('/agencies/:id/extend-trial', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ days: z.number().int().min(1).max(60) }), req.body); res.json(await P.extendTrial(req, idParam(req), b.days, b.reason)); });
@@ -73,5 +76,5 @@ platformRouter.get('/plans', async (_req, res) => res.json(await P.listPlans()))
 platformRouter.post('/plans', P.needs('billing'), async (req, res) => res.status(201).json({ id: await P.createPlan(req, parse(Plan, req.body) as P.PlanIn) }));
 platformRouter.put('/plans/:id', P.needs('billing'), async (req, res) => { const b = parse(Plan.extend({ reason: z.string().optional().default('') }), req.body); const { reason, ...plan } = b; res.json(await P.updatePlan(req, idParam(req), plan as P.PlanIn, reason)); });
 
-platformRouter.get('/audit', async (_req, res) => res.json((await pool.query(`SELECT a.id, a.action, a.agency_id, ag.name agency_name, a.detail, a.reason, a.ip, a.created_at, u.email admin_email FROM platform_audit_log a JOIN users u ON u.id = a.admin_user_id LEFT JOIN agencies ag ON ag.id = a.agency_id ORDER BY a.id DESC LIMIT 300`))[0]));
+platformRouter.get('/audit', async (_req, res) => res.json((await pool.query(`SELECT a.id, a.action, a.agency_id, ag.name agency_name, a.detail, a.reason, a.ip, a.created_at, a.actor_role, a.before_json, a.after_json, u.email admin_email FROM platform_audit_log a JOIN users u ON u.id = a.admin_user_id LEFT JOIN agencies ag ON ag.id = a.agency_id ORDER BY a.id DESC LIMIT 300`))[0]));
 platformRouter.get('/security-events', async (_req, res) => res.json((await pool.query(`SELECT e.id, e.agency_id, ag.name agency_name, e.event, e.detail, e.ip, e.created_at FROM security_events e LEFT JOIN agencies ag ON ag.id = e.agency_id ORDER BY e.id DESC LIMIT 300`))[0]));

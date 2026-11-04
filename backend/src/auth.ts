@@ -18,6 +18,7 @@ declare global {
 export const signAccess = (userId: number) => jwt.sign({ sub: userId }, config.jwtSecret, { algorithm: 'HS256', expiresIn: '15m' });
 
 export { HttpError };
+const userAgent = (req: Request) => String(req.headers['user-agent'] ?? '').slice(0, 200) || null;
 
 /** Verifies the JWT, then resolves the user's role *for the requested agency* (X-Agency-Id). */
 export async function authenticate(req: Request, _res: Response, next: NextFunction) {
@@ -37,7 +38,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     const [ss]: any = await pool.query('SELECT id FROM support_sessions WHERE id = ? AND admin_user_id = ? AND agency_id = ? AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()', [sup, userId, agencyId]);
     if (!ss.length) throw new HttpError(401, 'Support session ended');
     req.ctx = { userId, agencyId, role: 'viewer', branchId: null, support: true };
-    req.tenant = new Tenant(agencyId, { userId, ip: req.ip });
+    req.tenant = new Tenant(agencyId, { userId, ip: req.ip, role: 'support', ua: userAgent(req) });
     return next();
   }
   const [rows]: any = await pool.query(
@@ -47,7 +48,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     throw new HttpError(403, 'No access to this agency');
   }
   req.ctx = { userId, agencyId, role: rows[0].role, branchId: rows[0].branch_id ?? null };
-  req.tenant = new Tenant(agencyId, { userId, ip: req.ip });
+  req.tenant = new Tenant(agencyId, { userId, ip: req.ip, role: rows[0].role, ua: userAgent(req) });
   next();
 }
 
