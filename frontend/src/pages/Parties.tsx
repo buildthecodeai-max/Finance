@@ -88,10 +88,40 @@ function makeParty(kind: Kind, title: string) {
         actions={<><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted" /><input className="input pl-8 w-52" placeholder="Search" aria-label={`Search ${title}`} value={q} onChange={(e) => setQ(e.target.value)} /></div>
           <div className="inline-flex rounded-lg border border-line p-0.5 text-sm" role="group" aria-label="Show">{(['active', 'archived'] as const).map((s) => <button key={s} className={`px-3 py-1 rounded-md capitalize ${show === s ? 'bg-accent text-accent-ink' : 'text-muted'}`} onClick={() => setShow(s)}>{s}</button>)}</div>
           {canEdit && <button className="btn" onClick={() => setForm(blank(kind))}><Plus size={15} /> Add {kind === 'clients' ? 'client' : 'supplier'}</button>}</>}>
-        <Table rows={shown} onRow={(r) => setOpen(r.id)} empty={show === 'archived' ? 'Nothing archived' : `No ${title.toLowerCase()} yet`} cols={[
-          { h: 'Name', render: (r) => <span className="font-medium">{r.name}</span> }, { h: 'Email', render: (r) => r.email ?? '' }, { h: 'Currency', render: (r) => r.currency },
-          kind === 'clients' ? { h: 'Outstanding', right: true, render: (r) => money(r.outstanding, r.currency) } : { h: 'Type', render: (r) => <span className="capitalize">{String(r.supplier_type).replace('_', ' ')}</span> },
-          ...(kind === 'suppliers' ? [{ h: 'Bank details', render: (r: any) => (r.has_bank_details ? 'Encrypted' : <span className="text-muted">—</span>) }] : [])]} />
+        <Table rows={shown} empty={show === 'archived' ? 'Nothing archived' : `No ${title.toLowerCase()} yet`} cols={[
+          { h: 'Name', render: (r) => <button className="font-medium text-accent hover:underline text-left" onClick={() => setOpen(r.id)}>{r.name}</button> },
+          { h: 'Email', render: (r) => r.email ?? '' },
+          { h: 'Currency', render: (r) => r.currency },
+          kind === 'clients'
+            ? { h: 'Outstanding', right: true, render: (r) => money(r.outstanding, r.currency) }
+            : { h: 'Type', render: (r) => <span className="capitalize">{String(r.supplier_type).replace('_', ' ')}</span> },
+          ...(kind === 'suppliers' ? [{ h: 'Bank details', render: (r: any) => (r.has_bank_details ? 'Encrypted' : <span className="text-muted">—</span>) }] : []),
+          {
+            h: '',
+            render: (r) => (
+              <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
+                {canEdit && (
+                  <button className="btn-ghost py-0.5 px-2 text-xs flex items-center gap-1"
+                    onClick={() => setForm({ ...blank(kind), ...r, email: r.email ?? '', commission_override_pct: r.commission_override_pct ?? '' })}>
+                    <Pencil size={12} /> Edit
+                  </button>
+                )}
+                <button className="btn-ghost py-0.5 px-2 text-xs text-muted flex items-center gap-1" onClick={() => setOpen(r.id)}>
+                  View
+                </button>
+                {manage && (
+                  r.archived_at
+                    ? <button className="btn-ghost py-0.5 px-2 text-xs flex items-center gap-1" onClick={() => api(`/${kind}/${r.id}/restore`, 'POST').then(load)}>
+                        <ArchiveRestore size={12} /> Restore
+                      </button>
+                    : <button className="btn-ghost py-0.5 px-2 text-xs text-danger flex items-center gap-1" onClick={() => setOpen(r.id)}>
+                        <Trash2 size={12} /> Delete
+                      </button>
+                )}
+              </div>
+            ),
+          },
+        ]} />
         {open && <Detail kind={kind} id={open} canManage={manage} canEdit={canEdit} onClose={() => setOpen(null)} onChanged={load} />}
         {form && <PartyForm kind={kind} initial={form} onClose={() => setForm(null)} onSaved={(id) => { setForm(null); load(); if (id) setOpen(id); }} />}
       </Page>
