@@ -53,3 +53,9 @@
   .kbd { @apply inline-flex items-center px-1.5 h-5 rounded border border-line bg-surface2 text-[10px] font-medium text-muted; }
   .hairline { @apply border-line; }
 }
+
+/* Platform console: animation keyframes */
+@keyframes kpi-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes live-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgb(var(--success) / 0.5); } 70% { box-shadow: 0 0 0 7px rgb(var(--success) / 0); } }
+.kpi-enter { animation: kpi-fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 9999px; background: rgb(var(--success)); animation: live-pulse 2.5s ease-in-out infinite; flex-shrink: 0; }

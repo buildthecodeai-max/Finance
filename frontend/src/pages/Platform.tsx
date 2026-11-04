@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Building2, Clock, DollarSign, Plane, Search, ShieldAlert, Users } from 'lucide-react';
+import { AlertTriangle, Building2, CheckSquare, Clock, DollarSign, Layers, LayoutDashboard, Plane, Search, Settings, ShieldAlert, Users } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Pill, Table } from '../components/ui';
@@ -53,7 +53,11 @@ export default function Platform() {
           <span className="text-xs text-muted hidden sm:inline">· {user.email}</span>
           {me && <span className="pill bg-surface2 text-muted capitalize">{me.role}</span>}
         </div>
-        <div className="flex items-center gap-2"><button className="btn-ghost" onClick={() => nav('/')}>Workspace</button><ThemeMenuButton /><button className="btn-ghost" onClick={async () => { await logout(); nav('/login'); }}>Sign out</button></div>
+        <div className="flex items-center gap-3">
+          {me && !need2fa && <div className="hidden lg:flex items-center gap-2 bg-surface2 border border-line rounded-lg px-3 h-8 text-xs text-muted cursor-default"><Search size={12} className="shrink-0" /><span>Search agencies…</span><kbd className="kbd ml-1">⌘K</kbd></div>}
+          <div className="flex items-center gap-1.5 text-[11px] text-muted"><div className="live-dot" /><span className="hidden sm:inline">Live</span></div>
+          <button className="btn-ghost" onClick={() => nav('/')}>Workspace</button><ThemeMenuButton /><button className="btn-ghost" onClick={async () => { await logout(); nav('/login'); }}>Sign out</button>
+        </div>
       </header>
 
       <div className="flex flex-1 min-h-0">
@@ -80,12 +84,12 @@ export default function Platform() {
 
         {/* Content */}
         <main className="flex-1 min-w-0 overflow-auto">
-          <div className="max-w-[1200px] mx-auto px-4 md:px-6 py-6">
+          <div className="max-w-[1200px] mx-auto px-4 md:px-6 pt-6 pb-20 md:pb-6">
             {need2fa ? <TwoFactorGate onDone={() => { setNeed2fa(false); api('/platform/me').then(setMe); }} />
               : !me ? <div className="skeleton h-40" />
               : <OpCtx.Provider value={{ me, guarded }}>
                 {/* Mobile tab strip */}
-                <div className="flex flex-wrap gap-2 mb-5 md:hidden" role="tablist">
+                <div className="hidden md:flex flex-wrap gap-2 mb-5" role="tablist">
                   {allTabs.map(([k, l]) => (
                     <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'btn' : 'btn-ghost'} onClick={() => setTab(k)}>
                       {l}{k === 'approvals' && pending > 0 && <span className="ml-1 min-w-[1rem] h-4 px-0.5 text-[9px] font-bold rounded-full bg-danger text-white inline-flex items-center justify-center">{pending}</span>}
@@ -97,6 +101,32 @@ export default function Platform() {
           </div>
         </main>
       </div>
+
+      {/* Mobile bottom nav */}
+      {me && !need2fa && (
+        <nav className="fixed bottom-0 inset-x-0 h-16 bg-surface/90 backdrop-blur border-t border-line flex md:hidden z-40">
+          {([
+            ['dashboard', 'Home', LayoutDashboard],
+            ['agencies', 'Agencies', Building2],
+            ['approvals', 'Approvals', CheckSquare],
+            ['plans', 'Plans', Layers],
+            ['system', 'System', Settings],
+          ] as [Tab, string, any][]).map(([k, l, Icon]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors ${
+                tab === k ? 'text-accent' : 'text-muted'
+              }`}>
+              <div className="relative">
+                <Icon size={18} />
+                {k === 'approvals' && pending > 0 && (
+                  <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 bg-danger rounded-full text-white text-[8px] flex items-center justify-center font-bold">{pending > 9 ? '9+' : pending}</span>
+                )}
+              </div>
+              <span>{l}</span>
+            </button>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }
@@ -235,6 +265,84 @@ function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: 
   </Modal>;
 }
 
+/* ------------------------------------------------------------------ Dashboard KPI helpers ------------------------------------------------------------------ */
+
+function useCountUp(target: number | undefined, duration = 750) {
+  const [val, setVal] = useState(0);
+  useEffect(() => {
+    if (target == null) return;
+    if (target === 0) { setVal(0); return; }
+    let rafId: number;
+    let startTs: number | null = null;
+    const run = (ts: number) => {
+      if (!startTs) startTs = ts;
+      const p = Math.min((ts - startTs) / duration, 1);
+      setVal(Math.round((1 - Math.pow(1 - p, 3)) * target));
+      if (p < 1) rafId = requestAnimationFrame(run);
+    };
+    rafId = requestAnimationFrame(run);
+    return () => cancelAnimationFrame(rafId);
+  }, [target]);
+  return val;
+}
+
+function KpiCard({ label, icon: Icon, rawValue, formattedValue, sub, alert = false, glow, trend, trendDir = 'flat', sparkline = false, index }: {
+  label: string; icon: any; rawValue?: number; formattedValue?: string; sub?: string;
+  alert?: boolean; glow?: 'accent' | 'success';
+  trend?: string; trendDir?: 'up' | 'down' | 'flat';
+  sparkline?: boolean; index: number;
+}) {
+  const counted = useCountUp(rawValue);
+  const isLoading = rawValue == null && formattedValue == null;
+  const display = formattedValue ?? (rawValue != null ? counted.toLocaleString() : null);
+
+  return (
+    <div
+      className={`card relative overflow-hidden transition-all hover:-translate-y-0.5 kpi-enter ${
+        alert ? 'border-l-4 !border-l-warn border-warn/30 bg-warn/5' : ''
+      }`}
+      style={{ animationDelay: `${index * 55}ms` }}
+    >
+      {glow && (
+        <div className={`absolute -top-10 -right-4 w-32 h-32 rounded-full pointer-events-none opacity-70 ${
+          glow === 'accent' ? 'bg-accent/15' : 'bg-success/15'
+        }`} style={{ filter: 'blur(20px)' }} />
+      )}
+      <div className={`flex items-center gap-1.5 text-xs font-medium mb-1.5 relative z-10 ${alert ? 'text-warn' : 'text-muted'}`}>
+        <Icon size={12} />{label}
+      </div>
+      <div className={`text-3xl font-bold num tracking-tight relative z-10 ${
+        alert ? 'text-warn' : glow === 'accent' ? 'text-accent' : glow === 'success' ? 'text-success' : ''
+      }`}>
+        {isLoading ? <span className="block h-8 w-20 skeleton rounded" /> : display}
+      </div>
+      {trend != null ? (
+        <div className={`flex items-center gap-1 text-[11px] font-medium mt-1 relative z-10 ${
+          trendDir === 'up' ? 'text-success' : trendDir === 'down' ? 'text-danger' : 'text-muted'
+        }`}>
+          <span>{trendDir === 'up' ? '↑' : trendDir === 'down' ? '↓' : '→'}</span>
+          <span>{trend}</span>
+        </div>
+      ) : (
+        <div className="text-[11px] text-muted mt-0.5 relative z-10">{sub}</div>
+      )}
+      {sparkline && !isLoading && (
+        <svg className="mt-2 w-full relative z-10" viewBox="0 0 120 28" fill="none" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id={`spk${index}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgb(var(--accent))" stopOpacity="0.2" />
+              <stop offset="100%" stopColor="rgb(var(--accent))" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d="M0 24 C30 24 50 20 70 17 C90 14 105 12 120 11" stroke="rgb(var(--accent))" strokeWidth="1.5" opacity="0.5" />
+          <path d="M0 24 C30 24 50 20 70 17 C90 14 105 12 120 11 L120 28 L0 28 Z" fill={`url(#spk${index})`} />
+          <circle cx="120" cy="11" r="2.5" fill="rgb(var(--accent))" />
+        </svg>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ Dashboard ------------------------------------------------------------------ */
 function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
   const { me } = useOp();
@@ -246,6 +354,7 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
   const [notice, setNotice] = useState(''); const [newAgency, setNewAgency] = useState(false);
   const [plans, setPlans] = useState<any[]>([]); const [err, setErr] = useState('');
   const [openMenu, setOpenMenu] = useState<number | null>(null);
+  const [barsVisible, setBarsVisible] = useState(false);
 
   const loadAgencies = (qs = q, st = status) =>
     api(`/platform/agencies?${qs ? `q=${encodeURIComponent(qs)}&` : ''}${st ? `status=${st}&` : ''}`).then(setRes).catch((e: any) => setErr(e.message));
@@ -257,15 +366,21 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
     if (me.caps.includes('billing')) api('/platform/plans').then(setPlans).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!o) return;
+    const t = setTimeout(() => setBarsVisible(true), 200);
+    return () => clearTimeout(t);
+  }, [o]);
+
   const open = async (id: number) => { try { setDetail(await api(`/platform/agencies/${id}`)); } catch (e: any) { setErr(e.message); } };
 
   const kpis = [
-    { icon: Building2, label: 'Total agencies', value: o?.agencies, sub: o ? `${o.new_30d} new this month` : '…' },
-    { icon: DollarSign, label: 'MRR', value: o ? money(o.mrr) : '…', sub: o ? `${money(o.arr)} ARR` : '…' },
-    { icon: DollarSign, label: 'Invoiced MRR', value: o ? money(o.manual_mrr) : '…', sub: 'manual billing' },
-    { icon: Clock, label: 'Trials expiring', value: o?.trials_ending_7d ?? '…', sub: 'within 7 days', alert: !!(o?.trials_ending_7d) },
-    { icon: Users, label: 'Support sessions', value: o?.active_support_sessions ?? '…', sub: 'live now' },
-    { icon: ShieldAlert, label: 'Operator holds', value: o?.platform_holds ?? '…', sub: o?.pending_approvals ? `${o.pending_approvals} pending approval` : 'no holds', alert: !!(o?.platform_holds || o?.pending_approvals) },
+    { icon: Building2, label: 'Total agencies', rawValue: o?.agencies, sub: '', glow: 'accent' as const, trend: o ? `${o.new_30d} new this month` : undefined, trendDir: 'up' as const },
+    { icon: DollarSign, label: 'MRR', formattedValue: o ? money(o.mrr) : undefined, sub: '', sparkline: true, trend: o ? `${money(o.arr)} ARR` : undefined, trendDir: 'flat' as const },
+    { icon: DollarSign, label: 'Invoiced MRR', formattedValue: o ? money(o.manual_mrr) : undefined, sub: '', trend: o ? 'manual billing' : undefined, trendDir: 'flat' as const },
+    { icon: Clock, label: 'Trials expiring', rawValue: o?.trials_ending_7d, sub: 'within 7 days', alert: !!(o?.trials_ending_7d), trend: o ? 'within 7 days' : undefined, trendDir: o?.trials_ending_7d ? 'down' as const : 'flat' as const },
+    { icon: Users, label: 'Support sessions', rawValue: o?.active_support_sessions, sub: '', trend: o ? 'live now' : undefined, trendDir: 'flat' as const },
+    { icon: ShieldAlert, label: 'Operator holds', rawValue: o?.platform_holds, sub: '', alert: !!(o?.platform_holds || o?.pending_approvals), trend: o ? (o.pending_approvals ? `${o.pending_approvals} pending approval` : 'no holds') : undefined, trendDir: o?.platform_holds ? 'down' as const : 'flat' as const },
   ];
 
   const alerts: string[] = o ? [
@@ -279,14 +394,8 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
   return (
     <div className="space-y-5">
       {/* KPI strip */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {kpis.map((k) => (
-          <div key={k.label} className={`card ${k.alert ? 'border-warn/40 bg-warn/5 border-l-4 !border-l-warn' : ''}`}>
-            <div className="flex items-center gap-1.5 text-xs text-muted mb-1"><k.icon size={13} className={k.alert ? 'text-warn' : ''} />{k.label}</div>
-            <div className={`text-2xl font-semibold num ${k.alert ? 'text-warn' : ''}`}>{k.value ?? <span className="block h-7 w-16 skeleton rounded" />}</div>
-            <div className="text-[11px] text-muted mt-0.5">{k.sub}</div>
-          </div>
-        ))}
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {kpis.map((k, i) => <KpiCard key={k.label} index={i} {...k} />)}
       </div>
 
       {/* Alert banner */}
@@ -358,7 +467,7 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
             <div key={p.code} className="flex items-center gap-2.5 py-1.5">
               <span className="text-sm flex-1 truncate">{p.name}</span>
               <div className="w-28 h-1.5 bg-surface2 rounded-full overflow-hidden shrink-0">
-                <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${Math.min(100, Math.round((p.n / Math.max(1, o.agencies)) * 100))}%` }} />
+                <div className="h-full bg-accent rounded-full transition-all duration-700" style={{ width: barsVisible ? `${Math.min(100, Math.round((p.n / Math.max(1, o.agencies)) * 100))}%` : '0%' }} />
               </div>
               <span className="num text-sm w-5 text-right shrink-0 text-muted">{p.n}</span>
             </div>
