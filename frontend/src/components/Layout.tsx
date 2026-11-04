@@ -15,18 +15,38 @@ interface Item { to: string; label: string; icon: ReactNode; roles?: Role[] }
 const I = (C: any) => <C size={17} strokeWidth={1.8} />;
 const FINANCE: Role[] = ['admin', 'finance_manager', 'viewer'];
 
-// module: which package module gates this group. null = always visible (Overview, Administration).
-const GROUPS: { title: string; module: string | null; items: Item[] }[] = [
+// module: which package module(s) gate this group. null = always visible. Array = visible if ANY match.
+const GROUPS: { title: string; module: string | string[] | null; items: Item[] }[] = [
   { title: 'Overview', module: null, items: [{ to: '/', label: 'Dashboard', icon: I(LayoutDashboard) }, { to: '/operations', label: 'Operations', icon: I(CalendarClock) }] },
   { title: 'Sales', module: 'crm', items: [{ to: '/leads', label: 'Leads', icon: I(Target) }, { to: '/quotes', label: 'Quotes', icon: I(FileSignature) }, { to: '/bookings', label: 'Bookings', icon: I(Briefcase) }, { to: '/clients', label: 'Clients', icon: I(Users) }] },
   { title: 'Ticketing', module: 'ticketing', items: [{ to: '/ticket-invoices', label: 'Ticket Invoices', icon: I(Ticket) }, { to: '/refunds', label: 'Refunds', icon: I(Undo2) }, { to: '/ticket-search', label: 'Ticket Search', icon: I(Search) }, { to: '/airlines', label: 'Airlines', icon: I(Plane) }, { to: '/sale-reports', label: 'Sale Reports', icon: I(TrendingUp), roles: FINANCE }] },
-  { title: 'Finance', module: 'finance', items: [{ to: '/finance', label: 'Overview', icon: I(LineChart), roles: FINANCE }, { to: '/invoices', label: 'Invoices', icon: I(FileText) }, { to: '/client-receipts', label: 'Client Receipts', icon: I(HandCoins), roles: FINANCE }, { to: '/credit-notes', label: 'Credit Notes & Refunds', icon: I(FileMinus), roles: FINANCE },
-    { to: '/payments', label: 'Payments', icon: I(CreditCard) }, { to: '/statements', label: 'Statements', icon: I(ScrollText), roles: FINANCE }, { to: '/client-portal', label: 'Client Portal', icon: I(Users), roles: FINANCE },
-    { to: '/supplier-bills', label: 'Supplier Bills', icon: I(Truck), roles: FINANCE }, { to: '/payment-runs', label: 'Payment Runs', icon: I(Banknote), roles: FINANCE }, { to: '/suppliers', label: 'Suppliers', icon: I(Building2) }, { to: '/commissions', label: 'Commissions', icon: I(Percent) },
-    { to: '/reconciliation', label: 'Bank Reconciliation', icon: I(ArrowLeftRight), roles: FINANCE }, { to: '/exchange-rates', label: 'Exchange Rates', icon: I(Coins), roles: FINANCE }] },
-  { title: 'Accounting', module: 'accounting', items: [{ to: '/accounts', label: 'Accounts', icon: I(BookOpen), roles: FINANCE }, { to: '/ledger', label: 'Ledger', icon: I(Library), roles: FINANCE }, { to: '/receipts', label: 'Cash Receipts', icon: I(ArrowDownToLine), roles: FINANCE },
-    { to: '/payment-vouchers', label: 'Cash Payments', icon: I(ArrowUpFromLine), roles: FINANCE }, { to: '/journal', label: 'Journal Voucher', icon: I(NotebookPen), roles: FINANCE },
-    { to: '/cash-bank', label: 'Cash / Bank', icon: I(Wallet), roles: FINANCE }, { to: '/cheque-format', label: 'Cheque Format', icon: I(Banknote), roles: FINANCE }] },
+  { title: 'Finance & Accounting', module: ['finance', 'accounting'], items: [
+    // Overview & client-side
+    { to: '/finance', label: 'Overview', icon: I(LineChart), roles: FINANCE },
+    { to: '/invoices', label: 'Invoices', icon: I(FileText) },
+    { to: '/client-receipts', label: 'Client Receipts', icon: I(HandCoins), roles: FINANCE },
+    { to: '/credit-notes', label: 'Credit Notes & Refunds', icon: I(FileMinus), roles: FINANCE },
+    { to: '/payments', label: 'Payments', icon: I(CreditCard) },
+    { to: '/statements', label: 'Statements', icon: I(ScrollText), roles: FINANCE },
+    // Supplier-side
+    { to: '/supplier-bills', label: 'Supplier Bills', icon: I(Truck), roles: FINANCE },
+    { to: '/payment-runs', label: 'Payment Runs', icon: I(Banknote), roles: FINANCE },
+    // Cash & Bank
+    { to: '/cash-bank', label: 'Cash / Bank', icon: I(Wallet), roles: FINANCE },
+    { to: '/reconciliation', label: 'Bank Reconciliation', icon: I(ArrowLeftRight), roles: FINANCE },
+    { to: '/receipts', label: 'Cash Receipts', icon: I(ArrowDownToLine), roles: FINANCE },
+    { to: '/payment-vouchers', label: 'Cash Payments', icon: I(ArrowUpFromLine), roles: FINANCE },
+    // General Ledger
+    { to: '/accounts', label: 'Chart of Accounts', icon: I(BookOpen), roles: FINANCE },
+    { to: '/ledger', label: 'General Ledger', icon: I(Library), roles: FINANCE },
+    { to: '/journal', label: 'Journal Voucher', icon: I(NotebookPen), roles: FINANCE },
+    // Other
+    { to: '/suppliers', label: 'Suppliers', icon: I(Building2) },
+    { to: '/commissions', label: 'Commissions', icon: I(Percent) },
+    { to: '/exchange-rates', label: 'Exchange Rates', icon: I(Coins), roles: FINANCE },
+    { to: '/client-portal', label: 'Client Portal', icon: I(Users), roles: FINANCE },
+    { to: '/cheque-format', label: 'Cheque Format', icon: I(Banknote), roles: FINANCE },
+  ]},
   { title: 'Insights & Automation', module: 'insights', items: [{ to: '/reports', label: 'Reports', icon: I(BarChart3) }, { to: '/automation', label: 'Automation', icon: I(CalendarClock), roles: FINANCE }, { to: '/integrations', label: 'Integrations', icon: I(ArrowLeftRight), roles: FINANCE }] },
   { title: 'Administration', module: null, items: [{ to: '/settings', label: 'Settings', icon: I(Settings) }, { to: '/team', label: 'Team & Branches', icon: I(Users), roles: ['admin', 'finance_manager'] }, { to: '/billing', label: 'Billing', icon: I(CreditCard), roles: ['admin'] }, { to: '/audit', label: 'Audit Log', icon: I(ScrollText), roles: ['admin', 'finance_manager'] }] },
 ];
@@ -115,8 +135,9 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
         </div>)}
       <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-4" aria-label="Main">
         {GROUPS.map((g) => {
-          // null module = always visible; otherwise check against allowed_modules (null list = all allowed)
-          if (g.module !== null && allowedModules != null && !allowedModules.includes(g.module)) return null;
+          // null module = always visible; string[] = visible if ANY match; otherwise check single module
+          const mods = Array.isArray(g.module) ? g.module : g.module ? [g.module] : null;
+          if (mods !== null && allowedModules != null && !mods.some((m) => allowedModules.includes(m))) return null;
           const items = g.items.filter((i) => !i.roles || i.roles.includes(role));
           if (!items.length) return null;
           return (
