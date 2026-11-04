@@ -67,7 +67,7 @@ export async function postVoucher(t: Tenant, v: {
   await t.assertPeriodOpen(v.date);
   const id = await t.insert('vouchers', {
     voucher_type: v.type, voucher_no: await nextVoucherNo(t, v.type), voucher_date: v.date,
-    narration: v.narration ?? null, ref_table: v.ref_table ?? null, ref_id: v.ref_id ?? null,
+    narration: v.narration ?? null, ref_table: v.ref_table ?? null, ref_id: v.ref_id ?? null, created_by: t.actor.userId ?? null,
   });
   for (const l of legs) {
     // locking read: sees accounts created by a transaction we just waited for (a plain read would use our older snapshot)

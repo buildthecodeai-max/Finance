@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
-import { HttpError } from '../auth.js';
+import { HttpError, requireRole } from '../auth.js';
 import { fileKey, putFile, signedUrl } from '../storage.js';
 import { htmlToPdf, tableHtml } from '../services/pdf.js';
 import { T } from './util.js';
@@ -10,12 +10,28 @@ import { BALANCE_SQL } from '../services/accounting.js';
 export const reportsRouter = Router();
 
 export interface Reconcile { label: string; report: number; source: number; difference: number; ok: boolean }
-export interface Report { title: string; columns: string[]; rows: any[][]; reconcile?: Reconcile[]; note?: string }
+/** links[i] is an in-app route for rows[i] (drill-down); kinds[i] is 'section' | 'total' | 'muted' for styling. */
+export interface Report { title: string; columns: string[]; rows: any[][]; reconcile?: Reconcile[]; note?: string; links?: (string | null)[]; kinds?: string[] }
 const rec = (label: string, report: number, source: number): Reconcile => { const difference = Math.round((report - source) * 100) / 100; return { label, report: Math.round(report * 100) / 100, source: Math.round(source * 100) / 100, difference, ok: Math.abs(difference) <= 0.05 }; };
 const isCurrent = (to: string) => to >= new Date().toISOString().slice(0, 10);
 const ASOF = 'Aging uses current balances, so it is reconciled to the ledger only when the report date is today or later.';
-export type Gen = (t: Tenant, from: string, to: string) => Promise<Report>;
+export type Gen = (t: Tenant, from: string, to: string, opts?: Record<string, string>) => Promise<Report>;
+/** Reports that need an extra parameter and so cannot be scheduled. */
+export const PARAM_REPORTS = new Set(['general-ledger']);
+/** Ledger-derived statements: finance roles only (the older operational reports keep their existing access). */
+const LEDGER_REPORTS = new Set(['trial-balance', 'balance-sheet', 'general-ledger', 'day-book', 'cash-book', 'payment-register', 'gl-pnl']);
 const n2 = (v: any) => Number(v ?? 0).toFixed(2);
+
+
+const BAL_AT = `(a.opening_dr - a.opening_cr + COALESCE((SELECT SUM(g.debit - g.credit) FROM gl_entries g WHERE g.agency_id = a.agency_id AND g.account_id = a.id AND g.entry_date <= ?),0))`;
+const sum = (xs: number[]) => Math.round(xs.reduce((s, x) => s + x, 0) * 100) / 100;
+const VOUCHER_PAGE: Record<string, string> = { invoices: '/invoices', receipts: '/client-receipts', supplier_bills: '/supplier-bills', credit_notes: '/credit-notes', ticket_invoices: '/ticket-invoices',
+  payment_runs: '/payment-runs', commission_periods: '/commissions', client_refunds: '/credit-notes', refunds: '/refunds', bank_transactions: '/reconciliation' };
+/** Where the document behind a ledger voucher lives in the app. */
+const voucherLink = (v: any): string | null =>
+  v.ref_table === 'cash_vouchers' ? (v.voucher_type === 'receipt' ? '/receipts' : '/payment-vouchers')
+    : v.voucher_type === 'journal' && !v.ref_table ? `/journal?view=${v.vid}` : VOUCHER_PAGE[v.ref_table] ?? null;
+const LIMIT = 3000;
 
 // All amounts are converted to agency base currency using the invoice/payment fx_rate.
 export const GENERATORS: Record<string, Gen> = {
@@ -30,7 +46,7 @@ export const GENERATORS: Record<string, Gen> = {
       ...exp.map((e: any) => [`Expense: ${e.category}`, n2(e.amt)]), ['Total expenses', n2(expTotal)], ['Net profit', n2(gross - expTotal)]] };
   },
   'cash-flow': async (t, from, to) => {
-    const rows = await t.query(`SELECT DATE_FORMAT(paid_at,'%Y-%m') m, SUM(CASE WHEN direction='inbound' THEN amount*fx_rate ELSE 0 END) inflow, SUM(CASE WHEN direction='outbound' THEN amount*fx_rate ELSE 0 END) outflow FROM payments WHERE agency_id = ? AND paid_at BETWEEN ? AND ? GROUP BY m ORDER BY m`, [t.agencyId, from, to]);
+    const rows = await t.query(`SELECT DATE_FORMAT(paid_at,'%Y-%m') m, SUM(CASE WHEN direction='inbound' THEN amount*fx_rate ELSE 0 END) inflow, SUM(CASE WHEN direction='outbound' THEN amount*fx_rate ELSE 0 END) outflow FROM payments WHERE agency_id = ? AND voided = 0 AND paid_at BETWEEN ? AND ? GROUP BY m ORDER BY m`, [t.agencyId, from, to]);
     let run = 0;
     return { title: `Cash Flow ${from} → ${to}`, columns: ['Month', 'Inflow', 'Outflow', 'Net', 'Cumulative'],
       rows: rows.map((r: any) => { run += r.inflow - r.outflow; return [r.m, n2(r.inflow), n2(r.outflow), n2(r.inflow - r.outflow), n2(run)]; }) };
@@ -59,7 +75,7 @@ export const GENERATORS: Record<string, Gen> = {
     return { title: `Booking Revenue by Destination ${from} → ${to}`, columns: ['Destination', 'Bookings', 'Revenue'], rows: rows.map((r: any) => [r.d, r.n, n2(r.rev)]) };
   },
   'supplier-payments': async (t, from, to) => {
-    const rows = await t.query(`SELECT s.name, COUNT(*) n, SUM(p.amount*p.fx_rate) amt FROM payments p JOIN suppliers s ON s.id=p.supplier_id AND s.agency_id=p.agency_id WHERE p.agency_id = ? AND p.direction='outbound' AND p.paid_at BETWEEN ? AND ? GROUP BY s.id, s.name ORDER BY amt DESC`, [t.agencyId, from, to]);
+    const rows = await t.query(`SELECT s.name, COUNT(*) n, SUM(p.amount*p.fx_rate) amt FROM payments p JOIN suppliers s ON s.id=p.supplier_id AND s.agency_id=p.agency_id WHERE p.agency_id = ? AND p.voided = 0 AND p.direction='outbound' AND p.paid_at BETWEEN ? AND ? GROUP BY s.id, s.name ORDER BY amt DESC`, [t.agencyId, from, to]);
     return { title: `Supplier Payment Summary ${from} → ${to}`, columns: ['Supplier', 'Payments', 'Total paid'], rows: rows.map((r: any) => [r.name, r.n, n2(r.amt)]) };
   },
   'invoice-register': async (t, from, to) => {
@@ -78,6 +94,86 @@ export const GENERATORS: Record<string, Gen> = {
       JOIN vouchers v ON v.id = g.voucher_id AND v.agency_id = g.agency_id WHERE a.agency_id = ? AND a.type_code BETWEEN 300 AND 499 AND v.voucher_date BETWEEN ? AND ? GROUP BY a.id, a.code, a.name, a.type_code ORDER BY a.code`, [t.agencyId, from, to]);
     const income = rows.filter((r: any) => r.type_code >= 400), costs = rows.filter((r: any) => r.type_code < 400), inc = income.reduce((s: number, r: any) => s + r.net, 0), cost = costs.reduce((s: number, r: any) => s - r.net, 0);
     return { title: `Profit & Loss (ledger) ${from} → ${to}`, columns: ['Account', 'Amount'], rows: [...income.map((r: any) => [`${r.code} ${r.name}`, n2(r.net)]), ['Total income', n2(inc)], ...costs.map((r: any) => [`${r.code} ${r.name}`, n2(-r.net)]), ['Total costs & expenses', n2(cost)], ['Net profit', n2(inc - cost)]] };
+  },
+
+  'trial-balance': async (t, _f, to) => {
+    const rows = await t.query(`SELECT a.id, a.code, a.name, at.name type, ${BAL_AT} bal FROM accounts a JOIN account_types at ON at.code = a.type_code WHERE a.agency_id = ? ORDER BY a.code`, [to, t.agencyId]);
+    const live = rows.filter((r: any) => Math.abs(r.bal) > 0.004), dr = (r: any) => (r.bal > 0 ? r.bal : 0), cr = (r: any) => (r.bal < 0 ? -r.bal : 0);
+    const td = sum(live.map(dr)), tc = sum(live.map(cr));
+    return { title: `Trial Balance as at ${to}`, columns: ['Code', 'Account', 'Type', 'Debit', 'Credit'],
+      rows: [...live.map((r: any) => [r.code, r.name, r.type, n2(dr(r)), n2(cr(r))]), ['Total', '', '', n2(td), n2(tc)]],
+      links: [...live.map((r: any) => `/accounts?open=${r.id}`), null], kinds: [...live.map(() => ''), 'total'],
+      reconcile: [rec('Total debits vs total credits (must be equal)', td, tc)] };
+  },
+  'balance-sheet': async (t, _f, to) => {
+    const all = await t.query(`SELECT a.id, a.code, a.name, at.nature, ${BAL_AT} bal FROM accounts a JOIN account_types at ON at.code = a.type_code WHERE a.agency_id = ? ORDER BY a.code`, [to, t.agencyId]);
+    const live = all.filter((r: any) => Math.abs(r.bal) > 0.004), of = (n: string) => live.filter((r: any) => r.nature === n);
+    const rows: any[][] = [], links: (string | null)[] = [], kinds: string[] = [];
+    const add = (row: any[], kind = '', link: string | null = null) => { rows.push(row); kinds.push(kind); links.push(link); };
+    add(['ASSETS', ''], 'section'); of('asset').forEach((r: any) => add([`${r.code} ${r.name}`, n2(r.bal)], '', `/accounts?open=${r.id}`));
+    const assets = sum(of('asset').map((r: any) => r.bal)); add(['Total assets', n2(assets)], 'total');
+    add(['LIABILITIES', ''], 'section'); of('liability').forEach((r: any) => add([`${r.code} ${r.name}`, n2(-r.bal)], '', `/accounts?open=${r.id}`));
+    const liab = sum(of('liability').map((r: any) => -r.bal)); add(['Total liabilities', n2(liab)], 'total');
+    add(['EQUITY', ''], 'section'); of('equity').forEach((r: any) => add([`${r.code} ${r.name}`, n2(-r.bal)], '', `/accounts?open=${r.id}`));
+    const profit = sum([...of('income'), ...of('expense')].map((r: any) => -r.bal)); add(['Profit to date (income less expenses)', n2(profit)]);
+    const equity = sum([...of('equity').map((r: any) => -r.bal), profit]); add(['Total equity', n2(equity)], 'total');
+    add(['Total liabilities & equity', n2(liab + equity)], 'total');
+    return { title: `Balance Sheet as at ${to}`, columns: ['Account', 'Amount'], rows, links, kinds,
+      reconcile: [rec('Total assets vs total liabilities & equity (must be equal)', assets, liab + equity)] };
+  },
+  'general-ledger': async (t, from, to, o) => {
+    const id = Number(o?.account_id); if (!id) throw new HttpError(400, 'Choose an account for the general ledger');
+    const acc = await t.get('accounts', id); if (!acc) throw new HttpError(404, 'Account not found');
+    const prior = await t.one<{ d: number }>('SELECT COALESCE(SUM(debit - credit),0) d FROM gl_entries WHERE agency_id = ? AND account_id = ? AND entry_date < ?', [t.agencyId, id, from]);
+    const opening = sum([acc.opening_dr - acc.opening_cr, prior!.d]);
+    const ents = await t.query(`SELECT g.entry_date, g.debit, g.credit, g.narration, v.id vid, v.voucher_no, v.voucher_type, v.ref_table FROM gl_entries g JOIN vouchers v ON v.id = g.voucher_id AND v.agency_id = g.agency_id
+      WHERE g.agency_id = ? AND g.account_id = ? AND g.entry_date BETWEEN ? AND ? ORDER BY g.entry_date, g.id`, [t.agencyId, id, from, to]);
+    let bal = opening;
+    const rows: any[][] = [['', 'Opening balance', '', '', '', n2(opening)]], links: (string | null)[] = [null], kinds = ['muted'];
+    for (const e of ents) { bal = sum([bal, e.debit, -e.credit]); rows.push([e.entry_date, e.voucher_no, e.narration ?? '', e.debit ? n2(e.debit) : '', e.credit ? n2(e.credit) : '', n2(bal)]); links.push(voucherLink(e)); kinds.push(''); }
+    rows.push(['Total', '', '', n2(sum(ents.map((e: any) => e.debit))), n2(sum(ents.map((e: any) => e.credit))), n2(bal)]); links.push(null); kinds.push('total');
+    const out: Report = { title: `General Ledger — ${acc.code} ${acc.name}, ${from} → ${to}`, columns: ['Date', 'Voucher', 'Narration', 'Debit', 'Credit', 'Balance'], rows, links, kinds,
+      note: 'Balance: positive = debit, negative = credit.' };
+    if (isCurrent(to)) { const cur = await t.one<{ v: number }>(`SELECT ${BALANCE_SQL} v FROM accounts a WHERE a.agency_id = ? AND a.id = ?`, [t.agencyId, id]); out.reconcile = [rec('Closing balance vs current account balance', bal, cur!.v)]; }
+    return out;
+  },
+  'day-book': async (t, from, to) => {
+    const ents = await t.query(`SELECT g.entry_date, g.debit, g.credit, g.narration, v.id vid, v.voucher_no, v.voucher_type, v.ref_table, a.code, a.name FROM gl_entries g
+      JOIN vouchers v ON v.id = g.voucher_id AND v.agency_id = g.agency_id JOIN accounts a ON a.id = g.account_id AND a.agency_id = g.agency_id
+      WHERE g.agency_id = ? AND g.entry_date BETWEEN ? AND ? ORDER BY g.entry_date, v.id, g.id LIMIT ${LIMIT + 1}`, [t.agencyId, from, to]);
+    const tot = await t.one<{ d: number; c: number; n: number }>('SELECT COALESCE(SUM(debit),0) d, COALESCE(SUM(credit),0) c, COUNT(*) n FROM gl_entries WHERE agency_id = ? AND entry_date BETWEEN ? AND ?', [t.agencyId, from, to]);
+    const shown = ents.slice(0, LIMIT);
+    return { title: `Day Book ${from} → ${to}`, columns: ['Date', 'Voucher', 'Type', 'Account', 'Narration', 'Debit', 'Credit'],
+      rows: [...shown.map((e: any) => [e.entry_date, e.voucher_no, e.voucher_type.replace(/_/g, ' '), `${e.code} ${e.name}`, e.narration ?? '', e.debit ? n2(e.debit) : '', e.credit ? n2(e.credit) : '']), ['Total', '', '', '', '', n2(tot!.d), n2(tot!.c)]],
+      links: [...shown.map(voucherLink), null], kinds: [...shown.map(() => ''), 'total'],
+      note: ents.length > LIMIT ? `Showing the first ${LIMIT} of ${tot!.n} lines; narrow the dates or export for the full day book.` : undefined,
+      reconcile: [rec('Ledger debits vs credits for the period (must balance)', tot!.d, tot!.c)] };
+  },
+  'cash-book': async (t, from, to) => {
+    const rows = await t.query(`SELECT a.id, a.code, a.name,
+      a.opening_dr - a.opening_cr + COALESCE((SELECT SUM(g.debit - g.credit) FROM gl_entries g WHERE g.agency_id = a.agency_id AND g.account_id = a.id AND g.entry_date < ?),0) opening,
+      COALESCE((SELECT SUM(g.debit) FROM gl_entries g WHERE g.agency_id = a.agency_id AND g.account_id = a.id AND g.entry_date BETWEEN ? AND ?),0) receipts,
+      COALESCE((SELECT SUM(g.credit) FROM gl_entries g WHERE g.agency_id = a.agency_id AND g.account_id = a.id AND g.entry_date BETWEEN ? AND ?),0) payments
+      FROM accounts a WHERE a.agency_id = ? AND a.type_code = 110 ORDER BY a.code`, [from, from, to, from, to, t.agencyId]);
+    const cl = (r: any) => sum([r.opening, r.receipts, -r.payments]);
+    const out: Report = { title: `Cash & Bank Book ${from} → ${to}`, columns: ['Account', 'Opening', 'Receipts', 'Payments', 'Closing'],
+      rows: [...rows.map((r: any) => [`${r.code} ${r.name}`, n2(r.opening), n2(r.receipts), n2(r.payments), n2(cl(r))]),
+        ['Total', n2(sum(rows.map((r: any) => r.opening))), n2(sum(rows.map((r: any) => r.receipts))), n2(sum(rows.map((r: any) => r.payments))), n2(sum(rows.map(cl)))]],
+      links: [...rows.map((r: any) => `/accounts?open=${r.id}`), null], kinds: [...rows.map(() => ''), 'total'] };
+    if (isCurrent(to)) { const cur = await t.one<{ v: number }>(`SELECT COALESCE(SUM(${BALANCE_SQL}),0) v FROM accounts a WHERE a.agency_id = ? AND a.type_code = 110`, [t.agencyId]); out.reconcile = [rec('Closing cash & bank vs current ledger balances', sum(rows.map(cl)), cur!.v)]; }
+    return out;
+  },
+  'payment-register': async (t, from, to) => {
+    const ps = await t.query(`SELECT p.paid_at, p.direction, p.method, COALESCE(c.name, ic.name, s.name, '') party, p.reference, p.currency, p.amount, p.amount * p.fx_rate base
+      FROM payments p LEFT JOIN clients c ON c.id = p.client_id AND c.agency_id = p.agency_id LEFT JOIN suppliers s ON s.id = p.supplier_id AND s.agency_id = p.agency_id
+      LEFT JOIN invoices i ON i.id = p.invoice_id AND i.agency_id = p.agency_id LEFT JOIN clients ic ON ic.id = i.client_id AND ic.agency_id = p.agency_id
+      WHERE p.agency_id = ? AND p.voided = 0 AND p.paid_at BETWEEN ? AND ? ORDER BY p.paid_at, p.id`, [t.agencyId, from, to]);
+    const inb = sum(ps.filter((p: any) => p.direction === 'inbound').map((p: any) => p.base)), out = sum(ps.filter((p: any) => p.direction === 'outbound').map((p: any) => p.base));
+    const shown = ps.slice(0, LIMIT), blank = ['', '', '', '', '', ''];
+    return { title: `Payment Register ${from} → ${to}`, columns: ['Date', 'Direction', 'Method', 'Party', 'Reference', 'Currency', 'Amount', 'Amount (base)'],
+      rows: [...shown.map((p: any) => [p.paid_at, p.direction, p.method.replace(/_/g, ' '), p.party, p.reference ?? '', p.currency, n2(p.amount), n2(p.base)]),
+        ['Total received', ...blank, n2(inb)], ['Total paid', ...blank, n2(out)], ['Net', ...blank, n2(inb - out)]],
+      kinds: [...shown.map(() => ''), 'total', 'total', 'total'], note: ps.length > LIMIT ? `Showing the first ${LIMIT} of ${ps.length} payments; totals cover all of them.` : undefined };
   },
   'departures': async (t, from, to) => {
     const rows = await t.query(`SELECT b.reference, b.destination, b.travel_start, b.travel_end, b.status, c.name client,
@@ -110,20 +206,22 @@ async function arRec(t: Tenant, r: Report, to: string, col: number): Promise<Rec
 }
 
 /** Build a report plus its reconciliation. Shared by the API and the scheduler so both always agree. */
-export async function buildReport(t: Tenant, name: string, from: string, to: string): Promise<Report> {
+export async function buildReport(t: Tenant, name: string, from: string, to: string, opts?: Record<string, string>): Promise<Report> {
   const gen = GENERATORS[name]; if (!gen) throw new HttpError(404, 'Unknown report');
-  const report = await gen(t, from, to);
-  report.note = `Amounts are in ${(await t.agency()).base_currency}, converted at the exchange rate locked on each document when it was issued or paid (document currencies are shown where relevant).`;
+  const report = await gen(t, from, to, opts);
+  const own = report.note;
+  report.note = `${own ? own + ' ' : ''}Amounts are in ${(await t.agency()).base_currency}, converted at the exchange rate locked on each document when it was issued or paid (document currencies are shown where relevant).`;
   const checks = await RECONCILERS[name]?.(t, report, from, to);
   if (checks?.length) report.reconcile = checks; else if (name.includes('aging') && !isCurrent(to)) report.note += ` ${ASOF}`;
   return report;
 }
 
-reportsRouter.get('/:name', async (req, res) => {
+reportsRouter.get('/:name', (req, res, next) => (LEDGER_REPORTS.has(req.params.name as string) ? requireRole('admin', 'finance_manager', 'viewer')(req, res, next) : next()), async (req, res) => {
   const t = T(req);
   const y = new Date().getUTCFullYear();
   const from = String(req.query.from ?? `${y}-01-01`), to = String(req.query.to ?? new Date().toISOString().slice(0, 10));
-  const report = await buildReport(t, req.params.name as string, from, to);
+  const opts = Object.fromEntries(Object.entries(req.query).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+  const report = await buildReport(t, req.params.name as string, from, to, opts);
   const format = String(req.query.format ?? 'json');
   if (format === 'json') return void res.json(report);
 

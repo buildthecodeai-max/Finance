@@ -5,7 +5,7 @@ import { WRITERS, requireRole } from '../auth.js';
 import { HttpError } from '../errors.js';
 import { pool } from '../db.js';
 import { signedUrl } from '../storage.js';
-import { GENERATORS } from './reports.js';
+import { GENERATORS, PARAM_REPORTS } from './reports.js';
 import * as A from '../services/automation.js';
 import { today } from '../services/money.js';
 import { idParam, parse, T } from './util.js';
@@ -44,7 +44,7 @@ automationRouter.get('/activity', async (req, res) => { const t = T(req); res.js
 automationRouter.post('/run', W, async (req, res) => { const t = T(req); res.json({ automations: await A.runAutomations(t), exceptions: await A.scanExceptions(t), schedules: await A.runDueSchedules(t) }); });
 
 /* ---- scheduled reports ---- */
-const Sched = z.object({ name: z.string().trim().min(2).max(120), report: z.string().refine((r) => r in GENERATORS, 'Unknown report'), range_kind: z.enum(['last_30d', 'mtd', 'last_month', 'ytd']).default('last_month'),
+const Sched = z.object({ name: z.string().trim().min(2).max(120), report: z.string().refine((r) => r in GENERATORS && !PARAM_REPORTS.has(r), 'Unknown report'), range_kind: z.enum(['last_30d', 'mtd', 'last_month', 'ytd']).default('last_month'),
   frequency: z.enum(['daily', 'weekly', 'monthly']), weekday: z.number().int().min(0).max(6).optional(), day_of_month: z.number().int().min(1).max(28).optional(),
   recipients: z.array(z.string().email()).min(1).max(5), format: z.enum(['csv', 'xlsx', 'pdf']).default('csv'), active: z.boolean().default(true) });
 /** Financial reports go only to people on the team — never to arbitrary outside addresses. */
