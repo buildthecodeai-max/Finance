@@ -8,7 +8,7 @@ export default defineConfig({
     fileParallelism: false, // one shared MySQL schema
     testTimeout: 20000,
     env: {
-      NODE_ENV: 'test', ENFORCE_2FA: 'true',
+      NODE_ENV: 'test', ENFORCE_2FA: 'true', PLATFORM_TWO_PERSON: 'true',   // pinned: a developer's local .env must not change what the tests assert
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? `mysql://root@localhost:3306/${TEST_DB}`,
       JWT_SECRET: 'test-secret-test-secret-test-secret-1234',
       ENCRYPTION_KEY: '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
