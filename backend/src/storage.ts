@@ -33,6 +33,16 @@ export async function putFile(key: string, body: Buffer | string, contentType: s
   return key;
 }
 
+export async function getFile(key: string): Promise<Buffer> {
+  if (useLocal) {
+    return fs.readFile(path.join(LOCAL_DIR, key));
+  }
+  const resp = await s3.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }));
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
 export async function signedUrl(agencyId: number, key: string, filename?: string) {
   if (!key.startsWith(`agency-${agencyId}/`)) throw new Error('Forbidden key');
   if (useLocal) {

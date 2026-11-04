@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Page, Table } from '../components/ui';
@@ -14,11 +14,31 @@ export default function Settings() {
   const [s, setS] = useState<any>(null); const [locks, setLocks] = useState<any[]>([]);
   const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [lockErr, setLockErr] = useState('');
   const [lockDate, setLockDate] = useState(today()); const [reason, setReason] = useState(''); const [saveReason, setSaveReason] = useState('');
-  const load = () => { api('/admin/settings').then(setS); if (can('admin', 'finance_manager')) api('/admin/period-locks').then(setLocks); };
+  const [logoUrl, setLogoUrl] = useState<string | null>(null); const [logoErr, setLogoErr] = useState(''); const [logoMsg, setLogoMsg] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const loadLogo = () => api('/admin/logo').then((r: any) => setLogoUrl(r.url)).catch(() => {});
+  const load = () => { api('/admin/settings').then((r: any) => { setS(r); if (r.has_logo) loadLogo(); }); if (can('admin', 'finance_manager')) api('/admin/period-locks').then(setLocks); };
   useEffect(() => { load(); }, []);
   const save = async () => {
     try { setS(await api('/admin/settings', 'PUT', { name: s.name, tax_label: s.tax_label, address: s.address, timezone: s.timezone, invoice_prefix: s.invoice_prefix, min_margin_pct: Number(s.min_margin_pct) || 0, approval_threshold: Number(s.approval_threshold) || 0, dual_control_runs: !!s.dual_control_runs, fx_max_age_days: Number(s.fx_max_age_days ?? 7), commission_trigger: s.commission_trigger, bill_tolerance_pct: Number(s.bill_tolerance_pct) || 0, payment_instructions: s.payment_instructions || null, ...Object.fromEntries(BILLING.map(([k]) => [k, s[k] || null])), reason: saveReason || undefined })); setErr(''); setMsg('Settings saved'); setSaveReason(''); }
     catch (e: any) { setErr(e.message); setMsg(''); }
+  };
+  const uploadLogo = async (file: File) => {
+    if (file.size > 2 * 1024 * 1024) { setLogoErr('Logo must be under 2 MB'); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const b64 = (reader.result as string).split(',')[1];
+        const r: any = await api('/admin/logo', 'POST', { data: b64, mime: file.type });
+        setLogoUrl(r.url); setLogoErr(''); setLogoMsg('Logo saved');
+        setS((prev: any) => ({ ...prev, has_logo: true }));
+      } catch (e: any) { setLogoErr(e.message); }
+    };
+    reader.readAsDataURL(file);
+  };
+  const removeLogo = async () => {
+    try { await api('/admin/logo', 'DELETE'); setLogoUrl(null); setLogoMsg('Logo removed'); setS((prev: any) => ({ ...prev, has_logo: false })); }
+    catch (e: any) { setLogoErr(e.message); }
   };
   const lock = async (date: string | null) => {
     try { await api('/admin/period-locks', 'POST', { locked_through: date, reason }); setReason(''); setLockErr(''); load(); }
@@ -44,6 +64,18 @@ export default function Settings() {
             <Field label="Commission becomes eligible when" hint="Estimated → accrued → eligible. Agents are paid only on eligible commission."><select className="input" value={s.commission_trigger ?? 'booking_confirmed'} onChange={set('commission_trigger')} disabled={!admin}>{[['booking_confirmed', 'the booking is confirmed'], ['client_paid', 'the client has paid in full'], ['travel_completed', 'travel is completed'], ['supplier_paid', 'suppliers are paid']].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
             <Field label="Max exchange-rate age (days)" hint="Older rates are refused when issuing foreign-currency documents"><input className="input num" type="number" value={s.fx_max_age_days ?? 7} onChange={set('fx_max_age_days')} disabled={!admin} /></Field>
             <Field label="Supplier bill tolerance %" hint="Allowed overage vs the booking cost"><input className="input num" type="number" value={s.bill_tolerance_pct ?? 2} onChange={set('bill_tolerance_pct')} disabled={!admin} /></Field>
+          </div>
+          <h3 className="font-bold mt-5 mb-1">Agency logo</h3>
+          <p className="text-xs text-muted mb-3">Shown on invoice PDFs. PNG, JPG, GIF, WebP or SVG, max 2 MB. Recommended width 300–600 px.</p>
+          {logoErr && <div className="text-danger text-sm mb-2">{logoErr}</div>}
+          {logoMsg && <div className="text-accent text-sm mb-2">{logoMsg}</div>}
+          <div className="flex items-center gap-4 mb-3">
+            {logoUrl ? <img src={logoUrl} alt="Agency logo" className="max-h-16 max-w-[200px] object-contain border border-line rounded-lg p-2 bg-surface" /> : <div className="h-16 w-32 border border-dashed border-line rounded-lg flex items-center justify-center text-xs text-muted">No logo</div>}
+            {admin && <>
+              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.target.value = ''; }} />
+              <button className="btn-ghost" onClick={() => fileRef.current?.click()}>Upload logo</button>
+              {logoUrl && <button className="btn-ghost text-danger" onClick={removeLogo}>Remove</button>}
+            </>}
           </div>
           <h3 className="font-bold mt-5 mb-1">Invoice details</h3><p className="text-xs text-muted mb-3">Printed on every invoice PDF. Leave a field blank to omit it. Bank details show only while a balance is owed.</p>
           <div className="grid grid-cols-2 gap-x-3">{BILLING.map(([k, label]) => <Field key={k} label={label}><input className="input" value={s[k] ?? ''} onChange={set(k)} disabled={!admin} autoComplete="off" /></Field>)}</div>

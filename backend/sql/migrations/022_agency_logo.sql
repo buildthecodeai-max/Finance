@@ -1,0 +1,1 @@
+ALTER TABLE agencies ADD COLUMN logo_key VARCHAR(500) NULL;

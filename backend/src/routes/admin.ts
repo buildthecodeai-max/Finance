@@ -4,6 +4,7 @@ import { HttpError } from '../errors.js';
 import { requireRole } from '../auth.js';
 import { idParam, parse, T } from './util.js';
 import { pool } from '../db.js';
+import { fileKey, putFile, signedUrl } from '../storage.js';
 
 export const adminRouter = Router();
 const FINANCE = requireRole('admin', 'finance_manager');
@@ -11,7 +12,7 @@ const FINANCE = requireRole('admin', 'finance_manager');
 // ---- Agency settings ----
 const publicSettings = (a: any) => ({ id: a.id, name: a.name, base_currency: a.base_currency, tax_label: a.tax_label, address: a.address, timezone: a.timezone, invoice_prefix: a.invoice_prefix, min_margin_pct: a.min_margin_pct, approval_threshold: a.approval_threshold, dual_control_runs: !!a.dual_control_runs, bill_tolerance_pct: a.bill_tolerance_pct, fx_max_age_days: a.fx_max_age_days, commission_trigger: a.commission_trigger, locked_through: a.locked_through,
   tax_number: a.tax_number, bank_name: a.bank_name, bank_account_name: a.bank_account_name, bank_account_number: a.bank_account_number, bank_routing: a.bank_routing,
-  bank_iban: a.bank_iban, bank_swift: a.bank_swift, payment_instructions: a.payment_instructions });
+  bank_iban: a.bank_iban, bank_swift: a.bank_swift, payment_instructions: a.payment_instructions, has_logo: !!a.logo_key });
 
 adminRouter.get('/settings', async (req, res) => res.json(publicSettings(await T(req).agency())));
 
@@ -37,6 +38,28 @@ adminRouter.put('/settings', requireRole('admin'), async (req, res) => {
     await t.event('update', 'agencies', t.agencyId, publicSettings(before), fields, reason);
   }
   res.json(publicSettings(await t.agency()));
+});
+
+// ---- Agency logo upload / delete ----
+adminRouter.get('/logo', requireRole('admin'), async (req, res) => {
+  const t = T(req); const a = await t.agency();
+  if (!a.logo_key) return void res.json({ url: null });
+  res.json({ url: await signedUrl(t.agencyId, a.logo_key) });
+});
+
+adminRouter.post('/logo', requireRole('admin'), async (req, res) => {
+  const b = parse(z.object({ data: z.string().min(1), mime: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']) }), req.body);
+  const buf = Buffer.from(b.data, 'base64');
+  if (buf.length > 2 * 1024 * 1024) throw new HttpError(413, 'Logo must be under 2 MB');
+  const ext = b.mime.split('/')[1].replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+  const t = T(req);
+  const key = await putFile(fileKey(t.agencyId, 'logos', `logo.${ext}`), buf, b.mime);
+  await t.updateAgency({ logo_key: key });
+  res.json({ url: await signedUrl(t.agencyId, key) });
+});
+
+adminRouter.delete('/logo', requireRole('admin'), async (req, res) => {
+  const t = T(req); await t.updateAgency({ logo_key: null }); res.json({ ok: true });
 });
 
 // ---- Accounting period lock / reopen (reason always required, history append-only) ----

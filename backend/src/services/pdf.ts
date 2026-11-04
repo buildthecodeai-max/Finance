@@ -54,16 +54,17 @@ export const payRows = (a: any): [string, string][] => ([
   ['Bank', a.bank_name], ['Account name', a.bank_account_name], ['Account number', a.bank_account_number], ['BSB / Sort code / Routing', a.bank_routing], ['IBAN', a.bank_iban], ['SWIFT / BIC', a.bank_swift],
 ] as [string, string | null][]).filter(([, v]) => v && String(v).trim()) as [string, string][];
 
-export function invoiceHtml(a: any, inv: any, lines: any[], client: any, installments: any[]) {
+export function invoiceHtml(a: any, inv: any, lines: any[], client: any, installments: any[], logoData?: { data: string; mime: string } | null) {
   const c = inv.currency, balance = Math.max(0, Math.round((inv.total - inv.amount_paid) * 100) / 100);
   const today = new Date().toISOString().slice(0, 10);
   const [label, cls] = inv.status === 'void' ? ['Void', 'draft'] : inv.status === 'draft' || inv.status === 'reviewed' ? ['Draft', 'draft']
     : balance === 0 ? ['Paid', 'paid'] : inv.due_date < today ? ['Overdue', 'over'] : inv.amount_paid > 0 ? ['Partially paid', 'due'] : ['Payment due', 'due'];
   const rate = (l: any) => (l.line_net > 0 ? `${Math.round((l.line_tax / l.line_net) * 1000) / 10}%` : '—');
+  const logoImg = logoData ? `<img src="data:${logoData.mime};base64,${logoData.data}" style="max-height:64px;max-width:200px;object-fit:contain;display:block;margin-bottom:6px" alt="logo">` : '';
   return `<html><head><meta charset="utf-8"><style>${css}</style></head><body>
   <div class="bar"></div>
   <div class="top">
-    <div><div class="brand">${esc(a.name)}</div><div class="addr">${esc(a.address ?? '')}</div>${a.tax_number ? `<div class="addr" style="margin-top:6px"><b>Tax no:</b> ${esc(a.tax_number)}</div>` : ''}</div>
+    <div>${logoImg}<div class="brand">${esc(a.name)}</div><div class="addr">${esc(a.address ?? '')}</div>${a.tax_number ? `<div class="addr" style="margin-top:6px"><b>Tax no:</b> ${esc(a.tax_number)}</div>` : ''}</div>
     <div style="text-align:right"><h1>INVOICE</h1><div style="margin:6px 0 8px;font-size:13px;font-weight:600">${esc(inv.number)}</div><span class="badge ${cls}">${label}</span></div>
   </div>
   <div class="meta">

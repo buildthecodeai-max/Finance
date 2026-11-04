@@ -3,7 +3,7 @@ import { z } from 'zod';
 import Stripe from 'stripe';
 import { ALL_EDITORS, HttpError, WRITERS, requireRole } from '../auth.js';
 import { config } from '../config.js';
-import { fileKey, putFile, signedUrl } from '../storage.js';
+import { fileKey, getFile, putFile, signedUrl } from '../storage.js';
 import { htmlToPdf, invoiceHtml } from '../services/pdf.js';
 import { createLink, deliver } from '../services/portal.js';
 const PAYABLE_STATUSES = ['sent', 'partially_paid', 'overdue'];
@@ -131,11 +131,22 @@ invoicesRouter.post('/:id/status', requireRole(...WRITERS), async (req, res) => 
   res.json({ status });
 });
 
+async function agencyLogoData(agency: any): Promise<{ data: string; mime: string } | null> {
+  if (!agency.logo_key) return null;
+  try {
+    const buf = await getFile(agency.logo_key);
+    const ext = agency.logo_key.split('.').pop()?.toLowerCase() ?? '';
+    const mime = ext === 'svg' ? 'image/svg+xml' : ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    return { data: buf.toString('base64'), mime };
+  } catch { return null; }
+}
+
 export async function renderAndStore(t: ReturnType<typeof T>, id: number) {
   const { inv, lines, installments } = await load(t, id);
   const agency = await t.agency();
   const client = await t.get('clients', inv.client_id);
-  const pdf = await htmlToPdf(invoiceHtml(agency, inv, lines, client, installments), { footer: `${agency.name} · ${inv.number}` });
+  const logoData = await agencyLogoData(agency);
+  const pdf = await htmlToPdf(invoiceHtml(agency, inv, lines, client, installments, logoData), { footer: `${agency.name} · ${inv.number}` });
   const key = await putFile(fileKey(t.agencyId, 'invoices', `${inv.number}.pdf`), pdf, 'application/pdf');
   await t.update('invoices', id, { pdf_key: key });
   return { inv, client, key, agency };
