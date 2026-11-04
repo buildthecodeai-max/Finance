@@ -45,6 +45,7 @@ const GROUPS: { title: string; module: string | string[] | null; items: Item[] }
     { to: '/exchange-rates', label: 'Exchange Rates', icon: I(Coins), roles: FINANCE },
     { to: '/client-portal', label: 'Client Portal', icon: I(Users), roles: FINANCE },
     { to: '/cheque-format', label: 'Cheque Format', icon: I(Banknote), roles: FINANCE },
+    { to: '/reports', label: 'Reports', icon: I(BarChart3), roles: FINANCE },
   ]},
   { title: 'Insights & Automation', module: 'insights', items: [{ to: '/reports', label: 'Reports', icon: I(BarChart3) }, { to: '/automation', label: 'Automation', icon: I(CalendarClock), roles: FINANCE }, { to: '/integrations', label: 'Integrations', icon: I(ArrowLeftRight), roles: FINANCE }] },
   { title: 'Administration', module: null, items: [{ to: '/settings', label: 'Settings', icon: I(Settings) }, { to: '/team', label: 'Team & Branches', icon: I(Users), roles: ['admin', 'finance_manager'] }, { to: '/billing', label: 'Billing', icon: I(CreditCard), roles: ['admin'] }, { to: '/audit', label: 'Audit Log', icon: I(ScrollText), roles: ['admin', 'finance_manager'] }] },
