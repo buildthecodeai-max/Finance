@@ -42,8 +42,8 @@ function PartyForm({ kind, initial, onClose, onSaved }: { kind: Kind; initial: a
     <div className="flex justify-end gap-2 mt-2"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || f.name.trim().length < 1 || String(f.currency).length !== 3} onClick={save}>{editing ? 'Save changes' : 'Create'}</button></div></Modal>;
 }
 
-function Detail({ kind, id, canManage, canEdit, onClose, onChanged }: { kind: Kind; id: number; canManage: boolean; canEdit: boolean; onClose(): void; onChanged(): void }) {
-  const [d, setD] = useState<any>(null); const [tl, setTl] = useState<any[]>([]); const [usage, setUsage] = useState<any>(null); const [edit, setEdit] = useState(false); const [err, setErr] = useState(''); const [confirmDel, setConfirmDel] = useState(false);
+function Detail({ kind, id, canManage, canEdit, startDelete, onClose, onChanged }: { kind: Kind; id: number; canManage: boolean; canEdit: boolean; startDelete?: boolean; onClose(): void; onChanged(): void }) {
+  const [d, setD] = useState<any>(null); const [tl, setTl] = useState<any[]>([]); const [usage, setUsage] = useState<any>(null); const [edit, setEdit] = useState(false); const [err, setErr] = useState(''); const [confirmDel, setConfirmDel] = useState(!!startDelete);
   const load = () => { api(`/${kind}/${id}`).then(setD); if (kind === 'clients') api(`/crm/timeline/client/${id}`).then(setTl).catch(() => {}); if (canManage) api(`/${kind}/${id}/usage`).then(setUsage).catch(() => {}); };
   useEffect(() => { load(); }, [id]);
   if (!d) return null;
@@ -67,7 +67,8 @@ function Detail({ kind, id, canManage, canEdit, onClose, onChanged }: { kind: Ki
       {kind === 'clients' && tl.length > 0 && <><h3 className="font-bold mt-4 mb-2">Timeline</h3><div className="space-y-2 max-h-64 overflow-auto">{tl.map((x: any, i: number) => <div key={i} className="text-sm flex gap-3"><span className="num text-xs text-muted shrink-0">{String(x.at ?? x.created_at ?? '').slice(0, 10)}</span><span>{x.text ?? x.body ?? x.title}</span></div>)}</div></>}
       {edit && <PartyForm kind={kind} initial={{ ...blank(kind), ...d, email: d.email ?? '', commission_override_pct: d.commission_override_pct ?? '' }} onClose={() => setEdit(false)} onSaved={() => { setEdit(false); load(); onChanged(); }} />}
       {confirmDel && <Modal title={`Delete ${d.name}?`} onClose={() => setConfirmDel(false)}>
-        {usage && !usage.can_delete ? <><p className="text-sm mb-3">This {kind === 'clients' ? 'client' : 'supplier'} can't be deleted because it has <b>{usage.deps.map((x: any) => `${x.n} ${x.label}`).join(', ')}</b>. Archive it instead — it disappears from lists and pickers, and all history stays intact.</p>
+        {!usage ? <p className="text-sm text-muted">Checking what depends on this {kind === 'clients' ? 'client' : 'supplier'}…</p>
+          : !usage.can_delete ? <><p className="text-sm mb-3">This {kind === 'clients' ? 'client' : 'supplier'} can't be deleted because it has <b>{usage.deps.map((x: any) => `${x.n} ${x.label}`).join(', ')}</b>. Archive it instead — it disappears from lists and pickers, and all history stays intact.</p>
           <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setConfirmDel(false)}>Close</button>{!d.archived_at && <button className="btn" onClick={() => act(() => api(`/${kind}/${id}/archive`, 'POST'))}>Archive instead</button>}</div></>
           : <><p className="text-sm mb-3">This permanently deletes the record. It has no invoices, bookings or payments attached. This can't be undone.</p><div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setConfirmDel(false)}>Cancel</button><button className="btn bg-danger text-white" onClick={() => act(() => api(`/${kind}/${id}`, 'DELETE'))}>Delete permanently</button></div></>}</Modal>}
     </Modal>
@@ -77,7 +78,7 @@ function Detail({ kind, id, canManage, canEdit, onClose, onChanged }: { kind: Ki
 function makeParty(kind: Kind, title: string) {
   return function Party() {
     const { can } = useAuth();
-    const [rows, setRows] = useState<any[]>([]); const [open, setOpen] = useState<number | null>(null); const [form, setForm] = useState<any>(null);
+    const [rows, setRows] = useState<any[]>([]); const [open, setOpen] = useState<number | null>(null); const [askDelete, setAskDelete] = useState(false); const [form, setForm] = useState<any>(null);
     const [show, setShow] = useState<'active' | 'archived'>('active'); const [q, setQ] = useState('');
     const load = () => api(`/${kind}?status=${show}`).then(setRows);
     useEffect(() => { load(); }, [show]);
@@ -114,7 +115,7 @@ function makeParty(kind: Kind, title: string) {
                     ? <button className="btn-ghost py-0.5 px-2 text-xs flex items-center gap-1" onClick={() => api(`/${kind}/${r.id}/restore`, 'POST').then(load)}>
                         <ArchiveRestore size={12} /> Restore
                       </button>
-                    : <button className="btn-ghost py-0.5 px-2 text-xs text-danger flex items-center gap-1" onClick={() => setOpen(r.id)}>
+                    : <button className="btn-ghost py-0.5 px-2 text-xs text-danger flex items-center gap-1" onClick={() => { setAskDelete(true); setOpen(r.id); }}>
                         <Trash2 size={12} /> Delete
                       </button>
                 )}
@@ -122,7 +123,7 @@ function makeParty(kind: Kind, title: string) {
             ),
           },
         ]} />
-        {open && <Detail kind={kind} id={open} canManage={manage} canEdit={canEdit} onClose={() => setOpen(null)} onChanged={load} />}
+        {open && <Detail key={`${open}-${askDelete}`} kind={kind} id={open} canManage={manage} canEdit={canEdit} startDelete={askDelete} onClose={() => { setOpen(null); setAskDelete(false); }} onChanged={load} />}
         {form && <PartyForm kind={kind} initial={form} onClose={() => setForm(null)} onSaved={(id) => { setForm(null); load(); if (id) setOpen(id); }} />}
       </Page>
     );

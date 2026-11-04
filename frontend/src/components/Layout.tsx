@@ -117,6 +117,7 @@ function GlobalSearch() {
 function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { collapsed: boolean; onNavigate?(): void; onCollapse?(): void; allowedModules?: string[] | null }) {
   const { agency, agencies, switchAgency } = useAuth();
   const role = agency?.role ?? 'viewer';
+  const shown = new Set<string>();   // a destination listed in two sections (Reports) appears once, in the first visible one
   return (
     <div className="flex h-full flex-col">
       <div className={`flex items-center h-14 shrink-0 px-4 border-b border-line ${collapsed ? 'justify-center' : 'justify-between'}`}>
@@ -138,7 +139,8 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
           // null module = always visible; string[] = visible if ANY match; otherwise check single module
           const mods = Array.isArray(g.module) ? g.module : g.module ? [g.module] : null;
           if (mods !== null && allowedModules != null && !mods.some((m) => allowedModules.includes(m))) return null;
-          const items = g.items.filter((i) => !i.roles || i.roles.includes(role));
+          const items = g.items.filter((i) => (!i.roles || i.roles.includes(role)) && !shown.has(i.to));
+          items.forEach((i) => shown.add(i.to));
           if (!items.length) return null;
           return (
             <div key={g.title}>

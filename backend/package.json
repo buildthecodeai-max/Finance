@@ -18,7 +18,8 @@
     "backup:restore": "tsx src/ops/backup.ts restore",
     "loadtest": "tsx scripts/loadtest.ts",
     "billing:grant": "tsx src/ops/billing-grant.ts",
-    "platform:admin": "tsx src/ops/platform-admin.ts"
+    "platform:admin": "tsx src/ops/platform-admin.ts",
+    "db:orphans": "tsx src/ops/orphans.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

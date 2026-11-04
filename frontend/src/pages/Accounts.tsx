@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Num, Page, Table } from '../components/ui';
@@ -153,8 +153,8 @@ export default function Accounts() {
               </tr></thead>
               <tbody>
                 {rows.map((r) => (
-                  <>
-                    <tr key={r.id} className={`border-b border-line/50 hover:bg-surface2 ${openLedger === r.id ? 'bg-surface2' : ''}`}>
+                  <Fragment key={r.id}>
+                    <tr className={`border-b border-line/50 hover:bg-surface2 ${openLedger === r.id ? 'bg-surface2' : ''}`}>
                       <td className="px-3 py-2 w-6">
                         <button className="text-muted hover:text-accent" onClick={() => toggleLedger(r.id)} title="View ledger" aria-label="Toggle ledger">
                           {openLedger === r.id ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -179,8 +179,8 @@ export default function Accounts() {
                         </div>
                       </td>
                     </tr>
-                    {openLedger === r.id && <LedgerPanel key={`l-${r.id}`} accountId={r.id} onClose={() => setOpenLedger(null)} />}
-                  </>
+                    {openLedger === r.id && <LedgerPanel accountId={r.id} onClose={() => setOpenLedger(null)} />}
+                  </Fragment>
                 ))}
                 {rows.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-muted text-sm">No accounts found</td></tr>}
               </tbody>

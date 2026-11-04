@@ -58,7 +58,16 @@ export async function verifyTotp(userId: number, code: string): Promise<boolean>
   return r.affectedRows === 1;
 }
 /** Append-only by database trigger: kept after an agency is deleted, as evidence of what happened. */
-const RETAINED_ON_DELETE = new Set(['audit_log', 'security_events', 'period_locks', 'booking_changes', 'platform_audit_log']);
+export const RETAINED_ON_DELETE = new Set(['audit_log', 'security_events', 'period_locks', 'booking_changes', 'platform_audit_log']);
+
+/** Every table that holds per-agency rows (read from the schema, so tables added later are covered), minus the append-only evidence tables. */
+export async function tenantTables(): Promise<string[]> {
+  const [found]: any = await pool.query(
+    `SELECT DISTINCT c.TABLE_NAME AS t FROM information_schema.COLUMNS c
+     JOIN information_schema.TABLES x ON x.TABLE_SCHEMA = c.TABLE_SCHEMA AND x.TABLE_NAME = c.TABLE_NAME AND x.TABLE_TYPE = 'BASE TABLE'
+     WHERE c.TABLE_SCHEMA = DATABASE() AND c.COLUMN_NAME = 'agency_id' ORDER BY c.TABLE_NAME`);
+  return found.map((r: any) => r.t).filter((t: string) => !RETAINED_ON_DELETE.has(t));
+}
 
 /**
  * Permanently delete an agency and every tenant row that carries its agency_id, in one transaction.
@@ -69,11 +78,7 @@ const RETAINED_ON_DELETE = new Set(['audit_log', 'security_events', 'period_lock
 export async function deleteAgency(id: number): Promise<{ name: string; tables: number; rows: number; users: number }> {
   const [[ag]]: any = await pool.query('SELECT name FROM agencies WHERE id = ?', [id]);
   if (!ag) throw new HttpError(404, 'Agency not found');
-  const [found]: any = await pool.query(
-    `SELECT DISTINCT c.TABLE_NAME AS t FROM information_schema.COLUMNS c
-     JOIN information_schema.TABLES x ON x.TABLE_SCHEMA = c.TABLE_SCHEMA AND x.TABLE_NAME = c.TABLE_NAME AND x.TABLE_TYPE = 'BASE TABLE'
-     WHERE c.TABLE_SCHEMA = DATABASE() AND c.COLUMN_NAME = 'agency_id'`);
-  const tables: string[] = found.map((r: any) => r.t).filter((t: string) => !RETAINED_ON_DELETE.has(t));
+  const tables = await tenantTables();
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
