@@ -15,7 +15,7 @@ financeRouter.use(requireRole('admin', 'finance_manager', 'viewer'));   // agent
 const W = requireRole(...WRITERS);
 const METHOD = z.enum(['bank_transfer', 'stripe', 'direct_debit', 'cash']);
 const Alloc = z.object({ invoice_id: z.number().int(), amount: z.number().positive() });
-const Reason = z.object({ reason: z.string().min(3, 'A reason is required'), date: z.string().optional() });
+const Reason = z.object({ reason: z.string().optional().default(''), date: z.string().optional() });
 
 // ---------------------------------------------------------------- overview, aging, reconciliation
 const BUCKETS = `SUM(CASE WHEN due_date >= CURDATE() THEN b ELSE 0 END) current_, SUM(CASE WHEN DATEDIFF(CURDATE(),due_date) BETWEEN 1 AND 30 THEN b ELSE 0 END) d30,
@@ -152,7 +152,7 @@ financeRouter.get('/credit-notes/:id', async (req, res) => {
   res.json({ ...n, lines: await t.query('SELECT * FROM credit_note_lines WHERE agency_id = ? AND credit_note_id = ?', [t.agencyId, id]) });
 });
 financeRouter.post('/credit-notes', W, async (req, res) => {
-  const b = parse(z.object({ invoice_id: z.number().int(), reason: z.string().min(3), issue_date: z.string().optional(), lines: z.array(z.object({ description: z.string().min(1), amount: z.number().positive(), tax: z.number().min(0).optional() })).min(1) }), req.body);
+  const b = parse(z.object({ invoice_id: z.number().int(), reason: z.string().optional().default(''), issue_date: z.string().optional(), lines: z.array(z.object({ description: z.string().min(1), amount: z.number().positive(), tax: z.number().min(0).optional() })).min(1) }), req.body);
   res.status(201).json({ id: await F.createCreditNote(T(req), b) });
 });
 financeRouter.post('/credit-notes/:id/issue', W, async (req, res) => res.json(await F.issueCreditNote(T(req), idParam(req))));
@@ -164,7 +164,7 @@ financeRouter.get('/client-refunds', async (req, res) => {
   res.json(await t.query(`SELECT r.*, i.number invoice_number, c.name client_name, u.name requested_by_name FROM client_refunds r JOIN invoices i ON i.id = r.invoice_id AND i.agency_id = r.agency_id JOIN clients c ON c.id = r.client_id AND c.agency_id = r.agency_id LEFT JOIN users u ON u.id = r.requested_by WHERE r.agency_id = ? ORDER BY r.id DESC LIMIT 300`, [t.agencyId]));
 });
 financeRouter.post('/client-refunds', W, async (req, res) => {
-  const b = parse(z.object({ invoice_id: z.number().int(), amount: z.number().positive(), method: METHOD, cash_account_id: z.number().int(), reason: z.string().min(3) }), req.body);
+  const b = parse(z.object({ invoice_id: z.number().int(), amount: z.number().positive(), method: METHOD, cash_account_id: z.number().int(), reason: z.string().optional().default('') }), req.body);
   res.status(201).json({ id: await F.requestRefund(T(req), b) });
 });
 financeRouter.post('/client-refunds/:id/approve', W, async (req, res) => { await F.approveRefund(T(req), idParam(req)); res.json({ status: 'approved' }); });

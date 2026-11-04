@@ -20,7 +20,7 @@ export default function SupplierBills() {
   });
   const approve = async () => {
     let override: string | undefined;
-    if (view.mismatch_note) { override = prompt(`This bill does not match the booking cost:\n${view.mismatch_note}\n\nOverride reason (required to approve):`) ?? undefined; if (!override) return; }
+    if (view.mismatch_note) { override = prompt(`This bill does not match the booking cost:\n${view.mismatch_note}\n\nOverride note (optional):`) ?? undefined; }
     await run(() => api(`/finance/bills/${view.id}/approve`, 'POST', { override_reason: override }), () => setView(null));
   };
   return (
@@ -51,7 +51,7 @@ export default function SupplierBills() {
         {w && <div className="flex flex-wrap gap-2 mt-4">
           {['draft', 'pending_approval'].includes(view.status) && <button className="btn" onClick={approve}>Approve</button>}
           {['approved', 'partially_paid'].includes(view.status) && <button className="btn" onClick={() => setPay({ cash_account_id: '', amount: Math.round((view.total - view.amount_paid) * 100) / 100, date: today() })}>Record payment</button>}
-          {view.status !== 'void' && view.amount_paid === 0 && <button className="btn-ghost text-danger" onClick={() => { const r = prompt('Reason for voiding (required):'); if (r) run(() => api(`/finance/bills/${view.id}/void`, 'POST', { reason: r }), () => setView(null)); }}>Void</button>}</div>}</Modal>}
+          {view.status !== 'void' && view.amount_paid === 0 && <button className="btn-ghost text-danger" onClick={() => run(() => api(`/finance/bills/${view.id}/void`, 'POST', {}), () => setView(null))}>Void</button>}</div>}</Modal>}
       {pay && view && <Modal title={`Pay ${view.bill_no}`} onClose={() => setPay(null)}><Err e={err} />
         <Field label="Pay from"><select className="input" value={pay.cash_account_id} onChange={(e) => setPay({ ...pay, cash_account_id: e.target.value })}><option value="">Select…</option>{cash.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
         <div className="grid grid-cols-2 gap-3"><Field label="Amount"><Num v={pay.amount} set={(v) => setPay({ ...pay, amount: v })} /></Field><Field label="Date"><input className="input num" type="date" value={pay.date} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></Field></div>

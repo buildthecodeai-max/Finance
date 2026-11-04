@@ -128,11 +128,11 @@ bookingsRouter.get('/:id/usage', async (req, res) => {
 bookingsRouter.delete('/:id', requireRole(...ALL_EDITORS), async (req, res) => {
   const t = T(req), id = idParam(req), cur = await findScoped(t, req, 'bookings', id, OWN); assertCanEdit(req, cur, 'agent_id');
   if (req.ctx!.role === 'agent' && !AGENT_MAY_ARCHIVE.includes(cur.status)) throw new HttpError(403, 'Only finance or an admin can delete a confirmed booking. Ask them, or set it to Cancelled.');
-  const reason = parse(z.object({ reason: z.string().trim().min(3, 'A reason is required').max(300) }), req.body ?? {}).reason;
+  const reason = parse(z.object({ reason: z.string().trim().max(300).optional().default('') }), req.body ?? {}).reason;
   await archiveBooking(t, id, reason); await safeRecalc(t, id); res.json({ ok: true });
 });
 bookingsRouter.post('/:id/restore', requireRole(...WRITERS), async (req, res) => {
-  const t = T(req), id = idParam(req); await restoreBooking(t, id, parse(z.object({ reason: z.string().trim().min(3).max(300) }), req.body ?? {}).reason); await safeRecalc(t, id); res.json({ ok: true });
+  const t = T(req), id = idParam(req); await restoreBooking(t, id, parse(z.object({ reason: z.string().trim().max(300).optional().default('') }), req.body ?? {}).reason); await safeRecalc(t, id); res.json({ ok: true });
 });
 
 bookingsRouter.put('/:id', requireRole(...ALL_EDITORS), async (req, res) => {
@@ -144,8 +144,7 @@ bookingsRouter.put('/:id', requireRole(...ALL_EDITORS), async (req, res) => {
   if (req.ctx!.branchId) delete b.branch_id;
   await bookingRefs(t, b);
   if (b.status && b.status !== cur.status) {
-    if (NEEDS_REASON.includes(b.status) && !reason) throw new HttpError(400, `A reason is required to set status to ${b.status.replace('_', ' ')}`);
-    if (TERMINAL.includes(cur.status) && (!reason || !WRITERS.includes(req.ctx!.role))) throw new HttpError(403, `A ${cur.status} booking can only be reopened by finance/admin with a reason`);
+    if (TERMINAL.includes(cur.status) && !WRITERS.includes(req.ctx!.role)) throw new HttpError(403, `A ${cur.status} booking can only be reopened by finance/admin`);
   }
   if (b.reference && b.reference !== cur.reference) throw new HttpError(400, 'Booking reference cannot be changed');
   await t.tx(async (tx) => { await diff(tx, id, cur, b, reason); await tx.update('bookings', id, b); });
@@ -201,7 +200,7 @@ bookingsRouter.put('/:id/components/:cid', requireRole(...ALL_EDITORS), async (r
 
 bookingsRouter.delete('/:id/components/:cid', requireRole(...ALL_EDITORS), async (req, res) => {
   const id = idParam(req), cid = Number(req.params.cid), t = T(req); await editableBooking(req, id);
-  const { reason } = parse(z.object({ reason: z.string().min(3, 'A reason is required to remove a component') }), req.query);
+  const { reason } = parse(z.object({ reason: z.string().optional().default('') }), req.query);
   const cur = await t.one('SELECT * FROM booking_components WHERE agency_id = ? AND id = ? AND booking_id = ?', [t.agencyId, cid, id]);
   if (!cur) throw new HttpError(404, 'Component not found');
   await t.tx(async (tx) => { await logChange(tx, id, `component#${cid} removed`, `${cur.product_type}: ${cur.description} (${cur.net_total})`, null, reason); await tx.remove('booking_components', cid); });

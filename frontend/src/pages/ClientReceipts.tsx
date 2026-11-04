@@ -48,13 +48,13 @@ function NewReceipt({ onClose, onDone, preClient }: { onClose(): void; onDone():
 
 export default function ClientReceipts() {
   const { can } = useAuth(); const [sp] = useSearchParams();
-  const [rows, setRows] = useState<any[]>([]); const [creating, setCreating] = useState(false); const [view, setView] = useState<any>(null); const [err, setErr] = useState(''); const [reason, setReason] = useState('');
+  const [rows, setRows] = useState<any[]>([]); const [creating, setCreating] = useState(false); const [view, setView] = useState<any>(null); const [err, setErr] = useState('');
   const load = () => api('/finance/receipts').then(setRows).catch((e) => setErr(e.message));
   useEffect(() => { load(); if (sp.get('client')) setCreating(true); }, []);
   useOpenOnNew(() => setCreating(true));
   const w = can('admin', 'finance_manager');
-  const open = async (id: number) => { setReason(''); setErr(''); setView(await api(`/finance/receipts/${id}`)); };
-  const voidIt = async () => { try { await api(`/finance/receipts/${view.id}/void`, 'POST', { reason }); setView(null); load(); } catch (e: any) { setErr(e.message); } };
+  const open = async (id: number) => { setErr(''); setView(await api(`/finance/receipts/${id}`)); };
+  const voidIt = async () => { try { await api(`/finance/receipts/${view.id}/void`, 'POST', {}); setView(null); load(); } catch (e: any) { setErr(e.message); } };
   return (
     <Page title="Client receipts" description="Money received from clients, allocated to invoices. Voiding reverses the ledger entry; nothing is deleted." actions={w && <button className="btn" onClick={() => setCreating(true)}><Plus size={15} /> New receipt</button>}>
       <Err e={err} />
@@ -66,7 +66,7 @@ export default function ClientReceipts() {
       {view && <Modal title={`Receipt ${view.receipt_no}`} onClose={() => setView(null)}><Err e={err} />
         <div className="grid grid-cols-3 gap-3 text-sm mb-4"><div><div className="text-xs text-muted">Amount</div><b className="num">{money(view.amount, view.currency)}</b></div><div><div className="text-xs text-muted">Unallocated</div><b className="num">{money(view.unallocated, view.currency)}</b></div><div><div className="text-xs text-muted">Status</div><Pill s={view.status} /></div></div>
         <Table rows={view.allocations} cols={[{ h: 'Invoice', render: (a: any) => a.invoice_number }, { h: 'Amount', right: true, render: (a: any) => money(a.amount, view.currency) }, { h: '', render: (a: any) => (a.voided ? <Pill s="voided" /> : '') }]} />
-        {w && view.status === 'posted' && <div className="mt-4 flex gap-2"><input className="input" placeholder="Reason for voiding (required)" value={reason} onChange={(e) => setReason(e.target.value)} /><button className="btn-ghost text-danger" disabled={reason.length < 3} onClick={voidIt}>Void receipt</button></div>}</Modal>}
+        {w && view.status === 'posted' && <div className="mt-4 flex justify-end"><button className="btn-ghost text-danger" onClick={voidIt}>Void receipt</button></div>}</Modal>}
     </Page>
   );
 }

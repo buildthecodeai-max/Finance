@@ -26,7 +26,7 @@ export default function PaymentRuns() {
     if (view) setView(await api(`/finance/payment-runs/${view.run.id}`)); load();
   };
   const post = (path: string, body?: unknown) => act(() => api(`/finance/payment-runs/${view.run.id}/${path}`, 'POST', body));
-  const reasoned = (path: string, label: string) => { const reason = prompt(label); if (reason) post(path, { reason }); };
+  const reasoned = (path: string) => post(path, {});
   const startNew = async () => {
     setErr(''); const all = (await api('/finance/bills')).filter((b: any) => ['approved', 'partially_paid'].includes(b.status) && b.outstanding > 0);
     setBills(all); setForm({ currency: agency?.base_currency ?? 'USD', bank_account_id: '', run_date: today(), notes: '', pick: {} });
@@ -106,8 +106,8 @@ export default function PaymentRuns() {
           {w && r.status === 'draft' && <button className="btn" onClick={() => post('validate')}>Validate</button>}
           {w && r.status === 'validated' && <button className="btn" onClick={() => post('submit')}>Submit for approval</button>}
           {w && r.status === 'submitted' && <button className="btn" onClick={() => post('approve')}>Approve</button>}
-          {w && ['validated', 'submitted', 'approved'].includes(r.status) && <button className="btn-ghost" onClick={() => reasoned('return', 'Reason for sending back to draft:')}>Return to draft</button>}
-          {w && ['draft', 'validated', 'submitted', 'approved'].includes(r.status) && <button className="btn-ghost text-danger" onClick={() => reasoned('cancel', 'Reason for cancelling this run:')}>Cancel run</button>}
+          {w && ['validated', 'submitted', 'approved'].includes(r.status) && <button className="btn-ghost" onClick={() => reasoned('return')}>Return to draft</button>}
+          {w && ['draft', 'validated', 'submitted', 'approved'].includes(r.status) && <button className="btn-ghost text-danger" onClick={() => reasoned('cancel')}>Cancel run</button>}
           {w && (r.status === 'approved' || (SETTLING(r.status) && pending.length > 0)) && (FILE[r.currency] ?? ['csv']).map((f) => <button key={f} className={r.status === 'approved' ? 'btn' : 'btn-ghost'} onClick={() => download(f)}>{r.status === 'approved' ? 'Export ' : 'Re-download '}{f.toUpperCase()}</button>)}
           {w && r.status === 'exported' && <button className="btn-ghost" onClick={() => post('processing')}>Mark processing</button>}
           {w && SETTLING(r.status) && pending.length > 0 && <button className="btn" onClick={record}>Record settlement</button>}

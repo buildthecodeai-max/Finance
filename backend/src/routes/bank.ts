@@ -197,12 +197,12 @@ bankRouter.post('/auto-match', W, async (req, res) => {
 
 // ---------------------------------------------------------------- manual match / unmatch / ignore
 bankRouter.post('/transactions/:id/match', W, async (req, res) => {
-  const b = parse(z.object({ entries: z.array(z.object({ gl_entry_id: z.number().int(), amount: z.number().optional() })).default([]), adjustment: z.object({ account_id: z.number().int(), reason: z.string().min(3, 'A reason is required') }).optional() }), req.body);
+  const b = parse(z.object({ entries: z.array(z.object({ gl_entry_id: z.number().int(), amount: z.number().optional() })).default([]), adjustment: z.object({ account_id: z.number().int(), reason: z.string().optional().default('') }).optional() }), req.body);
   res.json(await applyMatch(T(req), idParam(req), b.entries, { method: 'manual', adjustment: b.adjustment }));
 });
 
 bankRouter.post('/transactions/:id/unmatch', W, async (req, res) => {
-  const { reason } = parse(z.object({ reason: z.string().min(3, 'A reason is required') }), req.body), t = T(req), id = idParam(req);
+  const { reason } = parse(z.object({ reason: z.string().optional().default('') }), req.body), t = T(req), id = idParam(req);
   await t.tx(async (tx) => {
     const txn = await loadTxn(tx, id, true); await assertStatementOpen(tx, txn);
     if (!txn.match_count) throw new HttpError(409, 'Nothing is matched');
@@ -217,7 +217,7 @@ bankRouter.post('/transactions/:id/unmatch', W, async (req, res) => {
 
 // "Ignore" declares a line is not a real bank movement (duplicate / noise). It is excluded from the reconciliation, so it needs a reason and is audited.
 bankRouter.post('/transactions/:id/ignore', W, async (req, res) => {
-  const { reason } = parse(z.object({ reason: z.string().min(3, 'A reason is required') }), req.body), t = T(req), id = idParam(req), txn = await loadTxn(t, id);
+  const { reason } = parse(z.object({ reason: z.string().optional().default('') }), req.body), t = T(req), id = idParam(req), txn = await loadTxn(t, id);
   await assertStatementOpen(t, txn);
   if (txn.match_count) throw new HttpError(409, 'Unmatch it first'); if (txn.status === 'ignored') throw new HttpError(409, 'Already ignored');
   await t.update('bank_transactions', id, { status: 'ignored', ignore_reason: reason }); res.json({ status: 'ignored' });
@@ -285,7 +285,7 @@ bankRouter.post('/statements/:id/finalize', W, async (req, res) => {
   res.json(out);
 });
 bankRouter.post('/statements/:id/reopen', requireRole('admin'), async (req, res) => {
-  const { reason } = parse(z.object({ reason: z.string().min(3, 'A reason is required') }), req.body), t = T(req), id = idParam(req), s = await t.get('bank_statements', id);
+  const { reason } = parse(z.object({ reason: z.string().optional().default('') }), req.body), t = T(req), id = idParam(req), s = await t.get('bank_statements', id);
   if (!s) throw new HttpError(404, 'Not found'); if (s.status !== 'reconciled') throw new HttpError(409, 'Not reconciled');
   await t.update('bank_statements', id, { status: 'open', reconciled_by: null, reconciled_at: null, reopened_reason: reason });
   await t.event('update', 'bank_statements', id, { status: 'reconciled' }, { status: 'open' }, reason); res.json({ status: 'open' });

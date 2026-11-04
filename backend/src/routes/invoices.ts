@@ -158,7 +158,7 @@ invoicesRouter.post('/:id/issue', requireRole(...WRITERS), async (req, res) => {
 });
 
 invoicesRouter.post('/:id/void', requireRole(...WRITERS), async (req, res) => {
-  const b = parse(z.object({ reason: z.string().min(3, 'A reason is required'), date: z.string().optional() }), req.body);
+  const b = parse(z.object({ reason: z.string().optional().default(''), date: z.string().optional() }), req.body);
   res.json(await voidInvoice(T(req), idParam(req), b.reason, b.date ?? today()));
 });
 

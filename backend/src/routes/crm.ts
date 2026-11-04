@@ -72,7 +72,6 @@ leadsRouter.put('/:id', requireRole(...ALL_EDITORS), async (req, res) => {
   assertCanEdit(req, cur);
   const b = parse(Lead.partial(), req.body);
   if (req.ctx!.role === 'agent') delete b.owner_id; // agents can't reassign
-  if (b.stage === 'lost' && !(b.lost_reason ?? cur.lost_reason)) throw new HttpError(400, 'A lost reason is required');
   await leadRefs(t, b);
   await t.tx(async (tx) => {
     await tx.update('leads', id, b);

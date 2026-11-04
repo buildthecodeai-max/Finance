@@ -29,8 +29,8 @@ function Explain({ id, onClose, onChange }: { id: number; onClose(): void; onCha
         <div className="card"><div className="text-xs text-muted">This agent's share ({e.split_pct}%)</div><b className="num">{money(c.computed_share ?? e.amount)}</b></div>
         <div className="card"><div className="text-xs text-muted">{c.override ? 'Manual override (final)' : 'Final amount'}</div><b className="num">{money(e.amount)}</b>{c.override && <div className="text-xs text-warn mt-1">{c.override.reason}</div>}</div></div>
       {e.adjustments.length > 0 && <><h4 className="font-semibold text-sm mt-4 mb-2">Adjustments after approval</h4><Table rows={e.adjustments} cols={[{ h: 'Kind', render: (a: any) => a.kind }, { h: 'Period', render: (a: any) => a.period }, { h: 'Reason', render: (a: any) => a.reason }, { h: 'Status', render: (a: any) => <Pill s={a.status} /> }, { h: 'Amount', right: true, render: (a: any) => money(a.amount) }]} /></>}
-      {w && !locked && <div className="flex flex-wrap items-end gap-2 mt-4"><Field label="Manual override amount"><div className="w-36"><Num v={amt} set={setAmt} /></div></Field><Field label="Reason (required)"><input className="input w-64" value={reason} onChange={(x) => setReason(x.target.value)} /></Field>
-        <button className="btn mb-3" disabled={amt === '' || reason.length < 3} onClick={() => setOverride(Number(amt))}>Apply override</button>{c.override && <button className="btn-ghost mb-3" onClick={() => setOverride(null)}>Remove override</button>}</div>}
+      {w && !locked && <div className="flex flex-wrap items-end gap-2 mt-4"><Field label="Manual override amount"><div className="w-36"><Num v={amt} set={setAmt} /></div></Field>
+        <button className="btn mb-3" disabled={amt === ''} onClick={() => setOverride(Number(amt))}>Apply override</button>{c.override && <button className="btn-ghost mb-3" onClick={() => setOverride(null)}>Remove override</button>}</div>}
     </Modal>
   );
 }
@@ -61,7 +61,7 @@ function PeriodDetail({ period, onClose, onChange }: { period: string; onClose()
         {['approved', 'paid'].includes(v.status) && <button className="btn-ghost" onClick={async () => download(`commission-payroll-${period}.csv`, await api(`/commissions/periods/${period}/payroll.csv`))}>Payroll CSV</button>}
         {v.status === 'approved' && <><select className="input w-48" value={payAcc} onChange={(e) => setPayAcc(e.target.value)}><option value="">Pay from…</option>{cash.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
           <button className="btn" disabled={!payAcc} onClick={() => act(() => api(`/commissions/periods/${period}/pay`, 'POST', { cash_account_id: Number(payAcc) }), 'Marked paid and posted')}>Pay</button></>}
-        {v.status === 'approved' && can('admin') && <button className="btn-ghost text-danger" onClick={() => { const r = prompt('Reason for reopening (required):'); if (r) act(() => api(`/commissions/periods/${period}/reopen`, 'POST', { reason: r }), 'Reopened'); }}>Reopen…</button>}
+        {v.status === 'approved' && can('admin') && <button className="btn-ghost text-danger" onClick={() => act(() => api(`/commissions/periods/${period}/reopen`, 'POST', {}), 'Reopened')}>Reopen…</button>}
       </div>}
       {explain && <Explain id={explain} onClose={() => setExplain(null)} onChange={load} />}
     </Modal>

@@ -80,7 +80,7 @@ function InvoiceDetail({ id, onClose, onChange }: { id: number; onClose(): void;
         {issued && outstanding > 0.005 && inv.status !== 'void' && <button className="btn" onClick={() => nav(`/client-receipts?client=${inv.client_id}`)}>Receive payment</button>}
         {issued && inv.status !== 'void' && <button className="btn-ghost" onClick={() => nav('/credit-notes')}>Credit note…</button>}
         {inv.status !== 'draft' && <button className="btn-ghost" onClick={() => run(async () => window.open((await api(`/invoices/${id}/pdf-url`)).url))}>PDF</button>}
-        {inv.status !== 'void' && inv.status !== 'credited' && (voiding ? <><input className="input w-64" placeholder="Reason for voiding (required)" value={reason} onChange={(e) => setReason(e.target.value)} /><button className="btn-ghost text-danger" disabled={reason.length < 3} onClick={() => run(() => api(`/invoices/${id}/void`, 'POST', { reason }))}>Confirm void</button></> : <button className="btn-ghost text-danger" onClick={() => setVoiding(true)}>Void…</button>)}</div>}
+        {inv.status !== 'void' && inv.status !== 'credited' && (voiding ? <><button className="btn-ghost text-danger" onClick={() => run(() => api(`/invoices/${id}/void`, 'POST', {}))}>Confirm void</button><button className="btn-ghost" onClick={() => setVoiding(false)}>Cancel</button></> : <button className="btn-ghost text-danger" onClick={() => setVoiding(true)}>Void…</button>)}</div>}
     </Modal>
   );
 }

@@ -13,7 +13,6 @@ export default function CreditNotes() {
   const load = () => { api('/finance/credit-notes').then(setCns); api('/finance/client-refunds').then(setRefunds); };
   useEffect(() => { load(); api('/invoices').then((r) => setInvoices(r.filter((i: any) => !['draft', 'reviewed', 'void'].includes(i.status)))); }, []);
   const run = async (fn: () => Promise<any>) => { try { await fn(); setErr(''); load(); } catch (e: any) { setErr(e.message); } };
-  const askReason = (what: string) => prompt(`Reason for ${what} (required):`) ?? '';
   return (
     <Page title="Credit notes & refunds" description="Corrections to issued invoices. Issued invoices are never edited — credit them, then refund any overpayment."
       actions={w && (tab === 'cn' ? <button className="btn" onClick={() => setForm({ invoice_id: '', reason: '', amount: '', tax: '' })}><Plus size={15} /> New credit note</button> : <button className="btn" onClick={() => setRform({ invoice_id: '', amount: '', method: 'bank_transfer', cash_account_id: '', reason: '' })}><Plus size={15} /> Request refund</button>)}>
@@ -24,7 +23,7 @@ export default function CreditNotes() {
         { h: 'Status', render: (r) => <Pill s={r.status} /> }, { h: 'Total', right: true, render: (r) => money(r.total, r.currency) },
         { h: '', render: (r) => w && <div className="flex gap-1 justify-end">
           {r.status === 'draft' && <button className="btn" onClick={() => run(() => api(`/finance/credit-notes/${r.id}/issue`, 'POST'))}>Issue</button>}
-          {r.status !== 'void' && <button className="btn-ghost text-danger" onClick={() => { const x = askReason('voiding this credit note'); if (x) run(() => api(`/finance/credit-notes/${r.id}/void`, 'POST', { reason: x })); }}>Void</button>}</div> }]} />
+          {r.status !== 'void' && <button className="btn-ghost text-danger" onClick={() => run(() => api(`/finance/credit-notes/${r.id}/void`, 'POST', {}))}>Void</button>}</div> }]} />
         : <Table rows={refunds} cols={[
           { h: 'No.', render: (r) => <span className="num font-medium">{r.refund_no}</span> }, { h: 'Invoice', render: (r) => r.invoice_number }, { h: 'Client', render: (r) => r.client_name }, { h: 'Requested by', render: (r) => r.requested_by_name },
           { h: 'Status', render: (r) => <Pill s={r.status} /> }, { h: 'Amount', right: true, render: (r) => money(r.amount, r.currency) },
@@ -36,13 +35,13 @@ export default function CreditNotes() {
         <Field label="Reason"><input className="input" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></Field>
         <div className="grid grid-cols-2 gap-3"><Field label="Amount (net)"><Num v={form.amount} set={(v) => setForm({ ...form, amount: v })} /></Field><Field label="Tax"><Num v={form.tax} set={(v) => setForm({ ...form, tax: v })} /></Field></div>
         <p className="text-xs text-muted mb-3">Created as a draft. Issuing posts it to the ledger; above the approval threshold a different person must issue it.</p>
-        <div className="flex justify-end"><button className="btn" disabled={!form.invoice_id || !form.reason || !form.amount} onClick={() => run(async () => { await api('/finance/credit-notes', 'POST', { invoice_id: Number(form.invoice_id), reason: form.reason, lines: [{ description: form.reason, amount: Number(form.amount), tax: Number(form.tax) || 0 }] }); setForm(null); })}>Create draft</button></div></Modal>}
+        <div className="flex justify-end"><button className="btn" disabled={!form.invoice_id || !form.amount} onClick={() => run(async () => { await api('/finance/credit-notes', 'POST', { invoice_id: Number(form.invoice_id), reason: form.reason || '', lines: [{ description: form.reason || 'Credit note', amount: Number(form.amount), tax: Number(form.tax) || 0 }] }); setForm(null); })}>Create draft</button></div></Modal>}
       {rform && <Modal title="Request client refund" onClose={() => setRform(null)}><Err e={err} />
         <Field label="Invoice (must be overpaid after credits)"><select className="input" value={rform.invoice_id} onChange={(e) => setRform({ ...rform, invoice_id: e.target.value })}><option value="">Select…</option>{invoices.filter((i) => i.amount_paid + i.amount_credited > i.total + 0.005).map((i) => <option key={i.id} value={i.id}>{i.number} — {i.client_name} — surplus {money(i.amount_paid + i.amount_credited - i.total, i.currency)}</option>)}</select></Field>
         <div className="grid grid-cols-2 gap-3"><Field label="Amount"><Num v={rform.amount} set={(v) => setRform({ ...rform, amount: v })} /></Field>
           <Field label="Pay from"><select className="input" value={rform.cash_account_id} onChange={(e) => setRform({ ...rform, cash_account_id: e.target.value })}><option value="">Select…</option>{cash.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field></div>
         <Field label="Reason"><input className="input" value={rform.reason} onChange={(e) => setRform({ ...rform, reason: e.target.value })} /></Field>
-        <div className="flex justify-end"><button className="btn" disabled={!rform.invoice_id || !rform.cash_account_id || !rform.amount || !rform.reason} onClick={() => run(async () => { await api('/finance/client-refunds', 'POST', { invoice_id: Number(rform.invoice_id), amount: Number(rform.amount), method: rform.method, cash_account_id: Number(rform.cash_account_id), reason: rform.reason }); setRform(null); })}>Request</button></div></Modal>}
+        <div className="flex justify-end"><button className="btn" disabled={!rform.invoice_id || !rform.cash_account_id || !rform.amount} onClick={() => run(async () => { await api('/finance/client-refunds', 'POST', { invoice_id: Number(rform.invoice_id), amount: Number(rform.amount), method: rform.method, cash_account_id: Number(rform.cash_account_id), reason: rform.reason || '' }); setRform(null); })}>Request</button></div></Modal>}
     </Page>
   );
 }

@@ -69,7 +69,7 @@ adminRouter.get('/period-locks', FINANCE, async (req, res) => {
 });
 
 adminRouter.post('/period-locks', FINANCE, async (req, res) => {
-  const b = parse(z.object({ locked_through: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), reason: z.string().min(3, 'A reason is required') }), req.body);
+  const b = parse(z.object({ locked_through: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), reason: z.string().optional().default('') }), req.body);
   const t = T(req); const a = await t.agency();
   const prev = a.locked_through ?? null;
   const reopening = prev !== null && (b.locked_through === null || b.locked_through < prev);

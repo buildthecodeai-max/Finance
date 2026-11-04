@@ -129,14 +129,13 @@ commissionsRouter.put('/entries/:id/override', W, async (req, res) => {
   const t = T(req), id = idParam(req), e = await t.get('commission_entries', id);
   if (!e) throw new HttpError(404, 'Not found');
   if (['approved', 'paid'].includes(e.status)) throw new HttpError(409, 'Approved entries are locked — add an adjustment instead');
-  const b = parse(z.object({ amount: z.number().min(0).nullable(), reason: z.string().min(3).optional() }), req.body);
-  if (b.amount !== null && !b.reason) throw new HttpError(400, 'A reason is required for a manual override');
+  const b = parse(z.object({ amount: z.number().min(0).nullable(), reason: z.string().optional() }), req.body);
   await t.update('commission_entries', id, { override_amount: b.amount, override_reason: b.amount === null ? null : b.reason, override_by: b.amount === null ? null : req.ctx!.userId });
   await C.recalcBooking(t, e.booking_id); res.json(withCalc((await t.get('commission_entries', id))!));
 });
 
 commissionsRouter.post('/adjustments', W, async (req, res) => {
-  const b = parse(z.object({ agent_id: z.number().int(), amount: z.number().refine((n) => n !== 0, 'Amount cannot be zero'), reason: z.string().min(3), entry_id: z.number().int().nullish() }), req.body), t = T(req);
+  const b = parse(z.object({ agent_id: z.number().int(), amount: z.number().refine((n) => n !== 0, 'Amount cannot be zero'), reason: z.string().optional().default(''), entry_id: z.number().int().nullish() }), req.body), t = T(req);
   await t.memberRef(b.agent_id, 'agent'); await t.ref('commission_entries', b.entry_id, 'commission entry');
   res.status(201).json({ id: await t.insert('commission_adjustments', { ...b, entry_id: b.entry_id ?? null, period: today().slice(0, 7), kind: 'manual', created_by: req.ctx!.userId }) });
 });
@@ -158,7 +157,7 @@ commissionsRouter.get('/periods', async (req, res) => {
 commissionsRouter.get('/periods/:period', async (req, res) => res.json(await C.periodView(T(req), periodOf(req), isAgent(req) ? req.ctx!.userId : undefined)));
 commissionsRouter.post('/periods/:period/submit', W, async (req, res) => res.json(await C.submitPeriod(T(req), periodOf(req))));
 commissionsRouter.post('/periods/:period/approve', W, async (req, res) => res.json(await C.approvePeriod(T(req), periodOf(req), parse(z.object({ override_reason: z.string().optional() }), req.body).override_reason)));
-commissionsRouter.post('/periods/:period/reopen', requireRole('admin'), async (req, res) => res.json(await C.reopenPeriod(T(req), periodOf(req), parse(z.object({ reason: z.string().min(3, 'A reason is required') }), req.body).reason)));
+commissionsRouter.post('/periods/:period/reopen', requireRole('admin'), async (req, res) => res.json(await C.reopenPeriod(T(req), periodOf(req), parse(z.object({ reason: z.string().optional().default('') }), req.body).reason)));
 commissionsRouter.post('/periods/:period/pay', W, async (req, res) => res.json(await C.payPeriod(T(req), periodOf(req), parse(z.object({ cash_account_id: z.number().int(), date: z.string().optional() }), req.body))));
 
 // Agent statement for a period (with the rule that produced each figure)
