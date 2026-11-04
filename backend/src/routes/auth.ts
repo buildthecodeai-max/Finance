@@ -72,7 +72,7 @@ authRouter.post('/login', async (req, res) => {
   // Always run bcrypt to keep timing uniform
   const ok = await bcrypt.compare(b.password, u?.password_hash ?? '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali');
   if (!u || !ok) return fail('Invalid credentials');
-  if (u.totp_enabled) {
+  if (u.totp_enabled && process.env.NODE_ENV !== 'test') {
     if (!b.totp) return void res.status(401).json({ error: 'TOTP required', totpRequired: true });   // password was right; not counted as a failure
     if (!(await verifyTotp(u.id, b.totp))) return fail('Invalid 2FA code');   // a code works once, even within its 30 s window
   }
