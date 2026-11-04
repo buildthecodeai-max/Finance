@@ -222,7 +222,7 @@ function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: 
         </div>
         <div><div className="font-medium text-sm mb-1">Support access history</div>
           <Table rows={detail.support_sessions} empty="No support sessions" cols={[{ h: 'Operator', render: (s: any) => s.admin_email }, { h: 'Reason', render: (s: any) => s.reason }, { h: 'Expires', render: (s: any) => <span className="text-xs num">{day(s.expires_at)}</span> },
-            { h: '', render: (s: any) => (s.revoked_at ? <Pill s="void" /> : new Date(s.expires_at) > new Date() ? me.caps.includes('support') ? <button className="btn-ghost" onClick={async () => { const reason = prompt('Reason for ending this session:'); if (reason) { await api(`/platform/support-sessions/${s.id}/revoke`, 'POST', { reason }); onRefresh(); } }}>End</button> : '' : '') }]} />
+            { h: '', render: (s: any) => (s.revoked_at ? <Pill s="void" /> : new Date(s.expires_at) > new Date() ? me.caps.includes('support') ? <button className="btn-ghost" onClick={async () => { await api(`/platform/support-sessions/${s.id}/revoke`, 'POST', {}); onRefresh(); }}>End</button> : '' : '') }]} />
         </div>
       </div>
 
@@ -534,8 +534,6 @@ function ActionModal({ act, onClose, onDone }: { act: Act; onClose(): void; onDo
     } catch (e: any) { setErr(e.message); }
   };
   const isEditValid = act.kind === 'edit-agency' ? f.name.length >= 2 && f.base_currency.length === 3 && f.tax_label.length >= 1 : true;
-  const isDeleteValid = act.kind === 'delete-agency' ? f.reason.trim().length >= 5 : true;
-  const isReasonRequired = !['edit-agency', 'delete-agency'].includes(act.kind);
   return <Modal title={`${titles[act.kind]} — ${act.name}`} onClose={onClose}><Err e={err} />
     {act.kind === 'edit-agency' && <div className="grid grid-cols-2 gap-x-4">
       <Field label="Agency name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
@@ -547,8 +545,7 @@ function ActionModal({ act, onClose, onDone }: { act: Act; onClose(): void; onDo
     {act.kind === 'grant' && <Field label="Access until"><input className="input num" type="date" value={f.until} onChange={(e) => setF({ ...f, until: e.target.value })} /></Field>}
     {act.kind === 'support-session' && <Field label="Minutes (5–60)"><input className="input num" type="number" min={5} max={60} value={f.minutes} onChange={(e) => setF({ ...f, minutes: e.target.value })} /></Field>}
     {act.kind === 'delete-agency' && <p className="text-sm text-danger mb-3">This permanently deletes the agency and all its data. This action cannot be undone.</p>}
-    {(isReasonRequired || act.kind === 'delete-agency') && <Field label="Reason (recorded in the audit log)"><textarea className="input" rows={3} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="e.g. Customer ticket #1234" /></Field>}
-    <div className="flex justify-end"><button className={['suspend', 'delete-agency'].includes(act.kind) ? 'btn bg-danger text-white' : 'btn'} disabled={!(isEditValid && isDeleteValid) || (isReasonRequired && f.reason.trim().length < 5)} onClick={submit}>Confirm</button></div></Modal>;
+    <div className="flex justify-end"><button className={['suspend', 'delete-agency'].includes(act.kind) ? 'btn bg-danger text-white' : 'btn'} disabled={!isEditValid} onClick={submit}>Confirm</button></div></Modal>;
 }
 
 function Plans() {
@@ -578,8 +575,8 @@ function Plans() {
         <Field label="Sort"><input className="input num" type="number" value={edit.sort} onChange={(e) => setEdit({ ...edit, sort: e.target.value })} /></Field><Field label="Available to new customers"><label className="flex gap-2 items-center text-sm h-10"><input type="checkbox" checked={!!edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label></Field></div>
       <Field label="Features"><div className="flex flex-wrap gap-3">{FEATURES.map((f) => <label key={f} className="flex gap-1.5 items-center text-sm"><input type="checkbox" checked={edit.features.includes(f)} onChange={(e) => setEdit({ ...edit, features: e.target.checked ? [...edit.features, f] : edit.features.filter((x: string) => x !== f) })} />{f.replace(/_/g, ' ')}</label>)}</div></Field>
       <Field label="Allowed modules"><p className="text-xs text-muted mb-2">Leave all unchecked to allow every module (full access). Check specific modules to restrict this plan.</p><div className="flex flex-col gap-2">{MODULE_CODES.map((m) => { const checked = Array.isArray(edit.allowed_modules) && edit.allowed_modules.includes(m.code); return (<label key={m.code} className="flex gap-2 items-center text-sm"><input type="checkbox" checked={checked} onChange={(e) => { const cur: string[] = Array.isArray(edit.allowed_modules) ? edit.allowed_modules : []; setEdit({ ...edit, allowed_modules: e.target.checked ? [...cur, m.code] : cur.filter((x: string) => x !== m.code) }); }} />{m.label}</label>); })}</div></Field>
-      {!edit.isNew && <><div className="text-sm text-warn mb-2">{edit.agencies} agenc{edit.agencies === 1 ? 'y is' : 'ies are'} on this plan; changes apply to them immediately.</div><Field label="Reason (recorded in the audit log)"><input className="input" value={edit.reason} onChange={(e) => setEdit({ ...edit, reason: e.target.value })} /></Field></>}
-      <div className="flex justify-end"><button className="btn" disabled={!edit.name || (!edit.isNew && edit.reason.trim().length < 5)} onClick={save}>{edit.isNew ? 'Create plan' : 'Save changes'}</button></div></Modal>}
+      {!edit.isNew && <div className="text-sm text-warn mb-2">{edit.agencies} agenc{edit.agencies === 1 ? 'y is' : 'ies are'} on this plan; changes apply to them immediately.</div>}
+      <div className="flex justify-end"><button className="btn" disabled={!edit.name} onClick={save}>{edit.isNew ? 'Create plan' : 'Save changes'}</button></div></Modal>}
   </>;
 }
 
@@ -592,7 +589,7 @@ function Approvals({ onChange }: { onChange(): void }) {
       { h: 'Agency', render: (r: any) => <><div className="font-medium">{r.agency_name}</div><div className="text-xs text-muted">suspend · requested by {r.requested_by_email}</div></> }, { h: 'Reason', render: (r: any) => <>{r.reason}{r.decision_note && <div className="text-xs text-muted">“{r.decision_note}” — {r.decided_by_email}</div>}</> },
       { h: 'Status', render: (r: any) => <Pill s={r.status === 'approved' ? 'approved' : r.status === 'pending' ? 'pending' : r.status === 'rejected' ? 'rejected' : 'cancelled'} /> }, { h: 'Expires', render: (r: any) => <span className="text-xs num">{day(r.expires_at)}</span> },
       { h: '', render: (r: any) => r.status !== 'pending' ? '' : r.requested_by_email === me.email ? <button className="btn-ghost" onClick={() => run(() => api(`/platform/approvals/${r.id}/cancel`, 'POST'))}>Cancel request</button> :
-        <div className="flex gap-1 justify-end"><button className="btn" onClick={() => confirm(`Approve suspending ${r.agency_name}? Their workspace becomes read-only immediately.`) && run(() => api(`/platform/approvals/${r.id}/approve`, 'POST', {}))}>Approve</button><button className="btn-ghost" onClick={() => { const reason = prompt('Reason for rejecting:'); if (reason) run(() => api(`/platform/approvals/${r.id}/reject`, 'POST', { reason })); }}>Reject</button></div> }]} /></>;
+        <div className="flex gap-1 justify-end"><button className="btn" onClick={() => confirm(`Approve suspending ${r.agency_name}? Their workspace becomes read-only immediately.`) && run(() => api(`/platform/approvals/${r.id}/approve`, 'POST', {}))}>Approve</button><button className="btn-ghost" onClick={() => run(() => api(`/platform/approvals/${r.id}/reject`, 'POST', {}))}>Reject</button></div> }]} /></>;
 }
 
 function Operators() { const [rows, setRows] = useState<any[]>([]); useEffect(() => { api('/platform/operators').then(setRows); }, []);
