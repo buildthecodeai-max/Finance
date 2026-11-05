@@ -12,6 +12,14 @@ mysql -u root -p -e "CREATE DATABASE travelfinance CHARACTER SET utf8mb4"
 cd backend && cp .env.example .env     # fill DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY (openssl rand -hex 32), R2_*
 npm install && npm run migrate && npm run seed && npm run dev   # seed login: demo@agency.test / DemoPass#2026
 
+Demo agency for showing the product to a client (realistic data across every module, dates always relative to today):
+
+```bash
+npm run seed:demo            # server must be running; creates "Sunrise Travel & Tours"
+npm run seed:demo -- --reset # wipe and rebuild only that agency
+# logins: demo@sunrise-travel.test (admin), finance@sunrise-travel.test, agent@sunrise-travel.test — password SunriseDemo#2026
+```
+
 # 3. UI
 cd ../frontend && npm install && npm run dev   # http://localhost:5173 (proxies /api -> :4000)
 ```

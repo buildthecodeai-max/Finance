@@ -1,7 +1,7 @@
 import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Banknote, BarChart3, BookOpen, Briefcase, Building2, CalendarClock, Calculator as CalcIcon, Check, ChevronRight, ChevronsLeft, ChevronsUpDown,
+  ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Banknote, BarChart3, BookOpen, Briefcase, Building2, CalendarClock, Calculator as CalcIcon, Check, ChevronDown, ChevronRight, ChevronsLeft, ChevronsUpDown,
   Coins, CreditCard, FileMinus, FileSignature, FileText, HandCoins, LineChart, Truck, LayoutDashboard, Library, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Percent, Plane, Plus, ScrollText, Search, Settings, MoonStar, ShieldCheck, Stamp, Sun, Target, Ticket, TrendingUp, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api } from '../api';
@@ -11,49 +11,62 @@ import Calculator from './Calculator';
 import Fallback from './Fallback';
 
 type Role = AgencyRef['role'];
-interface Item { to: string; label: string; icon: ReactNode; roles?: Role[] }
+interface Item { to: string; label: string; icon: ReactNode; roles?: Role[]; module?: string; children?: Item[] }
 const I = (C: any) => <C size={17} strokeWidth={1.8} />;
 const FINANCE: Role[] = ['admin', 'finance_manager', 'viewer'];
 
 // module: which package module(s) gate this group. null = always visible. Array = visible if ANY match.
 const GROUPS: { title: string; module: string | string[] | null; items: Item[] }[] = [
   { title: 'Overview', module: null, items: [{ to: '/', label: 'Dashboard', icon: I(LayoutDashboard) }, { to: '/operations', label: 'Operations', icon: I(CalendarClock) }] },
-  { title: 'Sales', module: 'crm', items: [{ to: '/leads', label: 'Leads', icon: I(Target) }, { to: '/quotes', label: 'Quotes', icon: I(FileSignature) }, { to: '/bookings', label: 'Bookings', icon: I(Briefcase) }, { to: '/clients', label: 'Clients', icon: I(Users) }, { to: '/visas', label: 'Visas', icon: I(Stamp) }, { to: '/umrah', label: 'Umrah Groups', icon: I(MoonStar) }] },
-  { title: 'Ticketing', module: 'ticketing', items: [{ to: '/ticket-invoices', label: 'Ticket Invoices', icon: I(Ticket) }, { to: '/refunds', label: 'Refunds', icon: I(Undo2) }, { to: '/ticket-search', label: 'Ticket Search', icon: I(Search) }, { to: '/airlines', label: 'Airlines', icon: I(Plane) }, { to: '/sale-reports', label: 'Sale Reports', icon: I(TrendingUp), roles: FINANCE }, { to: '/bsp-reconciliation', label: 'BSP Reconciliation', icon: I(ArrowLeftRight), roles: FINANCE }] },
+  { title: 'Sales', module: ['crm', 'ticketing'], items: [
+    { to: '/leads', label: 'Leads', icon: I(Target), module: 'crm' },
+    { to: '/quotes', label: 'Quotes', icon: I(FileSignature), module: 'crm' },
+    { to: '/bookings', label: 'Bookings', icon: I(Briefcase), children: [
+      { to: '/bookings', label: 'All bookings', icon: I(Briefcase), module: 'crm' },
+      { to: '/ticket-invoices', label: 'Ticket invoices', icon: I(Ticket), module: 'ticketing' },
+      { to: '/refunds', label: 'Ticket refunds', icon: I(Undo2), module: 'ticketing' },
+      { to: '/ticket-search', label: 'Ticket search', icon: I(Search), module: 'ticketing' },
+      { to: '/airlines', label: 'Airlines', icon: I(Plane), module: 'ticketing' },
+      { to: '/visas', label: 'Visas', icon: I(Stamp), module: 'crm' },
+      { to: '/umrah', label: 'Umrah groups', icon: I(MoonStar), module: 'crm' }] },
+    { to: '/clients', label: 'Clients', icon: I(Users), children: [
+      { to: '/clients', label: 'All clients', icon: I(Users), module: 'crm' },
+      { to: '/client-portal', label: 'Client portal', icon: I(Users), roles: FINANCE, module: 'finance' }] }] },
   { title: 'Finance & Accounting', module: ['finance', 'accounting'], items: [
-    // Overview & client-side
     { to: '/finance', label: 'Overview', icon: I(LineChart), roles: FINANCE },
-    { to: '/invoices', label: 'Invoices', icon: I(FileText) },
-    { to: '/client-receipts', label: 'Client Receipts', icon: I(HandCoins), roles: FINANCE },
-    { to: '/credit-notes', label: 'Credit Notes & Refunds', icon: I(FileMinus), roles: FINANCE },
-    { to: '/payments', label: 'Payments', icon: I(CreditCard) },
-    { to: '/statements', label: 'Statements', icon: I(ScrollText), roles: FINANCE },
-    // Supplier-side
-    { to: '/supplier-bills', label: 'Supplier Bills', icon: I(Truck), roles: FINANCE },
-    { to: '/payment-runs', label: 'Payment Runs', icon: I(Banknote), roles: FINANCE },
-    // Cash & Bank
-    { to: '/cash-bank', label: 'Cash / Bank', icon: I(Wallet), roles: FINANCE },
-    { to: '/reconciliation', label: 'Bank Reconciliation', icon: I(ArrowLeftRight), roles: FINANCE },
-    { to: '/receipts', label: 'Cash Receipts', icon: I(ArrowDownToLine), roles: FINANCE },
-    { to: '/payment-vouchers', label: 'Cash Payments', icon: I(ArrowUpFromLine), roles: FINANCE },
-    // General Ledger
-    { to: '/accounts', label: 'Accounts & Ledger', icon: I(BookOpen), roles: FINANCE },
-    { to: '/journal', label: 'Journal Voucher', icon: I(NotebookPen), roles: FINANCE },
-    // Other
-    { to: '/suppliers', label: 'Suppliers', icon: I(Building2) },
-    { to: '/commissions', label: 'Commissions', icon: I(Percent) },
-    { to: '/exchange-rates', label: 'Exchange Rates', icon: I(Coins), roles: FINANCE },
-    { to: '/client-portal', label: 'Client Portal', icon: I(Users), roles: FINANCE },
-    { to: '/cheque-format', label: 'Cheque Format', icon: I(Banknote), roles: FINANCE },
-    { to: '/reports', label: 'Reports', icon: I(BarChart3), roles: FINANCE },
-  ]},
-  { title: 'Insights & Automation', module: 'insights', items: [{ to: '/reports', label: 'Reports', icon: I(BarChart3) }, { to: '/automation', label: 'Automation', icon: I(CalendarClock), roles: FINANCE }, { to: '/integrations', label: 'Integrations', icon: I(ArrowLeftRight), roles: FINANCE }] },
+    { to: '/invoices', label: 'Invoices', icon: I(FileText), children: [
+      { to: '/invoices', label: 'All invoices', icon: I(FileText) },
+      { to: '/client-receipts', label: 'Client receipts', icon: I(HandCoins), roles: FINANCE },
+      { to: '/receipts', label: 'Cash receipts', icon: I(ArrowDownToLine), roles: FINANCE },
+      { to: '/payments', label: 'Payments received', icon: I(CreditCard) },
+      { to: '/credit-notes', label: 'Credit notes & refunds', icon: I(FileMinus), roles: FINANCE },
+      { to: '/statements', label: 'Client statements', icon: I(ScrollText), roles: FINANCE }] },
+    { to: '/suppliers', label: 'Suppliers', icon: I(Building2), children: [
+      { to: '/suppliers', label: 'All suppliers', icon: I(Building2) },
+      { to: '/supplier-bills', label: 'Supplier bills', icon: I(Truck), roles: FINANCE },
+      { to: '/payment-runs', label: 'Payment runs', icon: I(Banknote), roles: FINANCE },
+      { to: '/payment-vouchers', label: 'Cash payments', icon: I(ArrowUpFromLine), roles: FINANCE }] },
+    { to: '/cash-bank', label: 'Cash & bank', icon: I(Wallet), roles: FINANCE, children: [
+      { to: '/cash-bank', label: 'Cash / bank accounts', icon: I(Wallet), roles: FINANCE },
+      { to: '/reconciliation', label: 'Bank reconciliation', icon: I(ArrowLeftRight), roles: FINANCE },
+      { to: '/cheque-format', label: 'Cheque format', icon: I(Banknote), roles: FINANCE }] },
+    { to: '/accounts', label: 'Accounts', icon: I(BookOpen), roles: FINANCE, children: [
+      { to: '/accounts', label: 'Accounts & ledger', icon: I(BookOpen), roles: FINANCE },
+      { to: '/journal', label: 'Journal voucher', icon: I(NotebookPen), roles: FINANCE },
+      { to: '/exchange-rates', label: 'Exchange rates', icon: I(Coins), roles: FINANCE }] },
+    { to: '/commissions', label: 'Commissions', icon: I(Percent) }] },
+  { title: 'Insights & Automation', module: 'insights', items: [
+    { to: '/reports', label: 'Reports', icon: I(BarChart3), roles: FINANCE, children: [
+      { to: '/reports', label: 'All reports', icon: I(BarChart3), roles: FINANCE },
+      { to: '/sale-reports', label: 'Ticket sale reports', icon: I(TrendingUp), roles: FINANCE, module: 'ticketing' },
+      { to: '/bsp-reconciliation', label: 'BSP reconciliation', icon: I(ArrowLeftRight), roles: FINANCE, module: 'ticketing' }] },
+    { to: '/automation', label: 'Automation', icon: I(CalendarClock), roles: FINANCE }, { to: '/integrations', label: 'Integrations', icon: I(ArrowLeftRight), roles: FINANCE }] },
   { title: 'Administration', module: null, items: [{ to: '/settings', label: 'Settings', icon: I(Settings) }, { to: '/team', label: 'Team & Branches', icon: I(Users), roles: ['admin', 'finance_manager'] }, { to: '/billing', label: 'Billing', icon: I(CreditCard), roles: ['admin'] }, { to: '/audit', label: 'Audit Log', icon: I(ScrollText), roles: ['admin', 'finance_manager'] }] },
 ];
-const FLAT = GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.title })));
+const FLAT = GROUPS.flatMap((g) => g.items.flatMap((i) => (i.children ? i.children.map((c) => ({ ...c, group: i.label })) : [{ ...i, group: g.title }])));
 const findItem = (p: string) => FLAT.find((i) => i.to === p);
 const labelFor = (p: string) => findItem(p)?.label ?? (p.startsWith('/umrah/') ? 'Umrah group' : p.startsWith('/bookings/') ? 'Booking' : p.startsWith('/quotes/') ? 'Quote' : undefined);
-const groupFor = (p: string) => findItem(p)?.group ?? (p.startsWith('/bookings/') ? 'Sales' : p.startsWith('/quotes/') ? 'Sales' : '');
+const groupFor = (p: string) => findItem(p)?.group ?? (p.startsWith('/bookings/') ? 'Bookings' : p.startsWith('/quotes/') ? 'Sales' : p.startsWith('/umrah/') ? 'Bookings' : '');
 
 /* ---------- small popover ---------- */
 function Popover({ trigger, children, align = 'right', width = 'w-56' }: { trigger: (open: boolean, toggle: () => void) => ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right'; width?: string }) {
@@ -147,7 +160,10 @@ function OperatorSwitcher() {
 /* ---------- sidebar ---------- */
 function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { collapsed: boolean; onNavigate?(): void; onCollapse?(): void; allowedModules?: string[] | null }) {
   const { agency, agencies, switchAgency, operator } = useAuth();
-  const role = agency?.role ?? 'viewer';
+  const role = agency?.role ?? 'viewer'; const loc = useLocation();
+  const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('tf-nav-open') ?? '{}'); } catch { return {}; } });
+  const toggle = (k: string, now: boolean) => setOpenMap((m) => { const n = { ...m, [k]: !now }; try { localStorage.setItem('tf-nav-open', JSON.stringify(n)); } catch { /* ignore */ } return n; });
+  const isOn = (to: string) => loc.pathname === to || loc.pathname.startsWith(`${to}/`);
   const shown = new Set<string>();   // a destination listed in two sections (Reports) appears once, in the first visible one
   return (
     <div className="flex h-full flex-col">
@@ -170,16 +186,31 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
           // null module = always visible; string[] = visible if ANY match; otherwise check single module
           const mods = Array.isArray(g.module) ? g.module : g.module ? [g.module] : null;
           if (mods !== null && allowedModules != null && !mods.some((m) => allowedModules.includes(m))) return null;
-          const items = g.items.filter((i) => (!i.roles || i.roles.includes(role)) && !shown.has(i.to));
-          items.forEach((i) => shown.add(i.to));
-          if (!items.length) return null;
+          const allowed = (i: Item) => (!i.roles || i.roles.includes(role)) && (!i.module || allowedModules == null || allowedModules.includes(i.module));
+          const entries = g.items.map((i) => {
+            if (!i.children) return allowed(i) && !shown.has(i.to) ? { item: i, kids: null as Item[] | null } : null;
+            const kids = i.children.filter((c) => allowed(c) && !shown.has(c.to));
+            return kids.length ? { item: i, kids } : null;
+          }).filter((e): e is { item: Item; kids: Item[] | null } => !!e);
+          entries.forEach((e) => (e.kids ? e.kids.forEach((k) => shown.add(k.to)) : shown.add(e.item.to)));
+          if (!entries.length) return null;
+          const link = (i: Item, cls: (a: boolean) => string, child = false) => (
+            <NavLink key={i.to} to={i.to} end={i.to === '/'} onClick={onNavigate} title={collapsed ? i.label : undefined} className={({ isActive }) => cls(isActive)}>{!child && i.icon}{(!collapsed || child) && <span className="truncate">{i.label}</span>}</NavLink>);
           return (
             <div key={g.title}>
               {!collapsed ? <div className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted/80">{g.title}</div> : <div className="mx-2 mb-1.5 border-t border-line first:hidden" />}
-              <div className="space-y-0.5">{items.map((i) => (
-                <NavLink key={i.to} to={i.to} end={i.to === '/'} onClick={onNavigate} title={collapsed ? i.label : undefined}
-                  className={({ isActive }) => `group flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors ${collapsed ? 'justify-center' : ''} ${isActive ? 'bg-accent/10 text-accent font-medium' : 'text-muted hover:text-fg hover:bg-surface2'}`}>
-                  {i.icon}{!collapsed && <span className="truncate">{i.label}</span>}</NavLink>))}</div>
+              <div className="space-y-0.5">{entries.map(({ item: i, kids }) => {
+                const top = (a: boolean) => `group flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors ${collapsed ? 'justify-center' : ''} ${a ? 'bg-accent/10 text-accent font-medium' : 'text-muted hover:text-fg hover:bg-surface2'}`;
+                if (!kids) return link(i, top);
+                if (collapsed) return link({ ...i, to: kids[0].to }, (a) => top(a || kids.some((k) => isOn(k.to))));
+                const on = kids.some((k) => isOn(k.to)), open = openMap[i.label] ?? on;
+                return (
+                  <div key={i.label}>
+                    <button type="button" aria-expanded={open} onClick={() => toggle(i.label, open)} className={`w-full flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors ${on ? 'text-accent font-medium' : 'text-muted hover:text-fg hover:bg-surface2'}`}>
+                      {i.icon}<span className="truncate flex-1 text-left">{i.label}</span><ChevronDown size={14} className={`transition-transform ${open ? '' : '-rotate-90'}`} /></button>
+                    {open && <div className="ml-[19px] mt-0.5 mb-1 border-l border-line pl-2 space-y-0.5">{kids.map((k) => link(k, (a) => `flex items-center rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${a ? 'bg-accent/10 text-accent font-medium' : 'text-muted hover:text-fg hover:bg-surface2'}`, true))}</div>}
+                  </div>);
+              })}</div>
             </div>);
         })}
       </nav>
