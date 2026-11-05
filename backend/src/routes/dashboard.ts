@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { scope } from './scope.js';
 import { T } from './util.js';
 
 export const dashboardRouter = Router();
@@ -19,6 +20,23 @@ dashboardRouter.get('/', async (req, res) => {
     t.query(`SELECT category, SUM(amount*fx_rate) v FROM expenses WHERE agency_id = ? AND incurred_on >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH) GROUP BY category ORDER BY v DESC`, [a]),
     t.query(`SELECT a.id, a.action, a.entity, a.entity_id, a.created_at, u.name user FROM audit_log a LEFT JOIN users u ON u.id=a.user_id WHERE a.agency_id = ? AND a.entity IN ('invoices','payments','payment_runs','commissions','clients','suppliers') ORDER BY a.id DESC LIMIT 12`, [a]),
   ]);
+  // "What needs doing" counts. Agents only see their own records, and never agency-wide money.
+  const agent = req.ctx!.role === 'agent', qs = scope(req, 'q'), bs = scope(req, 'b', { owner: 'agent_id' }), vs = scope(req, 'v', { owner: 'owner_id' });
+  const one = async (sql: string, params: any[]) => (await t.one<any>(sql, params)) ?? {};
+  const [qt, bk, inv, visa, task, counts] = await Promise.all([
+    one(`SELECT SUM(q.status = 'accepted') accepted, SUM(q.status = 'changes_requested') changes, SUM(q.status = 'sent' AND q.valid_until BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)) expiring
+         FROM quotes q WHERE q.agency_id = ?${qs.sql}`, [a, ...qs.params]),
+    one(`SELECT COUNT(*) n FROM bookings b WHERE b.agency_id = ?${bs.sql} AND b.archived_at IS NULL AND b.status = 'confirmed' AND b.travel_start BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)`, [a, ...bs.params]),
+    agent ? Promise.resolve({}) : one(`SELECT SUM(status IN ('sent','partially_paid','overdue') AND due_date < CURDATE()) overdue_n,
+         COALESCE(SUM(CASE WHEN status IN ('sent','partially_paid','overdue') AND due_date < CURDATE() THEN (total-amount_credited-amount_paid)*fx_rate END), 0) overdue_amt, SUM(status = 'reviewed') ready, SUM(status = 'draft') drafts
+         FROM invoices WHERE agency_id = ?`, [a]),
+    one(`SELECT COUNT(*) n FROM visa_applications v WHERE v.agency_id = ?${vs.sql} AND v.status IN ('submitted','in_process') AND v.expected_on < CURDATE()`, [a, ...vs.params]),
+    one(`SELECT COUNT(*) n FROM tasks k WHERE k.agency_id = ? AND k.status = 'open' AND k.due_at < CURDATE() ${agent ? 'AND k.owner_id = ?' : ''}`, [a, ...(agent ? [req.ctx!.userId] : [])]),
+    one(`SELECT (SELECT COUNT(*) FROM clients WHERE agency_id = ? AND archived_at IS NULL) clients, (SELECT COUNT(*) FROM quotes WHERE agency_id = ?) quotes,
+                (SELECT COUNT(*) FROM bookings WHERE agency_id = ? AND archived_at IS NULL) bookings, (SELECT COUNT(*) FROM invoices WHERE agency_id = ?) invoices`, [a, a, a, a]),
+  ]);
+  const n = (v: any) => Number(v ?? 0);
+  const attention = { quotes_accepted: n(qt.accepted), quotes_changes: n(qt.changes), quotes_expiring: n(qt.expiring), departing_7d: n(bk.n), overdue_invoices: n(inv.overdue_n), overdue_amount: n(inv.overdue_amt), invoices_ready: n(inv.ready), invoices_draft: n(inv.drafts), visas_late: n(visa.n), tasks_overdue: n(task.n) };
   const series = (rows: { m: string; v: number }[]) => [...rows].sort((x, y) => x.m.localeCompare(y.m)).map((r) => r.v);
   const total = (rows: { v: number }[]) => rows.reduce((s, r) => s + r.v, 0);
   res.json({
@@ -28,6 +46,6 @@ dashboardRouter.get('/', async (req, res) => {
       outstandingAr: { value: ar[0].v, trend: [] },
       netCommission: { value: total(comm), trend: series(comm) },
     },
-    recentInvoices: recent, arAging: aging[0], revenueByType: byType, expenses, activity,
+    attention, counts: Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, n(v)])), recentInvoices: recent, arAging: aging[0], revenueByType: byType, expenses, activity,
   });
 });

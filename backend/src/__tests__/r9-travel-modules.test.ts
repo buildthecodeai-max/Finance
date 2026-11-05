@@ -267,3 +267,16 @@ describe('supplier page data', () => {
     expect(((await B.get('/suppliers')).body as any[]).some((s) => s.id === sup)).toBe(false);
   });
 });
+
+describe('dashboard attention list', () => {
+  it('counts what needs doing, keeps agents to their own work and hides agency-wide money from them', async () => {
+    const mk = (api: Api, title: string) => api.post('/quotes', { title, client_id: clientId, currency: 'USD', components: [{ option_name: 'O', product_type: 'hotel', description: 'x', unit_cost: 100, markup_pct: 20, quantity: 1 }] });
+    const q1 = (await mk(agent, 'Agent accepted')).body.id; await agent.post(`/quotes/${q1}/send`, {}); await agent.post(`/quotes/${q1}/accept`, { name: 'C' });
+    const q2 = (await mk(agent2, 'Other agent accepted')).body.id; await agent2.post(`/quotes/${q2}/send`, {}); await agent2.post(`/quotes/${q2}/accept`, { name: 'C' });
+    const mine = (await agent.get('/dashboard')).body, all = (await A.get('/dashboard')).body;
+    expect(all.attention.quotes_accepted).toBeGreaterThanOrEqual(2); expect(mine.attention.quotes_accepted).toBe(1);
+    expect(mine.attention.overdue_invoices).toBe(0); expect(mine.attention.overdue_amount).toBe(0);
+    expect(all.counts.clients).toBeGreaterThan(0); expect(all.counts.quotes).toBeGreaterThanOrEqual(2);
+    const bd = (await B.get('/dashboard')).body; expect(bd.attention.quotes_accepted).toBe(0); expect(bd.counts.quotes).toBe(0);
+  });
+});
