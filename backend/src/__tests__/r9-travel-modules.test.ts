@@ -254,3 +254,16 @@ describe('editing accepted quotes', () => {
     const r = await A.put(`/quotes/${id}`, body(150)); expect(r.status).toBe(409); expect(r.body.error).toMatch(/booking/i);
   });
 });
+
+describe('supplier page data', () => {
+  it('shows finance what is owed to a supplier and hides money from agents', async () => {
+    const sup = (await A.post('/suppliers', { name: 'Owed Hotel', supplier_type: 'hotel', currency: 'USD' })).body.id;
+    const agencyId = A.agencyId;
+    await sql(`INSERT INTO supplier_bills (agency_id, bill_no, supplier_id, supplier_ref, bill_date, due_date, currency, total, amount_paid, status, created_by) VALUES (?, 'SB-T1', ?, 'X1', '2026-01-01', '2026-01-31', 'USD', 500, 200, 'partially_paid', ?), (?, 'SB-T2', ?, 'X2', '2026-01-01', '2026-01-31', 'USD', 900, 0, 'draft', ?)`, [agencyId, sup, A.userId, agencyId, sup, A.userId]);
+    const mine = ((await A.get('/suppliers')).body as any[]).find((s) => s.id === sup); expect(Number(mine.owed)).toBe(300);          // only approved / part-paid bills count
+    const detail = (await A.get(`/suppliers/${sup}`)).body; expect(detail.bills).toHaveLength(2);
+    const seen = ((await agent.get('/suppliers')).body as any[]).find((s) => s.id === sup); expect(seen).toBeTruthy(); expect(seen.owed).toBeUndefined();
+    expect((await agent.get(`/suppliers/${sup}`)).body.bills).toEqual([]);
+    expect(((await B.get('/suppliers')).body as any[]).some((s) => s.id === sup)).toBe(false);
+  });
+});

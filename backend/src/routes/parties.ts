@@ -63,7 +63,9 @@ const stripBank = (s: any) => { const { bank_details_enc, ...rest } = s; return 
 
 // Bank details are never returned to the client; only a flag + last 4 digits of the account.
 suppliersRouter.get('/', requireRole('admin', 'finance_manager', 'agent', 'viewer'), async (req, res) => {
-  res.json((await T(req).query(`SELECT * FROM suppliers s WHERE s.agency_id = ? ${archFilter(req.query, 's')} ORDER BY s.name`, [T(req).agencyId])).map(stripBank));
+  const t = T(req), money = req.ctx!.role !== 'agent';   // what we owe a supplier is finance information
+  res.json((await t.query(`SELECT s.*${money ? `, (SELECT COALESCE(SUM(b.total - b.amount_paid), 0) FROM supplier_bills b WHERE b.agency_id = s.agency_id AND b.supplier_id = s.id AND b.status IN ('approved','partially_paid')) owed` : ''}
+    FROM suppliers s WHERE s.agency_id = ? ${archFilter(req.query, 's')} ORDER BY s.name`, [t.agencyId])).map(stripBank));
 });
 suppliersRouter.get('/:id', async (req, res) => {
   const t = T(req), id = idParam(req);
@@ -77,7 +79,8 @@ suppliersRouter.get('/:id', async (req, res) => {
   if (s.bank_details_enc && ['admin', 'finance_manager'].includes(req.ctx!.role)) {
     const bd = JSON.parse(decrypt(s.bank_details_enc)); last4 = String(bd.account_number).slice(-4);
   }
-  res.json({ ...stripBank(s), account_last4: last4, payments, purchases: lines });
+  const bills = req.ctx!.role === 'agent' ? [] : await t.query('SELECT id, bill_no, supplier_ref, bill_date, due_date, currency, total, amount_paid, status FROM supplier_bills WHERE agency_id = ? AND supplier_id = ? ORDER BY id DESC LIMIT 200', [t.agencyId, id]);
+  res.json({ ...stripBank(s), account_last4: last4, payments, purchases: lines, bills });
 });
 suppliersRouter.post('/', requireRole(...WRITERS), async (req, res) => {
   const { bank_details, ...rest } = parse(Supplier, req.body);

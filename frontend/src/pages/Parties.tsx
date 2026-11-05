@@ -47,95 +47,6 @@ function PartyForm({ kind, initial, onClose, onSaved, names = [] }: { kind: Kind
     <div className="flex justify-end gap-2 mt-2"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || f.name.trim().length < 1 || badEmail || String(f.currency).length !== 3} onClick={save}>{busy ? 'Saving…' : editing ? 'Save changes' : kind === 'clients' ? 'Add client' : 'Add supplier'}</button></div></Modal>;
 }
 
-function Detail({ kind, id, canManage, canEdit, startDelete, onClose, onChanged }: { kind: Kind; id: number; canManage: boolean; canEdit: boolean; startDelete?: boolean; onClose(): void; onChanged(): void }) {
-  const [d, setD] = useState<any>(null); const [tl, setTl] = useState<any[]>([]); const [usage, setUsage] = useState<any>(null); const [edit, setEdit] = useState(false); const [err, setErr] = useState(''); const [confirmDel, setConfirmDel] = useState(!!startDelete);
-  const load = () => { api(`/${kind}/${id}`).then(setD); if (kind === 'clients') api(`/crm/timeline/client/${id}`).then(setTl).catch(() => {}); if (canManage) api(`/${kind}/${id}/usage`).then(setUsage).catch(() => {}); };
-  useEffect(() => { load(); }, [id]);
-  if (!d) return null;
-  const act = async (fn: () => Promise<any>, done = true) => { try { await fn(); setErr(''); if (done) { onChanged(); onClose(); } else { load(); onChanged(); } } catch (e: any) { setErr(e.message); } };
-  return (
-    <Modal title={d.name} wide onClose={onClose}><Err e={err} />
-      <div className="flex flex-wrap items-center gap-2 mb-3">{d.archived_at && <Pill s="cancelled" />}{d.archived_at && <span className="text-xs text-muted">Archived {String(d.archived_at).slice(0, 10)} — hidden from lists and pickers; history kept.</span>}
-        <div className="ml-auto flex flex-wrap gap-2">
-          {canEdit && <button className="btn-ghost" onClick={() => setEdit(true)}><Pencil size={14} /> Edit</button>}
-          {canManage && (d.archived_at ? <button className="btn-ghost" onClick={() => act(() => api(`/${kind}/${id}/restore`, 'POST'), false)}><ArchiveRestore size={14} /> Restore</button> : <button className="btn-ghost" onClick={() => act(() => api(`/${kind}/${id}/archive`, 'POST'))}><Archive size={14} /> Archive</button>)}
-          {canManage && <button className="btn-ghost text-danger" onClick={() => setConfirmDel(true)}><Trash2 size={14} /> Delete</button>}</div></div>
-      <div className="grid gap-x-8 gap-y-1 text-sm mb-4 sm:grid-cols-2"><div><span className="text-muted">Email: </span>{d.email ?? '—'}</div>{kind === 'clients' ? <div><span className="text-muted">Phone: </span>{d.phone ?? '—'}</div> : <div><span className="text-muted">Type: </span><span className="capitalize">{String(d.supplier_type).replace('_', ' ')}</span></div>}
-        <div><span className="text-muted">Currency / terms: </span>{d.currency} · {d.payment_terms_days} days</div>{kind === 'clients' ? <div><span className="text-muted">Address: </span>{d.address ?? '—'}</div> : <div><span className="text-muted">Bank: </span>{d.has_bank_details ? `encrypted${d.account_last4 ? ` · ••••${d.account_last4}` : ''}` : 'not set'}</div>}
-        {kind === 'clients' && d.notes && <div className="sm:col-span-2"><span className="text-muted">Notes: </span>{d.notes}</div>}</div>
-      <h3 className="font-bold mb-2">{kind === 'clients' ? 'Invoices' : 'Purchases'}</h3>
-      <Table rows={kind === 'clients' ? d.invoices : d.purchases} empty="Nothing yet" cols={kind === 'clients' ? [
-        { h: 'Number', render: (r: any) => r.number }, { h: 'Issued', render: (r: any) => <span className="num">{String(r.issue_date).slice(0, 10)}</span> }, { h: 'Status', render: (r: any) => <Pill s={r.status} /> }, { h: 'Total', right: true, render: (r: any) => money(r.total, r.currency) }]
-        : [{ h: 'Invoice', render: (r: any) => r.number }, { h: 'Item', render: (r: any) => r.description }, { h: 'Cost', right: true, render: (r: any) => money(r.cost) }]} />
-      <h3 className="font-bold mt-4 mb-2">Payments</h3>
-      <Table rows={d.payments} empty="No payments" cols={[{ h: 'Date', render: (r: any) => String(r.paid_at).slice(0, 10) }, { h: 'Method', render: (r: any) => r.method }, { h: 'Amount', right: true, render: (r: any) => money(r.amount, r.currency) }]} />
-      {kind === 'clients' && tl.length > 0 && <><h3 className="font-bold mt-4 mb-2">Timeline</h3><div className="space-y-2 max-h-64 overflow-auto">{tl.map((x: any, i: number) => <div key={i} className="text-sm flex gap-3"><span className="num text-xs text-muted shrink-0">{String(x.at ?? x.created_at ?? '').slice(0, 10)}</span><span>{x.text ?? x.body ?? x.title}</span></div>)}</div></>}
-      {edit && <PartyForm kind={kind} initial={{ ...blank(kind), ...d, email: d.email ?? '', commission_override_pct: d.commission_override_pct ?? '' }} onClose={() => setEdit(false)} onSaved={() => { setEdit(false); load(); onChanged(); }} />}
-      {confirmDel && <Modal title={`Delete ${d.name}?`} onClose={() => setConfirmDel(false)}>
-        {!usage ? <p className="text-sm text-muted">Checking what depends on this {kind === 'clients' ? 'client' : 'supplier'}…</p>
-          : !usage.can_delete ? <><p className="text-sm mb-3">This {kind === 'clients' ? 'client' : 'supplier'} can't be deleted because it has <b>{usage.deps.map((x: any) => `${x.n} ${x.label}`).join(', ')}</b>. Archive it instead — it disappears from lists and pickers, and all history stays intact.</p>
-          <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setConfirmDel(false)}>Close</button>{!d.archived_at && <button className="btn" onClick={() => act(() => api(`/${kind}/${id}/archive`, 'POST'))}>Archive instead</button>}</div></>
-          : <><p className="text-sm mb-3">This permanently deletes the record. It has no invoices, bookings or payments attached. This can't be undone.</p><div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setConfirmDel(false)}>Cancel</button><button className="btn bg-danger text-white" onClick={() => act(() => api(`/${kind}/${id}`, 'DELETE'))}>Delete permanently</button></div></>}</Modal>}
-    </Modal>
-  );
-}
-
-function makeParty(kind: Kind, title: string) {
-  return function Party() {
-    const { can } = useAuth();
-    const [rows, setRows] = useState<any[]>([]); const [open, setOpen] = useState<number | null>(null); const [askDelete, setAskDelete] = useState(false); const [form, setForm] = useState<any>(null);
-    const [show, setShow] = useState<'active' | 'archived'>('active'); const [q, setQ] = useState('');
-    const load = () => api(`/${kind}?status=${show}`).then(setRows);
-    useEffect(() => { load(); }, [show]);
-    const manage = can('admin', 'finance_manager'), canEdit = kind === 'clients' ? can('admin', 'finance_manager', 'agent') : manage;
-    const shown = rows.filter((r) => !q || `${r.name} ${r.email ?? ''}`.toLowerCase().includes(q.toLowerCase()));
-    return (
-      <Page title={title} description={kind === 'clients' ? 'The people and companies you sell to.' : 'The airlines, hotels and operators you buy from.'}
-        actions={<><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted" /><input className="input pl-8 w-52" placeholder="Search" aria-label={`Search ${title}`} value={q} onChange={(e) => setQ(e.target.value)} /></div>
-          <div className="inline-flex rounded-lg border border-line p-0.5 text-sm" role="group" aria-label="Show">{(['active', 'archived'] as const).map((s) => <button key={s} className={`px-3 py-1 rounded-md capitalize ${show === s ? 'bg-accent text-accent-ink' : 'text-muted'}`} onClick={() => setShow(s)}>{s}</button>)}</div>
-          {canEdit && <button className="btn" onClick={() => setForm(blank(kind))}><Plus size={15} /> Add {kind === 'clients' ? 'client' : 'supplier'}</button>}</>}>
-        <Table rows={shown} empty={show === 'archived' ? 'Nothing archived' : `No ${title.toLowerCase()} yet`} cols={[
-          { h: 'Name', render: (r) => <button className="font-medium text-accent hover:underline text-left" onClick={() => setOpen(r.id)}>{r.name}</button> },
-          { h: 'Email', render: (r) => r.email ?? '' },
-          { h: 'Currency', render: (r) => r.currency },
-          kind === 'clients'
-            ? { h: 'Outstanding', right: true, render: (r) => money(r.outstanding, r.currency) }
-            : { h: 'Type', render: (r) => <span className="capitalize">{String(r.supplier_type).replace('_', ' ')}</span> },
-          ...(kind === 'suppliers' ? [{ h: 'Bank details', render: (r: any) => (r.has_bank_details ? 'Encrypted' : <span className="text-muted">—</span>) }] : []),
-          {
-            h: '',
-            render: (r) => (
-              <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
-                {canEdit && (
-                  <button className="btn-ghost py-0.5 px-2 text-xs flex items-center gap-1"
-                    onClick={() => setForm({ ...blank(kind), ...r, email: r.email ?? '', commission_override_pct: r.commission_override_pct ?? '' })}>
-                    <Pencil size={12} /> Edit
-                  </button>
-                )}
-                <button className="btn-ghost py-0.5 px-2 text-xs text-muted flex items-center gap-1" onClick={() => setOpen(r.id)}>
-                  View
-                </button>
-                {manage && (
-                  r.archived_at
-                    ? <button className="btn-ghost py-0.5 px-2 text-xs flex items-center gap-1" onClick={() => api(`/${kind}/${r.id}/restore`, 'POST').then(load)}>
-                        <ArchiveRestore size={12} /> Restore
-                      </button>
-                    : <button className="btn-ghost py-0.5 px-2 text-xs text-danger flex items-center gap-1" onClick={() => { setAskDelete(true); setOpen(r.id); }}>
-                        <Trash2 size={12} /> Delete
-                      </button>
-                )}
-              </div>
-            ),
-          },
-        ]} />
-        {open && <Detail key={`${open}-${askDelete}`} kind={kind} id={open} canManage={manage} canEdit={canEdit} startDelete={askDelete} onClose={() => { setOpen(null); setAskDelete(false); }} onChanged={load} />}
-        {form && <PartyForm kind={kind} initial={form} onClose={() => setForm(null)} onSaved={(id) => { setForm(null); load(); if (id) setOpen(id); }} />}
-      </Page>
-    );
-  };
-}
-export const Suppliers = makeParty('suppliers', 'Suppliers');
-
 /* ======================================================  CLIENTS  ====================================================== */
 const day = (d: any) => (d ? String(d).slice(0, 10) : '');
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -288,6 +199,105 @@ export function Clients() {
       {rows && !archived && <p className="text-xs text-muted mt-2">{list.length} of {all.length} client{all.length === 1 ? '' : 's'}</p>}
       {open && <ClientDetail key={`${open}-${askDelete}`} id={open} names={all.map((r) => r.name)} canManage={manage} canEdit={canEdit} startDelete={askDelete} onClose={() => setOpen(null)} onChanged={(m) => { if (m) setNote(m); load(); }} />}
       {form && <PartyForm kind="clients" initial={form} names={all.map((r) => r.name)} onClose={() => setForm(null)} onSaved={(id) => { setForm(null); setNote('Client added.'); load(); if (id) setOpen(id); }} />}
+    </Page>
+  );
+}
+
+/* ====================================================  SUPPLIERS  ==================================================== */
+const SUP_TYPES: Record<string, string> = { airline: 'Airline', hotel: 'Hotel', cruise: 'Cruise', transfer: 'Transfer', tour_operator: 'Tour operator', other: 'Other' };
+
+function SupplierDetail({ id, canManage, startDelete, onClose, onChanged, names }: { id: number; canManage: boolean; startDelete?: boolean; onClose(): void; onChanged(msg?: string): void; names: string[] }) {
+  const nav = useNavigate(); const { agency, can } = useAuth(); const tabs = ['Overview', 'Bills', 'Items you bought', 'Payments'];
+  const [d, setD] = useState<any>(null); const [usage, setUsage] = useState<any>(null); const [tab, setTab] = useState('Overview'); const [edit, setEdit] = useState(false); const [err, setErr] = useState(''); const [confirmDel, setConfirmDel] = useState(!!startDelete);
+  const load = () => { api(`/suppliers/${id}`).then(setD).catch((e) => setErr(e.message)); if (canManage) api(`/suppliers/${id}/usage`).then(setUsage).catch(() => {}); };
+  useEffect(() => { load(); }, [id]);
+  if (!d) return <Modal title="Supplier" wide onClose={onClose}>{err ? <Err e={err} /> : <Skeleton className="h-48" />}</Modal>;
+  const act = async (fn: () => Promise<any>, msg: string, close = true) => { try { await fn(); setErr(''); onChanged(msg); if (close) onClose(); else load(); } catch (e: any) { setErr(e.message); } };
+  const archived = !!d.archived_at, finance = can('admin', 'finance_manager', 'viewer');
+  const open = d.bills.filter((b: any) => ['approved', 'partially_paid'].includes(b.status)); const owed = sumBy(open, (b) => b.total - b.amount_paid);
+  const overdue = open.filter((b: any) => day(b.due_date) < new Date().toISOString().slice(0, 10)).length;
+  return (
+    <Modal title={d.name} wide onClose={onClose}><Err e={err} />
+      {archived && <div className="rounded-lg border border-line bg-surface2/60 text-sm px-3 py-2 mb-3">Archived on {day(d.archived_at)} — hidden from lists and pickers, all history is kept.</div>}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {!archived && canManage && <button className="btn inline-flex items-center gap-1" onClick={() => nav('/supplier-bills')}><FilePlus2 size={14} />Supplier bills</button>}
+        <div className="ml-auto flex flex-wrap gap-2">
+          {canManage && <button className="btn-ghost inline-flex items-center gap-1" onClick={() => setEdit(true)}><Pencil size={14} />Edit</button>}
+          {canManage && (archived ? <button className="btn-ghost inline-flex items-center gap-1" onClick={() => act(() => api(`/suppliers/${id}/restore`, 'POST'), `${d.name} was restored.`, false)}><ArchiveRestore size={14} />Restore</button>
+            : <button className="btn-ghost inline-flex items-center gap-1" title="Hide from lists but keep all history" onClick={() => act(() => api(`/suppliers/${id}/archive`, 'POST'), `${d.name} was archived. Find them under the Archived tab.`)}><Archive size={14} />Archive</button>)}
+          {canManage && <button className="btn-ghost text-danger inline-flex items-center gap-1" onClick={() => setConfirmDel(true)}><Trash2 size={14} />Delete</button>}</div></div>
+      {finance && <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="card !p-3"><div className="text-xs text-muted">You owe them</div><div className={`font-semibold num ${Object.keys(owed).length ? 'text-warn' : ''}`}>{fmtMap(owed)}</div>{overdue > 0 && <div className="text-xs text-danger">{overdue} bill{overdue === 1 ? '' : 's'} overdue</div>}</div>
+        <div className="card !p-3"><div className="text-xs text-muted">Bills on file</div><div className="font-semibold num">{d.bills.length}</div></div>
+        <div className="card !p-3"><div className="text-xs text-muted">Payments made</div><div className="font-semibold num">{d.payments.filter((p: any) => !p.voided).length}</div></div></div>}
+      <div className="flex gap-1 border-b border-line mb-4 overflow-x-auto" role="tablist">{tabs.filter((t) => finance || t === 'Overview' || t === 'Items you bought').map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`px-3 py-2 text-sm whitespace-nowrap ${tab === t ? 'text-accent border-b-2 border-accent font-medium' : 'text-muted hover:text-fg'}`}>{t}{t === 'Bills' ? ` (${d.bills.length})` : ''}</button>)}</div>
+      {tab === 'Overview' && <div className="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+        <div><span className="text-muted">Type </span>{SUP_TYPES[d.supplier_type] ?? d.supplier_type}</div>
+        <div><span className="text-muted">Email </span>{d.email ? <a className="text-accent hover:underline" href={`mailto:${d.email}`}>{d.email}</a> : '—'}</div>
+        <div><span className="text-muted">Bills in </span>{d.currency} · you pay within <b>{d.payment_terms_days}</b> days</div>
+        <div><span className="text-muted">Commission </span>{d.commission_override_pct != null ? `${d.commission_override_pct}% (overrides your rules)` : 'Follows your commission rules'}</div>
+        <div className="sm:col-span-2"><span className="text-muted">Bank details </span>{d.has_bank_details ? <>Saved and encrypted{d.account_last4 ? ` · account ending ${d.account_last4}` : ''}</> : <span className="text-warn">Not added — needed to pay them in a payment run</span>}{d.has_bank_details && canManage && <span className="text-xs text-muted"> (open Edit to replace them)</span>}</div></div>}
+      {tab === 'Bills' && <Table rows={d.bills} onRow={() => nav('/supplier-bills')} empty="No bills from this supplier yet." cols={[
+        { h: 'Bill', render: (r: any) => <><span className="num font-medium">{r.bill_no}</span><div className="text-xs text-muted">Their ref {r.supplier_ref}</div></> }, { h: 'Dated', render: (r: any) => <span className="num">{day(r.bill_date)}</span> },
+        { h: 'Due', render: (r: any) => <span className="num">{day(r.due_date)}</span> }, { h: 'Status', render: (r: any) => <Pill s={r.status} /> },
+        { h: 'Total', right: true, render: (r: any) => money(r.total, r.currency) }, { h: 'Still owed', right: true, render: (r: any) => (['approved', 'partially_paid'].includes(r.status) ? <b>{money(r.total - r.amount_paid, r.currency)}</b> : <span className="text-muted">—</span>) }]} />}
+      {tab === 'Items you bought' && <Table rows={d.purchases} empty="Nothing has been invoiced to clients from this supplier yet." cols={[{ h: 'Invoice', render: (r: any) => <span className="num">{r.number}</span> }, { h: 'Date', render: (r: any) => <span className="num">{day(r.issue_date)}</span> }, { h: 'Item', render: (r: any) => r.description }, { h: 'Your cost', right: true, render: (r: any) => money(r.cost) }]} />}
+      {tab === 'Payments' && <Table rows={d.payments} empty="No payments to this supplier yet." cols={[{ h: 'Date', render: (r: any) => <span className="num">{day(r.paid_at)}</span> }, { h: 'Method', render: (r: any) => <span className="capitalize">{String(r.method).replace('_', ' ')}</span> }, { h: 'Status', render: (r: any) => (r.voided ? <Pill s="voided" /> : <Pill s="paid" />) }, { h: 'Amount', right: true, render: (r: any) => money(r.amount, r.currency) }]} />}
+      {edit && <PartyForm kind="suppliers" initial={{ ...blank('suppliers', agency?.base_currency), ...d, email: d.email ?? '', commission_override_pct: d.commission_override_pct ?? '' }} names={names.filter((n) => n !== d.name)} onClose={() => setEdit(false)} onSaved={() => { setEdit(false); load(); onChanged(`${d.name} was updated.`); }} />}
+      {confirmDel && <Modal title={`Delete ${d.name}?`} onClose={() => setConfirmDel(false)}>
+        {!usage ? <p className="text-sm text-muted">Checking what depends on this supplier…</p>
+          : !usage.can_delete ? <><p className="text-sm mb-3">This supplier can't be deleted because it has <b>{usage.deps.map((x: any) => `${x.n} ${x.label}`).join(', ')}</b>. Archive it instead — it disappears from lists and pickers, and all history stays intact.</p>
+            <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setConfirmDel(false)}>Close</button>{!archived && <button className="btn" onClick={() => act(() => api(`/suppliers/${id}/archive`, 'POST'), `${d.name} was archived.`)}>Archive instead</button>}</div></>
+          : <><p className="text-sm mb-3">This permanently deletes the supplier. They have no bills, bookings or payments attached. This can't be undone.</p><div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setConfirmDel(false)}>Cancel</button><button className="btn bg-danger text-white" onClick={() => act(() => api(`/suppliers/${id}`, 'DELETE'), `${d.name} was deleted.`)}>Delete permanently</button></div></>}</Modal>}
+    </Modal>
+  );
+}
+
+export function Suppliers() {
+  const { can, agency } = useAuth(); const [sp, setSp] = useSearchParams();
+  const [rows, setRows] = useState<any[] | null>(null); const [err, setErr] = useState(''); const [note, setNote] = useState('');
+  const [tab, setTab] = useState(sp.get('tab') ?? 'all'); const [q, setQ] = useState(sp.get('q') ?? ''); const [sort, setSort] = useState('name');
+  const [open, setOpen] = useState<number | null>(Number(sp.get('open')) || null); const [form, setForm] = useState<any>(null);
+  const archived = tab === 'archived'; const manage = can('admin', 'finance_manager'); const money$ = can('admin', 'finance_manager', 'viewer');
+  const load = () => api(`/suppliers?status=${archived ? 'archived' : 'active'}`).then((r) => { setRows(r); setErr(''); }).catch((e) => { setErr(e.message); setRows([]); });
+  useEffect(() => { setRows(null); load(); }, [archived]);
+  useOpenOnNew(() => { if (manage) setForm(blank('suppliers', agency?.base_currency)); });
+  useEffect(() => { if (sp.has('open')) { const n = new URLSearchParams(sp); n.delete('open'); setSp(n, { replace: true }); } }, []);
+  const all = rows ?? [];
+  const tabs = [{ key: 'all', label: 'All' }, ...Object.entries(SUP_TYPES).filter(([k]) => all.some((r) => r.supplier_type === k)).map(([k, l]) => ({ key: k, label: k === 'other' ? 'Other' : `${l}s` })), { key: 'nobank', label: 'No bank details' }, { key: 'archived', label: 'Archived' }];
+  const test = (r: any) => (tab === 'all' || archived ? true : tab === 'nobank' ? !r.has_bank_details : r.supplier_type === tab);
+  const list = useMemo(() => { const s = q.trim().toLowerCase(); const l = all.filter(test).filter((r) => !s || `${r.name} ${r.email ?? ''}`.toLowerCase().includes(s)); return sort === 'owed' ? [...l].sort((a, b) => (b.owed ?? 0) - (a.owed ?? 0)) : sort === 'newest' ? [...l].sort((a, b) => b.id - a.id) : l; }, [rows, tab, q, sort]);
+  const owing = all.filter((r) => Number(r.owed) > 0.005), noBank = all.filter((r) => !r.has_bank_details);
+  const stat = (key: string | null, title: string, value: string, sub: string, tone = '') => (
+    <button type="button" disabled={!key} onClick={() => key && setTab(key)} className={`card text-left ${key ? 'hover:bg-surface2/70 transition-colors' : 'cursor-default'} ${key && tab === key ? 'ring-1 ring-accent' : ''}`}>
+      <div className="text-xs text-muted">{title}</div><div className={`text-xl font-semibold num mt-0.5 ${tone}`}>{value}</div><div className="text-xs text-muted mt-0.5">{sub}</div></button>);
+  return (
+    <Page title="Suppliers" description="The airlines, hotels and operators you buy from. Click a supplier to see their bills, what you owe and what you've paid."
+      actions={manage ? <button className="btn inline-flex items-center gap-1" onClick={() => setForm(blank('suppliers', agency?.base_currency))}><Plus size={16} />Add supplier</button> : undefined}>
+      {!archived && (rows === null ? <div className="grid sm:grid-cols-3 gap-3 mb-4"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div> : (
+        <div className="grid sm:grid-cols-3 gap-3 mb-4">
+          {stat('all', 'Suppliers', String(all.length), all.length ? 'Active suppliers' : 'None yet')}
+          {money$ ? stat(null, 'You owe', owing.length ? String(owing.length) : '0', owing.length ? `${fmtMap(sumBy(owing, (r) => Number(r.owed)))} across approved bills` : 'No bills waiting to be paid', owing.length ? 'text-warn' : '') : stat(null, 'Types', String(new Set(all.map((r) => r.supplier_type)).size), 'kinds of supplier')}
+          {stat('nobank', 'No bank details', String(noBank.length), noBank.length ? 'Can’t be paid in a payment run yet' : 'Everyone can be paid', noBank.length ? 'text-warn' : '')}</div>))}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-1 basis-full min-w-0" role="tablist" aria-label="Supplier views">
+          {tabs.map((t) => <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)} className={`whitespace-nowrap text-sm px-3 py-1.5 rounded-lg border ${tab === t.key ? 'border-accent bg-accent/15 text-accent font-medium' : 'border-line hover:bg-surface2'}`}>{t.label}</button>)}</div>
+        <div className="relative w-full sm:w-72"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" /><input className="input pl-8" placeholder="Search name or email…" aria-label="Search suppliers" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <label className="text-xs text-muted flex items-center gap-2">Sort by<select className="input w-auto" value={sort} onChange={(e) => setSort(e.target.value)}><option value="name">Name</option>{money$ && <option value="owed">You owe the most</option>}<option value="newest">Newest first</option></select></label></div>
+      {note && <div role="status" className="rounded-lg border border-success/30 bg-success/10 text-success text-sm px-3 py-2 mb-3 flex justify-between gap-3"><span>{note}</span><button className="opacity-70 hover:opacity-100" aria-label="Dismiss" onClick={() => setNote('')}><X size={14} /></button></div>}
+      <Err e={form ? '' : err} />
+      {archived && <p className="text-sm text-muted mb-3">Archived suppliers are hidden from lists and pickers. Their history is kept.{manage ? ' Open one to restore it.' : ''}</p>}
+      {rows === null ? <Skeleton className="h-64" /> : (
+        <Table rows={list} onRow={(r) => setOpen(r.id)} empty={all.length === 0 ? (archived ? 'No archived suppliers.' : manage ? 'No suppliers yet — click “Add supplier” to add your first one.' : 'No suppliers yet.') : q ? `No supplier matches “${q}”.` : 'Nobody here.'} cols={[
+          { h: 'Supplier', render: (r) => <><span className="font-medium">{r.name}</span>{r.email ? <div className="text-xs text-muted">{r.email}</div> : null}</> },
+          { h: 'Type', render: (r) => SUP_TYPES[r.supplier_type] ?? r.supplier_type },
+          { h: 'You pay within', render: (r) => <span className="num">{r.payment_terms_days} days</span> },
+          { h: 'Bank details', render: (r) => (r.has_bank_details ? <span className="text-success">Saved</span> : <span className="text-warn">Not added</span>) },
+          ...(money$ ? [{ h: 'You owe', right: true, render: (r: any) => (Number(r.owed) > 0.005 ? <b className="text-warn">{money(r.owed, r.currency)}</b> : <span className="text-muted">—</span>) }] : []),
+          { h: '', render: (r) => <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>{archived && manage && <button className="btn-ghost inline-flex items-center gap-1" onClick={() => api(`/suppliers/${r.id}/restore`, 'POST').then(() => { setNote(`${r.name} was restored.`); load(); }).catch((e) => setErr(e.message))}><ArchiveRestore size={14} />Restore</button>}</div> }]} />)}
+      {rows && !archived && <p className="text-xs text-muted mt-2">{list.length} of {all.length} supplier{all.length === 1 ? '' : 's'}</p>}
+      {open && <SupplierDetail key={open} id={open} names={all.map((r) => r.name)} canManage={manage} onClose={() => setOpen(null)} onChanged={(m) => { if (m) setNote(m); load(); }} />}
+      {form && <PartyForm kind="suppliers" initial={form} names={all.map((r) => r.name)} onClose={() => setForm(null)} onSaved={(id) => { setForm(null); setNote('Supplier added.'); load(); if (id) setOpen(id); }} />}
     </Page>
   );
 }
