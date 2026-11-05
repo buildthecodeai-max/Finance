@@ -236,3 +236,21 @@ describe('text messages (SMS)', () => {
     expect((await sql('SELECT id FROM sms_settings WHERE agency_id = ?', [A.agencyId]))).toHaveLength(0);
   });
 });
+
+describe('editing accepted quotes', () => {
+  const mk = async () => {
+    const q = await A.post('/quotes', { title: 'Editable', client_id: clientId, currency: 'USD', components: [{ option_name: 'Option 1', product_type: 'hotel', description: 'Room', unit_cost: 100, markup_pct: 20, quantity: 1 }] });
+    const id = q.body.id; await A.post(`/quotes/${id}/send`, {}); await A.post(`/quotes/${id}/accept`, { name: 'Client' }); return id;
+  };
+  const body = (cost: number) => ({ title: 'Editable', client_id: clientId, currency: 'USD', components: [{ option_name: 'Option 1', product_type: 'hotel', description: 'Room', unit_cost: cost, markup_pct: 20, quantity: 1 }] });
+  it('lets an accepted quote be changed, withdrawing the acceptance as a new draft version', async () => {
+    const id = await mk(); expect((await A.get(`/quotes/${id}`)).body.status).toBe('accepted');
+    const r = await A.put(`/quotes/${id}`, body(150)); expect(r.status).toBe(200); expect(r.body.version).toBe(2);
+    const q = (await A.get(`/quotes/${id}`)).body; expect(q.status).toBe('draft'); expect(q.accepted_option).toBeNull(); expect(q.accepted_by_name).toBeNull(); expect(q.versions).toHaveLength(2);
+    expect((await A.post(`/quotes/${id}/convert`)).status).toBe(409);                      // no booking until the client accepts again
+  });
+  it('still locks a quote that already became a booking', async () => {
+    const id = await mk(); expect((await A.post(`/quotes/${id}/convert`)).status).toBe(201);
+    const r = await A.put(`/quotes/${id}`, body(150)); expect(r.status).toBe(409); expect(r.body.error).toMatch(/booking/i);
+  });
+});

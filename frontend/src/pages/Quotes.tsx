@@ -120,7 +120,7 @@ export function QuoteEditor() {
   const dirty = JSON.stringify(q) !== snap;
   useEffect(() => { if (!dirty) return; const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }, [dirty]);
 
-  const locked = !!meta && ['accepted', 'converted'].includes(meta.status); const readOnly = locked || !editor;
+  const locked = !!meta && meta.status === 'converted'; const readOnly = locked || !editor;
   const status = meta ? shown(meta) : 'draft';
   const totals = q.opts.map((o: any) => { const cs = q.components.filter((c: any) => c._k === o.k); const t = cs.reduce((s: any, c: any) => { const p = price(c); return { net: s.net + p.net, tax: s.tax + p.tax, cost: s.cost + p.cost }; }, { net: 0, tax: 0, cost: 0 }); return { ...o, ...t, total: r2(t.net + t.tax), margin: pct(t.net, t.cost) }; });
   const lowest = totals.map((t: any) => t.margin).filter((m: any) => m !== null) as number[]; const low = lowest.length ? Math.min(...lowest) : null;
@@ -183,8 +183,9 @@ export function QuoteEditor() {
         {meta.status === 'declined' && meta.client_message && <span className="text-muted">Reason: “{meta.client_message}”</span>}
         {meta.status === 'accepted' && !meta.client_id && <span className="text-warn">This quote is for a lead. Link it to a client before creating the booking.</span>}</div>}
       {meta?.status === 'changes_requested' && <div className="rounded-lg border border-warn/30 bg-warn/10 text-sm px-4 py-3 mb-4"><div className="font-medium text-warn mb-1">The client asked for changes</div><div className="whitespace-pre-wrap">“{meta.client_message}”</div><div className="text-xs text-muted mt-1">Make the changes below, save, and send again.</div></div>}
-      {locked && <div className="rounded-lg border border-line bg-surface2/60 text-sm p-3 mb-4">This quote has been {meta.status === 'converted' ? 'turned into a booking' : 'accepted'}, so it can't be changed any more. To offer something different, create a new quote.</div>}
-      {!readOnly && meta?.sent_at && !locked && <p className="text-xs text-muted mb-3">This version has already been sent. Saving any change creates version {meta.current_version + 1} and cancels the link the client has.</p>}
+      {locked && <div className="rounded-lg border border-line bg-surface2/60 text-sm p-3 mb-4">This quote has been turned into a booking, so it can't be changed any more. Change the booking instead, or create a new quote.</div>}
+      {meta?.status === 'accepted' && !readOnly && <div className="rounded-lg border border-warn/30 bg-warn/10 text-sm px-4 py-3 mb-4">The client has accepted this quote. If you change it, the acceptance is withdrawn: saving creates version {meta.current_version + 1} as a draft, and the client must accept the new terms. To keep the accepted terms, create the booking instead.</div>}
+      {!readOnly && meta?.sent_at && !locked && meta.status !== 'accepted' && <p className="text-xs text-muted mb-3">This version has already been sent. Saving any change creates version {meta.current_version + 1} and cancels the link the client has.</p>}
 
       {belowMin && !locked && <div className={`rounded-lg border text-sm px-4 py-3 mb-4 flex flex-wrap items-center justify-between gap-2 ${meta?.margin_approved_by ? 'border-success/30 bg-success/10' : 'border-warn/30 bg-warn/10'}`}>
         <span>{meta?.margin_approved_by ? <><Check size={14} className="inline text-success" /> A margin of {low!.toFixed(1)}% was approved for this version.</> : <>The lowest margin here is <b>{low!.toFixed(1)}%</b>, below your agency minimum of {minMargin}%. {finance ? 'Approve it to allow sending, or raise the markup.' : 'A finance manager must approve it before the quote can be sent — or raise the markup.'}{dirty && !isNew && ' Save first.'}</>}</span>

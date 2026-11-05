@@ -117,7 +117,7 @@ quotesRouter.post('/', requireRole(...ALL_EDITORS), async (req, res) => {
 quotesRouter.put('/:id', requireRole(...ALL_EDITORS), async (req, res) => {
   const b = parse(QuoteIn, req.body), t = T(req), id = idParam(req), q = await findScoped(t, req, 'quotes', id);
   assertCanEdit(req, q);
-  if (['accepted', 'converted'].includes(q.status)) throw new HttpError(409, `A ${q.status} quote cannot be edited — create a new quote`);
+  if (q.status === 'converted') throw new HttpError(409, 'This quote has already become a booking and cannot be edited — change the booking, or create a new quote');
   await assertQuoteRefs(t, b, req);
   const { components, inclusions, exclusions, payment_terms, cancellation_terms, internal_notes, ...head } = b;
   const cur = await loadVersion(t, id, q.current_version);
@@ -129,8 +129,9 @@ quotesRouter.put('/:id', requireRole(...ALL_EDITORS), async (req, res) => {
     const vdata = { inclusions, exclusions, payment_terms, cancellation_terms, internal_notes, margin_pct };
     if (cur.sent_at) {
       await tx.insert('quote_versions', { quote_id: id, version: nextVersion, ...vdata, created_by: req.ctx!.userId });
-      await tx.update('quotes', id, { ...head, valid_until: head.valid_until ?? null, current_version: nextVersion, status: 'draft', public_token_hash: null, public_token_expires: null });
-      await activity(tx, id, `New version v${nextVersion} created after changes to a sent quote; client link revoked`);
+      await tx.update('quotes', id, { ...head, valid_until: head.valid_until ?? null, current_version: nextVersion, status: 'draft', public_token_hash: null, public_token_expires: null,
+        ...(q.status === 'accepted' ? { accepted_version: null, accepted_option: null, accepted_at: null, accepted_by_name: null, accepted_ip: null } : {}) });   // editing an accepted quote withdraws the acceptance: the client must accept the new terms
+      await activity(tx, id, q.status === 'accepted' ? `Accepted quote edited — new version v${nextVersion} created; the earlier acceptance was withdrawn and the client link revoked` : `New version v${nextVersion} created after changes to a sent quote; client link revoked`);
     } else {
       await tx.query('UPDATE quote_versions SET margin_approved_by = NULL, margin_approved_at = NULL WHERE agency_id = ? AND quote_id = ? AND version = ?', [tx.agencyId, id, nextVersion]);
       await tx.update('quote_versions', cur.id, vdata);

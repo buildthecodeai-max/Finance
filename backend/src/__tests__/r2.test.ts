@@ -150,7 +150,6 @@ describe('quote → booking conversion', () => {
     expect((await pub(token, '/accept', 'POST', { name: 'Nguyen Van A', option: 'Premium' })).status).toBe(409);
     const row = (await sql('SELECT status, accepted_version, accepted_option, accepted_by_name, accepted_ip, accepted_at FROM quotes WHERE id = ?', [qid]))[0];
     expect(row).toMatchObject({ status: 'accepted', accepted_version: 1, accepted_option: 'Premium', accepted_by_name: 'Nguyen Van A' }); expect(row.accepted_ip).toBeTruthy(); expect(row.accepted_at).toBeTruthy();
-    expect((await agent.put(`/quotes/${qid}`, quoteBody())).status).toBe(409);
   });
   it('converts once, even under concurrent requests; preserves option, terms, prices', async () => {
     const results = await Promise.all([agent.post(`/quotes/${qid}/convert`), agent.post(`/quotes/${qid}/convert`), agent.post(`/quotes/${qid}/convert`)]);
@@ -161,6 +160,7 @@ describe('quote → booking conversion', () => {
     expect(bk.status).toBe('confirmed'); expect(bk.quote_id).toBe(qid); expect(bk.agent_id).toBe(agent.userId);
     expect(bk.components).toHaveLength(1); expect(bk.components[0]).toMatchObject({ description: 'Premium villa', net_total: 1800, tax_total: 180, cost_total: 1500, cancellation_terms: '50% within 30 days' });
     expect(bk.travel_start).toBe('2026-12-10'); expect(bk.finance.margin_pct).toBeCloseTo(16.67, 1);
+    expect((await agent.put(`/quotes/${qid}`, quoteBody())).status).toBe(409);   // a booked quote stays locked
     const q = (await agent.get(`/quotes/${qid}`)).body; expect(q.status).toBe('converted'); expect(q.activities.some((a: any) => /Converted to booking/.test(a.body))).toBe(true);
   });
   it('cannot convert an unaccepted quote, or one without a client', async () => {
