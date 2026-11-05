@@ -14,7 +14,9 @@ export function useList(path: string) {
   useEffect(() => { api(path).then(setRows); }, [path]);
   return rows;
 }
-export const today = () => new Date().toISOString().slice(0, 10);
+/** The user's own calendar date (YYYY-MM-DD). toISOString() is UTC, which is yesterday for the first hours of the day east of Greenwich. */
+export const isoDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export const today = () => isoDate(new Date());
 
 /** Lets the global "Create" menu deep-link to a page's create form (?new=1); the flag is consumed once. */
 export function useOpenOnNew(open: () => void) {
