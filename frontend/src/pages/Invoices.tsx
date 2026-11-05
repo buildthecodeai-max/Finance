@@ -26,7 +26,7 @@ const TABS: { key: string; label: string; test: (r: any) => boolean }[] = [
   { key: 'closed', label: 'Void / credited', test: (r) => r.status === 'void' || r.status === 'credited' },
 ];
 
-interface Initial { id?: number; client_id: number | string; booking_id?: number | string | null; currency: string; issue_date: string; due_date?: string; notes?: string; lines: any[]; installments: any[] }
+interface Initial { id?: number; client_id: number | string; booking_id?: number | string | null; currency: string; issue_date: string; due_date?: string; notes?: string; lines: any[]; installments: any[]; fresh?: boolean }
 
 function InvoiceForm({ initial, onDone, onSaved }: { initial?: Initial; onDone(): void; onSaved(id: number): void }) {
   const { agency } = useAuth();
@@ -71,7 +71,7 @@ function InvoiceForm({ initial, onDone, onSaved }: { initial?: Initial; onDone()
   const cell = 'lg:grid-cols-[6.5rem_9rem_minmax(0,1fr)_4.5rem_6.5rem_5rem_5rem_6.5rem_2rem]';
   const L = ({ t }: { t: string }) => <span className="lg:hidden block text-[11px] text-muted mb-0.5">{t}</span>;
   return (
-    <Modal title={editing ? 'Edit invoice' : initial ? 'New invoice (copy)' : 'New invoice'} onClose={onDone} wide>
+    <Modal title={editing ? 'Edit invoice' : initial && !initial.fresh ? 'New invoice (copy)' : 'New invoice'} onClose={onDone} wide>
       <Err e={err} />
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-x-3">
         <Field label="Client" hint={client ? `Terms: ${client.payment_terms_days ?? 14} days${client.currency && client.currency !== currency ? ` · usually pays in ${client.currency}` : ''}` : 'Start typing to search your clients'}>
@@ -184,10 +184,35 @@ export default function Invoices() {
   const load = () => api(`/invoices${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`).then(setRows).catch((e) => { setNote({ ok: false, text: e.message }); setRows([]); });
   useOpenOnNew(() => setForm({}));
   // "Create invoice" on a booking lands here with ?booking=ID — start a draft with that booking's client, currency and components as lines.
+  // "Create invoice" on an Umrah group lands here with ?umrah=GROUP&client=CLIENT: one package line for that payer's pilgrims.
+  useEffect(() => {
+    const gid = Number(sp.get('umrah')), cid = Number(sp.get('client')); if (!gid || !cid) return;
+    const n = new URLSearchParams(sp); n.delete('umrah'); n.delete('client'); setSp(n, { replace: true });
+    api(`/umrah/groups/${gid}`).then((g) => { const pax = g.pilgrims.filter((p: any) => p.client_id === cid && p.status !== 'cancelled').length, cost = Number(g.cost_per_pax), price = Number(g.price_per_pax);
+      if (!pax) throw new Error('This client has no pilgrims in that group');
+      setForm({ initial: { client_id: cid, booking_id: null, currency: g.currency, issue_date: today(), installments: [], fresh: true,
+        lines: [{ product_type: 'package', supplier_id: '', description: `Umrah package — ${g.name} (${String(g.departure_date).slice(0, 10)} to ${String(g.return_date).slice(0, 10)})`, quantity: pax, unit_cost: cost > 0 ? cost : price, markup_pct: cost > 0 ? Math.round((price / cost - 1) * 1e6) / 1e4 : 0, tax_rate: 0 }] } }); })
+      .catch((e) => setNote({ ok: false, text: e.message }));
+  }, []);
+  // "Create invoice" on a visa file lands here with ?visa=ID.
+  useEffect(() => {
+    const vid = Number(sp.get('visa')); if (!vid) return;
+    const n = new URLSearchParams(sp); n.delete('visa'); setSp(n, { replace: true });
+    api(`/visas/${vid}`).then((v) => { const cost = Number(v.cost), price = Number(v.price);
+      setForm({ initial: { client_id: v.client_id, booking_id: v.booking_id ?? null, currency: v.currency, issue_date: today(), installments: [], fresh: true,
+        lines: [{ product_type: 'other', supplier_id: v.supplier_id ?? '', description: `Visa processing — ${v.country} ${v.visa_type} visa, ${v.applicant_name}`, quantity: 1, unit_cost: cost > 0 ? cost : price, markup_pct: cost > 0 ? Math.round((price / cost - 1) * 1e6) / 1e4 : 0, tax_rate: 0 }] } }); })
+      .catch((e) => setNote({ ok: false, text: e.message }));
+  }, []);
+  // "New invoice" on a client page lands here with ?client=ID.
+  useEffect(() => {
+    const cid = Number(sp.get('client')); if (!cid || sp.get('booking') || sp.get('umrah')) return;
+    const n = new URLSearchParams(sp); n.delete('client'); setSp(n, { replace: true });
+    api(`/clients/${cid}`).then((c) => setForm({ initial: { client_id: c.id, booking_id: null, currency: c.currency, issue_date: today(), installments: [], lines: [], fresh: true } })).catch((e) => setNote({ ok: false, text: e.message }));
+  }, []);
   useEffect(() => {
     const bid = Number(sp.get('booking')); if (!bid) return;
     const n = new URLSearchParams(sp); n.delete('booking'); setSp(n, { replace: true });
-    api(`/bookings/${bid}`).then((b) => setForm({ initial: { client_id: b.client_id, booking_id: b.id, currency: b.currency, issue_date: today(), installments: [],
+    api(`/bookings/${bid}`).then((b) => setForm({ initial: { client_id: b.client_id, booking_id: b.id, currency: b.currency, issue_date: today(), installments: [], fresh: true,
       lines: b.components.map((c: any) => {
         const cost = Number(c.unit_cost), qty = Number(c.quantity), net = Number(c.net_total);
         const markup = cost > 0 && qty > 0 ? Math.round((net / (qty * cost) - 1) * 1e6) / 1e4 : Number(c.markup_pct);   // folds any discount into the markup, so the total matches the booking

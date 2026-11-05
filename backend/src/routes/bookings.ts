@@ -12,6 +12,10 @@ import { marginPct, priceComponent } from '../services/pricing.js';
 import { safeRecalc } from '../services/commissions.js';
 import { assertCanEdit, findScoped, scope } from './scope.js';
 import { idParam, parse, T } from './util.js';
+import { fileKey, putFile, signedUrl } from '../storage.js';
+import { htmlToPdf } from '../services/pdf.js';
+import { agencyLogoData, voucherHtml, voucherNo } from '../services/vouchers.js';
+import { config } from '../config.js';
 
 export const bookingsRouter = Router();
 export const travellersRouter = Router();
@@ -196,6 +200,20 @@ bookingsRouter.put('/:id/components/:cid', requireRole(...ALL_EDITORS), async (r
   });
   await safeRecalc(t, id);
   res.json({ ok: true });
+});
+
+// Printable service voucher (hotel, car rental, transfer, tour…) for one component: proof of booking for the guest or supplier, with no prices.
+bookingsRouter.get('/:id/components/:cid/voucher-url', async (req, res) => {
+  const id = idParam(req), cid = Number(req.params.cid), t = T(req), b = await findScoped(t, req, 'bookings', id, OWN);
+  const c = await t.one('SELECT * FROM booking_components WHERE agency_id = ? AND id = ? AND booking_id = ?', [t.agencyId, cid, id]);
+  if (!c) throw new HttpError(404, 'Component not found');
+  if (c.confirmation_status === 'cancelled') throw new HttpError(409, 'This item was cancelled with the supplier, so no voucher can be issued for it');
+  const [agency, supplier, client, guests] = await Promise.all([t.agency(), c.supplier_id ? t.get('suppliers', c.supplier_id) : null, t.get('clients', b.client_id),
+    t.query(`SELECT tr.first_name, tr.last_name FROM booking_travellers bt JOIN travellers tr ON tr.id = bt.traveller_id AND tr.agency_id = bt.agency_id WHERE bt.agency_id = ? AND bt.booking_id = ? ORDER BY tr.last_name, tr.first_name`, [t.agencyId, id])]);
+  const pdf = await htmlToPdf(voucherHtml(agency, b, c, supplier, guests, client, await agencyLogoData(agency)), { footer: `${agency.name} · ${voucherNo(c.product_type, b.reference, c.id)}` });
+  const name = `${voucherNo(c.product_type, b.reference, c.id)}.pdf`;
+  const key = await putFile(fileKey(t.agencyId, 'vouchers', name), pdf, 'application/pdf');
+  res.json({ url: await signedUrl(t.agencyId, key, name), expiresIn: config.r2.signedTtl });
 });
 
 bookingsRouter.delete('/:id/components/:cid', requireRole(...ALL_EDITORS), async (req, res) => {

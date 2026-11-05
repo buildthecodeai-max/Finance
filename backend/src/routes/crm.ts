@@ -192,6 +192,13 @@ opsRouter.get('/deadlines', requireRole('admin', 'finance_manager', 'agent', 'vi
              FROM travellers tr JOIN booking_travellers bt ON bt.traveller_id = tr.id AND bt.agency_id = tr.agency_id JOIN bookings b ON b.id = bt.booking_id AND b.agency_id = bt.agency_id
              WHERE tr.agency_id = ?${bs.sql} AND tr.passport_expiry IS NOT NULL AND b.travel_start BETWEEN ? AND ? AND tr.passport_expiry < DATE_ADD(COALESCE(b.travel_end, b.travel_start), INTERVAL 6 MONTH)
                AND b.status IN ('confirmed','in_service')`, [t.agencyId, ...bs.params, from, to]),
+    // Birthdays of travellers on live bookings (the people you may want to greet or upsell to).
+    t.query(`SELECT 'birthday' kind, x.next_bday date, CONCAT(x.name, ' turns ', YEAR(x.next_bday) - YEAR(x.dob), ' on this date (', x.ref, ')') title, 'booking' ref_type, x.booking_id ref_id, 'info' severity FROM (
+               SELECT CONCAT(tr.first_name, ' ', tr.last_name) name, tr.dob, MIN(b.id) booking_id, MIN(b.reference) ref,
+                      DATE_ADD(tr.dob, INTERVAL YEAR(CURDATE()) - YEAR(tr.dob) + (DATE_FORMAT(CURDATE(), '%m%d') > DATE_FORMAT(tr.dob, '%m%d')) YEAR) next_bday
+               FROM travellers tr JOIN booking_travellers bt ON bt.traveller_id = tr.id AND bt.agency_id = tr.agency_id JOIN bookings b ON b.id = bt.booking_id AND b.agency_id = bt.agency_id
+               WHERE tr.agency_id = ?${bs.sql} AND tr.dob IS NOT NULL AND b.archived_at IS NULL AND b.status IN ('enquiry','quoted','awaiting_client','confirmed','in_service') GROUP BY tr.id) x
+             WHERE x.next_bday BETWEEN ? AND ?`, [t.agencyId, ...bs.params, from, to]),
     t.query(`SELECT 'task' kind, k.due_at date, k.title, k.entity_type ref_type, k.entity_id ref_id, IF(k.priority IN ('urgent','high'),'high','medium') severity
              FROM tasks k WHERE k.agency_id = ? AND k.status = 'open' AND k.due_at BETWEEN ? AND ? ${mine ? 'AND k.owner_id = ?' : ''}`, [t.agencyId, from, to, ...(mine ? [req.ctx!.userId] : [])]),
     t.query(`SELECT 'overdue_task' kind, k.due_at date, k.title, k.entity_type ref_type, k.entity_id ref_id, 'high' severity

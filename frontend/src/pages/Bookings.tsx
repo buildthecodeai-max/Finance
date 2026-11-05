@@ -4,6 +4,7 @@ import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
 import { ClientPick } from '../components/ClientPick';
+import { SendSms } from '../components/SendSms';
 import { isoDate, today, useList, useOpenOnNew } from '../lookup';
 import { AlertTriangle, Archive, ArchiveRestore, CheckCircle2, FilePlus2, Pencil, Plus, Search, X } from 'lucide-react';
 
@@ -14,6 +15,7 @@ const NEXT: Record<string, string> = { enquiry: 'Mark as quoted', quoted: 'Quote
 const NEEDS_REASON = ['cancelled', 'lost', 'on_hold', 'refunded'];
 const TERMINAL = ['closed', 'cancelled', 'refunded', 'lost'];
 const TYPES = ['flight', 'hotel', 'package', 'cruise', 'transfer', 'tour', 'rail', 'car', 'insurance', 'visa', 'fee', 'other'];
+const VOUCHER: Record<string, string> = { hotel: 'Hotel voucher', car: 'Car voucher', transfer: 'Transfer voucher', tour: 'Tour voucher', package: 'Voucher', cruise: 'Voucher' };
 const PAYMENT: Record<string, string> = { not_invoiced: 'Not invoiced yet', unpaid: 'Unpaid', part_paid: 'Part paid', paid: 'Paid in full' };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -207,7 +209,7 @@ export function BookingWorkspace() {
   const tabs = ['Overview', 'Itinerary', 'Travellers', 'Components', 'Finance', 'Activity'];
   const [b, setB] = useState<any>(null); const [tab, setTabState] = useState(tabs.includes(sp.get('tab') ?? '') ? sp.get('tab')! : 'Overview'); const [err, setErr] = useState(''); const [msg, setMsg] = useState('');
   const [status, setStatus] = useState(''); const [reason, setReason] = useState(''); const [editing, setEditing] = useState(false); const [deleting, setDeleting] = useState(false);
-  const [comp, setComp] = useState<any>(null); const [item, setItem] = useState<any>(null); const [trv, setTrv] = useState<any>(null); const [note, setNote] = useState(''); const [task, setTask] = useState(''); const [taskDue, setTaskDue] = useState(''); const [confirmDel, setConfirmDel] = useState(false);
+  const [sms, setSms] = useState(false); const [comp, setComp] = useState<any>(null); const [item, setItem] = useState<any>(null); const [trv, setTrv] = useState<any>(null); const [note, setNote] = useState(''); const [task, setTask] = useState(''); const [taskDue, setTaskDue] = useState(''); const [confirmDel, setConfirmDel] = useState(false);
   const setTab = (t: string) => { setTabState(t); const n = new URLSearchParams(sp); t === 'Overview' ? n.delete('tab') : n.set('tab', t); setSp(n, { replace: true }); };
   const load = () => api(`/bookings/${id}`).then((d) => { setB(d); setStatus(d.status); }).catch((e) => setErr(e.message));
   useEffect(() => { setB(null); load(); }, [id]);
@@ -221,6 +223,7 @@ export function BookingWorkspace() {
     cid ? await api(`/bookings/${id}/components/${cid}`, 'PUT', body) : await api(`/bookings/${id}/components`, 'POST', body); setComp(null);
   }, 'Item saved.');
   const addTask = () => { if (task.trim()) run(async () => { await api('/crm/tasks', 'POST', { title: task.trim(), entity_type: 'booking', entity_id: b.id, ...(taskDue ? { due_at: taskDue } : {}) }); setTask(''); setTaskDue(''); }, 'Task added.'); };
+  const openVoucher = (c: any) => run(async () => { window.open((await api(`/bookings/${id}/components/${c.id}/voucher-url`)).url); }, c.confirmation_status === 'confirmed' ? 'Voucher opened.' : 'Voucher opened — it is marked provisional until the supplier confirms.');
   const days = [...new Set(b.itinerary.map((i: any) => i.day_no))].sort((x: any, y: any) => x - y) as number[];
   const dayDate = (n: number) => { if (!b.travel_start) return ''; const d = new Date(`${day(b.travel_start)}T00:00:00`); d.setDate(d.getDate() + n - 1); return niceDay(d); };
   const w = when(b.travel_start, b.travel_end); const nights = b.travel_start && b.travel_end ? Math.max(0, Math.round((Date.parse(day(b.travel_end)) - Date.parse(day(b.travel_start))) / 864e5)) : null;
@@ -235,6 +238,7 @@ export function BookingWorkspace() {
     <Page title={b.reference} description={[b.client?.name, b.destination].filter(Boolean).join(' · ') || undefined}
       actions={<><button className="btn-ghost" onClick={() => nav('/bookings')}>← Bookings</button>
         {write && !archived && <button className="btn-ghost inline-flex items-center gap-1" onClick={() => nav(`/invoices?booking=${b.id}`)}><FilePlus2 size={14} /> Create invoice</button>}
+        {write && !archived && <button className="btn-ghost" onClick={() => setSms(true)}>Text client</button>}
         {write && !archived && <button className="btn-ghost inline-flex items-center gap-1" onClick={() => setEditing(true)}><Pencil size={14} /> Edit details</button>}
         {write && !archived && <button className="btn-ghost text-danger inline-flex items-center gap-1" onClick={() => setDeleting(true)}><Archive size={14} /> Delete</button>}
         {archived && finance && <button className="btn" onClick={() => run(() => api(`/bookings/${id}/restore`, 'POST', {}), 'Booking restored.')}><ArchiveRestore size={14} /> Restore</button>}
@@ -242,6 +246,7 @@ export function BookingWorkspace() {
       <Err e={err} />{msg && <Banner ok onClose={() => setMsg('')}>{msg}</Banner>}
       {archived && <div className="rounded-lg border border-danger/30 bg-danger/10 text-danger text-sm p-3 mb-3">This booking was deleted on {day(b.archived_at)}{b.archive_reason ? ` — “${b.archive_reason}”` : ''}. It is read-only until restored.</div>}
       {locked && !archived && <div className="rounded-lg border border-line bg-surface2/60 text-sm p-3 mb-3">This booking is <b>{LABEL[b.status].toLowerCase()}</b>, so its items can't be changed. {finance || write ? (finance ? 'Change the status below to reopen it.' : 'Ask finance or an admin to reopen it.') : ''}</div>}
+      {sms && <SendSms target={{ client_id: b.client_id, name: b.client?.name ?? 'client', phone: b.client?.phone }} entity={{ type: 'booking', id: b.id }} onClose={() => setSms(false)} onSent={(m) => { setSms(false); setMsg(m); }} />}
       {editing && <EditBooking b={b} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); setMsg('Booking details updated.'); load(); }} />}
       {deleting && <DeleteBooking b={b} onClose={() => setDeleting(false)} onDone={() => nav('/bookings?tab=deleted')} />}
 
@@ -313,7 +318,8 @@ export function BookingWorkspace() {
           { h: 'Item', render: (c: any) => <><span className="capitalize text-muted">{c.product_type}</span> — {c.description}{c.supplier_ref && <div className="text-xs text-muted">Ref {c.supplier_ref}</div>}</> },
           { h: 'Supplier', render: (c: any) => c.supplier_name ?? <span className="text-muted">—</span> }, { h: 'Dates', render: (c: any) => c.service_start ? <span className="num whitespace-nowrap">{day(c.service_start)}{c.service_end && day(c.service_end) !== day(c.service_start) ? ` → ${day(c.service_end).slice(5)}` : ''}</span> : <span className="text-muted">—</span> },
           { h: 'Supplier confirmed', render: (c: any) => <Pill s={c.confirmation_status} /> }, { h: 'Ticket', render: (c: any) => (c.ticketing_status === 'not_applicable' ? <span className="text-muted">—</span> : <Pill s={c.ticketing_status} />) },
-          { h: 'Selling', right: true, render: (c: any) => money(c.net_total + c.tax_total, f.currency) }, { h: 'Cost', right: true, render: (c: any) => money(c.cost_total, f.currency) }, { h: 'Margin', right: true, render: (c: any) => margin(c.net_total, c.cost_total) }]} />
+          { h: 'Selling', right: true, render: (c: any) => money(c.net_total + c.tax_total, f.currency) }, { h: 'Cost', right: true, render: (c: any) => money(c.cost_total, f.currency) }, { h: 'Margin', right: true, render: (c: any) => margin(c.net_total, c.cost_total) },
+          { h: '', render: (c: any) => (c.confirmation_status === 'cancelled' || ['flight', 'fee', 'insurance'].includes(c.product_type) ? null : <button className="btn-ghost whitespace-nowrap" title="Printable voucher for the guest or supplier" onClick={(e) => { e.stopPropagation(); openVoucher(c); }}>{VOUCHER[c.product_type] ?? 'Voucher'}</button>) }]} />
         {b.components.length > 0 && <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 text-sm mt-3 num"><span className="text-muted">Selling <b className="text-fg">{money(r2(sumNet + sumTax), f.currency)}</b> <span className="text-xs">(incl. {money(r2(sumTax), f.currency)} tax)</span></span><span className="text-muted">Cost <b className="text-fg">{money(r2(sumCost), f.currency)}</b></span><span className="text-muted">Margin <b className="text-fg">{margin(sumNet, sumCost)}</b></span></div>}
         {editable && b.components.length > 0 && <p className="text-xs text-muted mt-1">Click any row to change it.</p>}</div>}
 

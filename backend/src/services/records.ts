@@ -11,7 +11,7 @@ async function tablesWith(column: string): Promise<string[]> {
   return colCache.get(column) ?? [];
 }
 
-const LABEL: Record<string, string> = { invoices: 'invoices', bookings: 'bookings', quotes: 'quotes', receipts: 'receipts', payments: 'payments', credit_notes: 'credit notes', client_refunds: 'refunds', leads: 'leads', travellers: 'travellers',
+const LABEL: Record<string, string> = { visa_applications: 'visa applications', umrah_pilgrims: 'Umrah pilgrims', invoices: 'invoices', bookings: 'bookings', quotes: 'quotes', receipts: 'receipts', payments: 'payments', credit_notes: 'credit notes', client_refunds: 'refunds', leads: 'leads', travellers: 'travellers',
   booking_components: 'booking components', supplier_bills: 'supplier bills', invoice_lines: 'invoice lines', itinerary_items: 'itinerary items', payment_run_items: 'payment-run items', quote_components: 'quote components', commission_rules: 'commission rules',
   supplier_commissions: 'supplier commissions', accounts: 'ledger accounts', memberships: 'team members', refunds: 'refunds', ticket_invoices: 'ticket invoices', commission_entries: 'commission entries', commission_splits: 'commission splits', commissions: 'commissions', booking_travellers: 'travellers on bookings' };
 export type Dep = { table: string; label: string; n: number };

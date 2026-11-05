@@ -320,3 +320,81 @@ ticketsRouter.get('/reports/sales', requireRole('admin', 'finance_manager', 'vie
      WHERE l.agency_id = ? AND i.status = 'confirmed' AND i.invoice_date BETWEEN ? AND ? GROUP BY label ORDER BY receivable DESC`, [t.agencyId, from, to]);
   res.json({ group, from, to, rows });
 });
+
+// ---- Airline remittance (IATA / BSP) report ----
+const FINANCE_VIEW = requireRole('admin', 'finance_manager', 'viewer');
+const dateOk = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+function period(req: any) {
+  const from = String(req.query.from ?? `${new Date().getUTCFullYear()}-01-01`), to = String(req.query.to ?? today());
+  if (!dateOk(from) || !dateOk(to)) throw new HttpError(400, 'from and to must be dates (YYYY-MM-DD)');
+  if (to < from) throw new HttpError(400, 'The end date is before the start date');
+  return { from, to };
+}
+
+/**
+ * What the agency owes each airline for the period, ready to compare with the airline's BSP/IATA statement.
+ * Confirmed (supervised) ticket invoices only. Refunds are netted off by refund date. Amounts are in base currency.
+ */
+ticketsRouter.get('/reports/airline-remittance', FINANCE_VIEW, async (req, res) => {
+  const t = T(req), { from, to } = period(req), airline = req.query.airline_id ? Number(req.query.airline_id) : null;
+  const lines = await t.query(
+    `SELECT l.id, i.invoice_no, i.invoice_date, l.ticket_no, l.passenger_name, l.route, l.sector, l.pnr, l.airline_id, al.code airline_code, al.name airline_name, al.iata_code,
+            ROUND(l.fare * l.fx_rate, 2) fare, ROUND(l.total_taxes * l.fx_rate, 2) taxes, ROUND(l.ticket_total * l.fx_rate, 2) gross, l.com_rec commission, l.wh_air, l.payable
+     FROM ticket_lines l JOIN ticket_invoices i ON i.id = l.invoice_id AND i.agency_id = l.agency_id LEFT JOIN airlines al ON al.id = l.airline_id AND al.agency_id = l.agency_id
+     WHERE l.agency_id = ? AND i.status = 'confirmed' AND i.invoice_date BETWEEN ? AND ? ${airline ? 'AND l.airline_id = ?' : ''} ORDER BY al.name, i.invoice_date, l.id LIMIT 5000`,
+    [t.agencyId, from, to, ...(airline ? [airline] : [])]);
+  const refunds = await t.query(
+    `SELECT l.airline_id, COUNT(*) n, COALESCE(SUM(r.rec_from_vendor),0) recovered FROM refunds r JOIN ticket_lines l ON l.id = r.ticket_line_id AND l.agency_id = r.agency_id
+     WHERE r.agency_id = ? AND r.refund_date BETWEEN ? AND ? ${airline ? 'AND l.airline_id = ?' : ''} GROUP BY l.airline_id`, [t.agencyId, from, to, ...(airline ? [airline] : [])]);
+  const by = new Map<number | string, any>();
+  for (const l of lines) {
+    const k = l.airline_id ?? 'none';
+    const a = by.get(k) ?? { airline_id: l.airline_id, code: l.airline_code, name: l.airline_name ?? 'No airline', iata_code: l.iata_code, tickets: 0, fare: 0, taxes: 0, gross: 0, commission: 0, wh_air: 0, payable: 0, refunds: 0, recovered: 0 };
+    a.tickets++; for (const f of ['fare', 'taxes', 'gross', 'commission', 'wh_air', 'payable']) a[f] = r2(a[f] + Number(l[f] ?? 0)); by.set(k, a);
+  }
+  for (const r of refunds) { const a = by.get(r.airline_id ?? 'none'); if (a) { a.refunds = r.n; a.recovered = r2(Number(r.recovered)); } else by.set(r.airline_id ?? 'none', { airline_id: r.airline_id, name: 'Refunds only', tickets: 0, fare: 0, taxes: 0, gross: 0, commission: 0, wh_air: 0, payable: 0, refunds: r.n, recovered: r2(Number(r.recovered)) }); }
+  const airlines = [...by.values()].map((a) => ({ ...a, net: r2(a.payable - a.recovered) })).sort((x, y) => y.net - x.net);
+  const sum = (f: string) => r2(airlines.reduce((s, a) => s + a[f], 0));
+  res.json({ from, to, airlines, lines, totals: { tickets: airlines.reduce((s, a) => s + a.tickets, 0), fare: sum('fare'), taxes: sum('taxes'), gross: sum('gross'), commission: sum('commission'), payable: sum('payable'), recovered: sum('recovered'), net: sum('net') },
+    truncated: lines.length >= 5000 });
+});
+
+// ---- BSP reconciliation: compare the airline/BSP statement with the tickets in the books ----
+const digits = (s: unknown) => String(s ?? '').replace(/\D/g, '');
+/** Airline-prefixed (13 digit) and bare (10 digit) ticket numbers refer to the same ticket. */
+const tkey = (s: unknown) => { const d = digits(s); return d.length > 10 ? d.slice(-10) : d; };
+
+ticketsRouter.post('/bsp-reconcile', FINANCE_VIEW, async (req, res) => {
+  const b = parse(z.object({
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), airline_id: z.number().int().nullish(), basis: z.enum(['payable', 'gross']).default('payable'),
+    lines: z.array(z.object({ ticket_no: z.string().min(1).max(40), amount: z.number() })).min(1).max(5000),
+  }), req.body), t = T(req);
+  if (b.to < b.from) throw new HttpError(400, 'The end date is before the start date');
+  const col = b.basis === 'gross' ? 'ROUND(l.ticket_total * l.fx_rate, 2)' : 'l.payable';
+  const mine = await t.query(
+    `SELECT l.id, i.invoice_no, i.invoice_date, l.ticket_no, l.passenger_name, al.name airline_name, ${col} amount
+     FROM ticket_lines l JOIN ticket_invoices i ON i.id = l.invoice_id AND i.agency_id = l.agency_id LEFT JOIN airlines al ON al.id = l.airline_id AND al.agency_id = l.agency_id
+     WHERE l.agency_id = ? AND i.status = 'confirmed' AND l.ticket_no IS NOT NULL AND l.ticket_no <> '' AND i.invoice_date BETWEEN ? AND ? ${b.airline_id ? 'AND l.airline_id = ?' : ''}`,
+    [t.agencyId, b.from, b.to, ...(b.airline_id ? [b.airline_id] : [])]);
+  const sys = new Map<string, any[]>(); for (const m of mine) { const k = tkey(m.ticket_no); if (k) sys.set(k, [...(sys.get(k) ?? []), m]); }
+  const seen = new Set<string>(), matched: any[] = [], different: any[] = [], missingInSystem: any[] = [], duplicates: string[] = [];
+  for (const l of b.lines) {
+    const k = tkey(l.ticket_no); if (!k) continue;
+    if (seen.has(k)) { duplicates.push(l.ticket_no); continue; } seen.add(k);
+    const hit = sys.get(k);
+    if (!hit) { missingInSystem.push({ ticket_no: l.ticket_no, bsp: r2(l.amount) }); continue; }
+    const sysAmt = r2(hit.reduce((s, h) => s + Number(h.amount), 0)), row = { ticket_no: l.ticket_no, passenger: hit[0].passenger_name, invoice_no: hit[0].invoice_no, airline: hit[0].airline_name, system: sysAmt, bsp: r2(l.amount), diff: r2(l.amount - sysAmt) };
+    (Math.abs(row.diff) <= 0.01 ? matched : different).push(row);
+  }
+  const missingInBsp = mine.filter((m) => !seen.has(tkey(m.ticket_no))).map((m) => ({ ticket_no: m.ticket_no, passenger: m.passenger_name, invoice_no: m.invoice_no, airline: m.airline_name, date: m.invoice_date, system: r2(Number(m.amount)) }));
+  // BSP tickets absent from this period may simply be booked in another period — say so instead of crying "unknown".
+  let elsewhere = new Set<string>();
+  if (missingInSystem.length) {
+    const keys = missingInSystem.map((m) => tkey(m.ticket_no)), found = await t.query(`SELECT l.ticket_no FROM ticket_lines l JOIN ticket_invoices i ON i.id = l.invoice_id AND i.agency_id = l.agency_id WHERE l.agency_id = ? AND i.status = 'confirmed' AND RIGHT(REGEXP_REPLACE(l.ticket_no, '[^0-9]', ''), 10) IN (${keys.map(() => '?').join(',')})`, [t.agencyId, ...keys]);
+    elsewhere = new Set(found.map((f: any) => tkey(f.ticket_no)));
+  }
+  const unknown = missingInSystem.map((m) => ({ ...m, in_other_period: elsewhere.has(tkey(m.ticket_no)) }));
+  res.json({ basis: b.basis, totals: { bsp_lines: seen.size, matched: matched.length, different: different.length, missing_in_bsp: missingInBsp.length, missing_in_system: unknown.length, duplicates: duplicates.length,
+    bsp_amount: r2(b.lines.filter((l, i, a) => a.findIndex((x) => tkey(x.ticket_no) === tkey(l.ticket_no)) === i).reduce((s, l) => s + l.amount, 0)), system_amount: r2(mine.reduce((s, m) => s + Number(m.amount), 0)) },
+    matched, different, missing_in_bsp: missingInBsp, missing_in_system: unknown, duplicates });
+});

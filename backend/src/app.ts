@@ -13,6 +13,9 @@ import { clientsRouter, suppliersRouter, teamRouter } from './routes/parties.js'
 import { bookingsRouter, travellersRouter } from './routes/bookings.js';
 import { leadsRouter, crmRouter, opsRouter } from './routes/crm.js';
 import { quotesRouter, publicQuotesRouter } from './routes/quotes.js';
+import { visasRouter } from './routes/visas.js';
+import { umrahRouter } from './routes/umrah.js';
+import { smsRouter } from './routes/sms.js';
 import { paymentsRouter } from './routes/payments.js';
 import { commissionsRouter } from './routes/commissions.js';
 import { reportsRouter } from './routes/reports.js';
@@ -120,6 +123,9 @@ api.use('/leads', leadsRouter);
 api.use('/crm', crmRouter);
 api.use('/ops', opsRouter);
 api.use('/quotes', quotesRouter);
+api.use('/visas', visasRouter);
+api.use('/umrah', umrahRouter);
+api.use('/sms', smsRouter);
 app.use('/api', api);
 
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

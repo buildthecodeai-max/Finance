@@ -4,6 +4,30 @@ import { useAuth } from '../auth';
 import { Err, Field, Page, Table } from '../components/ui';
 import { today } from '../lookup';
 
+function SmsCard() {
+  const [s, setS] = useState<any>(null); const [f, setF] = useState<any>({ account_sid: '', auth_token: '', from: '', default_cc: '' }); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [test, setTest] = useState(''); const [log, setLog] = useState<any[]>([]); const [busy, setBusy] = useState(false);
+  const load = () => { api('/sms/settings').then((r) => { setS(r); if (r.configured) setF((x: any) => ({ ...x, from: r.from, default_cc: r.default_cc ?? '', account_sid: '' })); }); api('/sms/log').then(setLog).catch(() => {}); };
+  useEffect(() => { load(); }, []);
+  const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
+  const save = async () => { setBusy(true); try { await api('/sms/settings', 'PUT', { account_sid: f.account_sid.trim() || undefined, auth_token: f.auth_token.trim() || undefined, from: f.from.trim(), default_cc: f.default_cc.trim() || null }); setErr(''); setMsg('Saved. Send yourself a test message below to check it works.'); setF({ ...f, auth_token: '' }); load(); } catch (e: any) { setErr(e.message); setMsg(''); } finally { setBusy(false); } };
+  const sendTest = async () => { setBusy(true); try { await api('/sms/test', 'POST', { to: test }); setErr(''); setMsg(`Test message sent to ${test}.`); load(); } catch (e: any) { setErr(e.message); setMsg(''); } finally { setBusy(false); } };
+  const disconnect = async () => { await api('/sms/settings', 'DELETE'); setMsg('Text messages disconnected.'); setF({ account_sid: '', auth_token: '', from: '', default_cc: '' }); load(); };
+  if (!s) return null;
+  return (<div className="card">
+    <h3 className="font-bold mb-1">Text messages (SMS)</h3>
+    <p className="text-sm text-muted mb-3">Send clients booking confirmations, payment reminders and birthday wishes by text. Uses your own <a className="underline" href="https://www.twilio.com" target="_blank" rel="noreferrer">Twilio</a> account — you pay Twilio for the messages. {s.configured ? <>Connected as <b className="text-fg">{s.account_sid}</b>, sending from <b className="text-fg">{s.from}</b>.</> : 'Not connected yet.'}</p>
+    <Err e={err} />{msg && <div className="text-accent text-sm mb-3">{msg}</div>}
+    <div className="grid sm:grid-cols-2 gap-x-3">
+      <Field label="Account SID" hint={s.configured ? 'Leave blank to keep the saved one' : 'Starts with AC — from your Twilio console'}><input className="input num" value={f.account_sid} onChange={set('account_sid')} autoComplete="off" placeholder={s.configured ? s.account_sid : 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'} /></Field>
+      <Field label="Auth token" hint={s.configured ? 'Leave blank to keep the saved one' : 'Stored encrypted and never shown again'}><input className="input num" type="password" value={f.auth_token} onChange={set('auth_token')} autoComplete="new-password" /></Field>
+      <Field label="Send from" hint="Your Twilio number (+14155550100) or a sender name"><input className="input" value={f.from} onChange={set('from')} /></Field>
+      <Field label="Your country code" hint="So 0300 1234567 becomes +92 300 1234567"><input className="input num" value={f.default_cc} onChange={set('default_cc')} placeholder="+92" /></Field></div>
+    <div className="flex flex-wrap gap-2 mb-4"><button className="btn" disabled={busy || !f.from.trim() || (!s.configured && (!f.account_sid.trim() || !f.auth_token.trim()))} onClick={save}>{s.configured ? 'Save changes' : 'Connect'}</button>{s.configured && <button className="btn-ghost text-danger" onClick={() => confirm('Disconnect text messages?') && disconnect()}>Disconnect</button>}</div>
+    {s.configured && <div className="flex flex-wrap items-end gap-2 mb-4"><Field label="Send a test message to"><input className="input num" value={test} onChange={(e) => setTest(e.target.value)} placeholder="+92 300 1234567" /></Field><button className="btn-ghost mb-3" disabled={busy || !test.trim()} onClick={sendTest}>Send test</button></div>}
+    {log.length > 0 && <><h4 className="text-sm font-bold mb-2">Recent texts</h4><Table rows={log.slice(0, 15)} cols={[{ h: 'When', render: (r: any) => new Date(r.created_at).toLocaleString() }, { h: 'To', render: (r: any) => <>{r.client_name ?? ''}<div className="text-xs text-muted num">{r.to_number}</div></> }, { h: 'Message', render: (r: any) => <span className="text-xs">{r.body}</span> }, { h: 'Result', render: (r: any) => (r.status === 'sent' ? <span className="text-success">Sent</span> : <span className="text-danger" title={r.error}>Failed</span>) }]} /></>}
+  </div>);
+}
+
 const BILLING: [string, string, string?][] = [
   ['tax_number', 'Tax registration no. (GST / VAT / ABN)'], ['bank_name', 'Bank name'], ['bank_account_name', 'Account name'], ['bank_account_number', 'Account number'],
   ['bank_routing', 'BSB / Sort code / Routing no.'], ['bank_iban', 'IBAN'], ['bank_swift', 'SWIFT / BIC'],
@@ -82,6 +106,7 @@ export default function Settings() {
           <Field label="Payment instructions (optional)"><textarea className="input h-16" value={s.payment_instructions ?? ''} onChange={set('payment_instructions')} disabled={!admin} placeholder="e.g. Please email the transfer receipt to accounts@…" /></Field>
           {admin ? <button className="btn" onClick={save}>Save settings</button> : <p className="text-xs text-muted">Only an Admin can change agency settings.</p>}
         </div>
+        {admin && <SmsCard />}
         {can('admin', 'finance_manager') && <div className="card">
           <h3 className="font-bold mb-1">Accounting period lock</h3>
           <p className="text-sm text-muted mb-3">Currently locked through: <b className="num text-fg">{s.locked_through ?? 'nothing (all periods open)'}</b>. Nothing can be posted, edited or reversed on or before this date.</p>

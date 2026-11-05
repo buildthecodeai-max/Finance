@@ -24,7 +24,7 @@ export async function htmlToPdf(html: string, opts: { footer?: string } = {}): P
 export const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
-const css = `*{box-sizing:border-box}body{font-family:Inter,Helvetica,Arial,sans-serif;color:#1b2430;font-size:11.5px;line-height:1.45;margin:0}
+export const css = `*{box-sizing:border-box}body{font-family:Inter,Helvetica,Arial,sans-serif;color:#1b2430;font-size:11.5px;line-height:1.45;margin:0}
 table{width:100%;border-collapse:collapse}.r{text-align:right;font-variant-numeric:tabular-nums}.m{color:#6b7686}
 h1{font-size:30px;letter-spacing:2px;margin:0;color:#0f172a;font-weight:800}
 .bar{height:6px;background:#00A586;border-radius:3px;margin-bottom:18px}

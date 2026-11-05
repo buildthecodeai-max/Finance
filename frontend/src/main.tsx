@@ -11,6 +11,9 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const Payments = lazy(() => import('./pages/Payments'));
 const Commissions = lazy(() => import('./pages/Commissions'));
+const UmrahList = lazy(() => import('./pages/Umrah').then((m) => ({ default: m.UmrahList })));
+const UmrahGroup = lazy(() => import('./pages/Umrah').then((m) => ({ default: m.UmrahGroup })));
+const Visas = lazy(() => import('./pages/Visas'));
 const Clients = lazy(() => import('./pages/Parties').then((m) => ({ default: m.Clients })));
 const Suppliers = lazy(() => import('./pages/Parties').then((m) => ({ default: m.Suppliers })));
 const Reports = lazy(() => import('./pages/Reports'));
@@ -21,6 +24,7 @@ const CashBank = lazy(() => import('./pages/CashBank'));
 const Journal = lazy(() => import('./pages/Journal'));
 const Vouchers = lazy(() => import('./pages/Vouchers'));
 const ChequeFormat = lazy(() => import('./pages/ChequeFormat'));
+const BspRecon = lazy(() => import('./pages/BspRecon'));
 const SaleReports = lazy(() => import('./pages/SaleReports'));
 const TicketInvoices = lazy(() => import('./pages/TicketInvoices'));
 const Refunds = lazy(() => import('./pages/Refunds'));
@@ -77,6 +81,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Route path="payments" element={<Payments />} />
       <Route path="commissions" element={<Commissions />} />
       <Route path="clients" element={<Clients />} />
+      <Route path="visas" element={<Visas />} />
+      <Route path="umrah" element={<UmrahList />} />
+      <Route path="umrah/:id" element={<UmrahGroup />} />
       <Route path="suppliers" element={<Suppliers />} />
       <Route path="reports" element={<Reports />} />
       <Route path="reconciliation" element={<Recon />} />
@@ -89,6 +96,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Route path="payment-vouchers" element={<Vouchers kind="payment" />} />
       <Route path="cheque-format" element={<ChequeFormat />} />
       <Route path="sale-reports" element={<SaleReports />} />
+      <Route path="bsp-reconciliation" element={<BspRecon />} />
       <Route path="ticket-invoices" element={<TicketInvoices />} />
       <Route path="refunds" element={<Refunds />} />
       <Route path="ticket-search" element={<TicketSearch />} />

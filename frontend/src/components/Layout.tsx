@@ -2,7 +2,7 @@ import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Banknote, BarChart3, BookOpen, Briefcase, Building2, CalendarClock, Calculator as CalcIcon, Check, ChevronRight, ChevronsLeft, ChevronsUpDown,
-  Coins, CreditCard, FileMinus, FileSignature, FileText, HandCoins, LineChart, Truck, LayoutDashboard, Library, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Percent, Plane, Plus, ScrollText, Search, Settings, ShieldCheck, Sun, Target, Ticket, TrendingUp, Undo2, Users, Wallet, X,
+  Coins, CreditCard, FileMinus, FileSignature, FileText, HandCoins, LineChart, Truck, LayoutDashboard, Library, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Percent, Plane, Plus, ScrollText, Search, Settings, MoonStar, ShieldCheck, Stamp, Sun, Target, Ticket, TrendingUp, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api } from '../api';
 import { useAuth, AgencyRef } from '../auth';
@@ -18,8 +18,8 @@ const FINANCE: Role[] = ['admin', 'finance_manager', 'viewer'];
 // module: which package module(s) gate this group. null = always visible. Array = visible if ANY match.
 const GROUPS: { title: string; module: string | string[] | null; items: Item[] }[] = [
   { title: 'Overview', module: null, items: [{ to: '/', label: 'Dashboard', icon: I(LayoutDashboard) }, { to: '/operations', label: 'Operations', icon: I(CalendarClock) }] },
-  { title: 'Sales', module: 'crm', items: [{ to: '/leads', label: 'Leads', icon: I(Target) }, { to: '/quotes', label: 'Quotes', icon: I(FileSignature) }, { to: '/bookings', label: 'Bookings', icon: I(Briefcase) }, { to: '/clients', label: 'Clients', icon: I(Users) }] },
-  { title: 'Ticketing', module: 'ticketing', items: [{ to: '/ticket-invoices', label: 'Ticket Invoices', icon: I(Ticket) }, { to: '/refunds', label: 'Refunds', icon: I(Undo2) }, { to: '/ticket-search', label: 'Ticket Search', icon: I(Search) }, { to: '/airlines', label: 'Airlines', icon: I(Plane) }, { to: '/sale-reports', label: 'Sale Reports', icon: I(TrendingUp), roles: FINANCE }] },
+  { title: 'Sales', module: 'crm', items: [{ to: '/leads', label: 'Leads', icon: I(Target) }, { to: '/quotes', label: 'Quotes', icon: I(FileSignature) }, { to: '/bookings', label: 'Bookings', icon: I(Briefcase) }, { to: '/clients', label: 'Clients', icon: I(Users) }, { to: '/visas', label: 'Visas', icon: I(Stamp) }, { to: '/umrah', label: 'Umrah Groups', icon: I(MoonStar) }] },
+  { title: 'Ticketing', module: 'ticketing', items: [{ to: '/ticket-invoices', label: 'Ticket Invoices', icon: I(Ticket) }, { to: '/refunds', label: 'Refunds', icon: I(Undo2) }, { to: '/ticket-search', label: 'Ticket Search', icon: I(Search) }, { to: '/airlines', label: 'Airlines', icon: I(Plane) }, { to: '/sale-reports', label: 'Sale Reports', icon: I(TrendingUp), roles: FINANCE }, { to: '/bsp-reconciliation', label: 'BSP Reconciliation', icon: I(ArrowLeftRight), roles: FINANCE }] },
   { title: 'Finance & Accounting', module: ['finance', 'accounting'], items: [
     // Overview & client-side
     { to: '/finance', label: 'Overview', icon: I(LineChart), roles: FINANCE },
@@ -52,7 +52,7 @@ const GROUPS: { title: string; module: string | string[] | null; items: Item[] }
 ];
 const FLAT = GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.title })));
 const findItem = (p: string) => FLAT.find((i) => i.to === p);
-const labelFor = (p: string) => findItem(p)?.label ?? (p.startsWith('/bookings/') ? 'Booking' : p.startsWith('/quotes/') ? 'Quote' : undefined);
+const labelFor = (p: string) => findItem(p)?.label ?? (p.startsWith('/umrah/') ? 'Umrah group' : p.startsWith('/bookings/') ? 'Booking' : p.startsWith('/quotes/') ? 'Quote' : undefined);
 const groupFor = (p: string) => findItem(p)?.group ?? (p.startsWith('/bookings/') ? 'Sales' : p.startsWith('/quotes/') ? 'Sales' : '');
 
 /* ---------- small popover ---------- */
