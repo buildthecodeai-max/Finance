@@ -113,9 +113,40 @@ function GlobalSearch() {
   );
 }
 
+
+/* ---------- Super admin: open any agency's workspace from the sidebar ---------- */
+function AgencyPicker({ currentId, inAgency, busy, err, list, onPick, onHome }: { currentId?: number; inAgency: boolean; busy: boolean; err: string; list(q: string): Promise<any[]>; onPick(id: number): void; onHome(): void }) {
+  const [q, setQ] = useState(''); const [rows, setRows] = useState<any[] | null>(null); const [e, setE] = useState('');
+  useEffect(() => { setRows(null); const t = setTimeout(() => list(q).then(setRows).catch((x) => setE(x.message)), q ? 250 : 0); return () => clearTimeout(t); }, [q]);
+  return (
+    <div className={busy ? 'opacity-60 pointer-events-none' : ''}>
+      <input autoFocus className="input h-8 py-1 text-sm mb-1.5" placeholder="Search agencies…" aria-label="Search agencies" value={q} onChange={(x) => setQ(x.target.value)} />
+      <div className="max-h-72 overflow-y-auto" role="listbox" aria-label="Agencies">
+        {inAgency && <MenuBtn onClick={onHome}><Undo2 size={14} className="text-muted" /><span className="flex-1">Back to my own workspace</span></MenuBtn>}
+        {rows?.map((a) => <MenuBtn key={a.id} active={a.id === currentId} onClick={() => onPick(a.id)}><span className="flex-1 truncate">{a.name}</span>{a.status && <span className="text-[11px] text-muted capitalize">{String(a.status).replace('_', ' ')}</span>}</MenuBtn>)}
+        {rows && !rows.length && <div className="px-2.5 py-2 text-xs text-muted">No agencies found.</div>}
+        {!rows && !e && <div className="px-2.5 py-2 text-xs text-muted">Loading…</div>}
+      </div>
+      {(e || err) && <div className="px-2.5 py-1.5 text-xs text-danger" role="alert">{e || err}</div>}
+      <div className="px-2.5 pt-1.5 mt-1 border-t border-line text-[11px] text-muted">Opening a workspace is recorded in the operator audit log.</div>
+    </div>
+  );
+}
+function OperatorSwitcher() {
+  const { agency, inAgency, listAgencies, enterAgency, leaveAgency } = useAuth(); const nav = useNavigate();
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const go = async (fn: () => Promise<void>, close: () => void) => { setBusy(true); setErr(''); try { await fn(); close(); nav('/'); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  return (
+    <Popover align="left" width="w-72" trigger={(_o, t) => <button onClick={t} aria-haspopup="listbox" title="Switch agency" className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface2/50 px-2.5 py-2 text-left text-sm hover:bg-surface2"><span className="flex-1 truncate font-medium">{agency?.name ?? 'Choose an agency'}</span>{inAgency && <ShieldCheck size={13} className="text-accent shrink-0" />}<ChevronsUpDown size={14} className="text-muted shrink-0" /></button>}>
+      {(close) => <AgencyPicker currentId={agency?.id} inAgency={inAgency} busy={busy} err={err} list={listAgencies}
+        onPick={(id) => (id === agency?.id && !inAgency ? close() : go(() => enterAgency(id), close))} onHome={() => go(leaveAgency, close)} />}
+    </Popover>
+  );
+}
+
 /* ---------- sidebar ---------- */
 function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { collapsed: boolean; onNavigate?(): void; onCollapse?(): void; allowedModules?: string[] | null }) {
-  const { agency, agencies, switchAgency } = useAuth();
+  const { agency, agencies, switchAgency, operator } = useAuth();
   const role = agency?.role ?? 'viewer';
   const shown = new Set<string>();   // a destination listed in two sections (Reports) appears once, in the first visible one
   return (
@@ -128,7 +159,7 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
       </div>
       {!collapsed && (
         <div className="px-3 pt-3">
-          {agencies.length > 1 ? (
+          {operator ? <OperatorSwitcher /> : agencies.length > 1 ? (
             <Popover align="left" width="w-60" trigger={(_o, t) => <button onClick={t} className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface2/50 px-2.5 py-2 text-left text-sm hover:bg-surface2"><span className="flex-1 truncate font-medium">{agency?.name}</span><ChevronsUpDown size={14} className="text-muted" /></button>}>
               {(close) => agencies.map((a) => <MenuBtn key={a.id} active={a.id === agency?.id} onClick={() => { close(); switchAgency(a.id); }}><span className="flex-1 truncate">{a.name}</span><span className="text-[11px] text-muted capitalize">{a.role.replace('_', ' ')}</span></MenuBtn>)}
             </Popover>
@@ -162,7 +193,7 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
 
 export default function Layout() {
   const { user, agency, logout } = useAuth();
-  const [bill, setBill] = useState<any>(null); const { support } = useAuth();
+  const [bill, setBill] = useState<any>(null); const { support, inAgency, leaveAgency } = useAuth();
   useEffect(() => { if (agency) api('/billing/subscription').then(setBill).catch(() => setBill(null)); }, [agency?.id, useLocation().pathname]);   // refreshed on navigation so the banner clears after paying
   const role = agency?.role ?? 'viewer';
   const loc = useLocation(); const nav = useNavigate(); const path = loc.pathname;
@@ -207,9 +238,12 @@ export default function Layout() {
             </Popover>
           </div>
         </header>
+        {inAgency && <div role="status" className="px-4 md:px-8 py-2 text-sm bg-accent/10 text-accent border-b border-accent/30 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>Super admin — you are working inside <b>{agency?.name}</b>. Everything you do here is recorded against your operator account.</span>
+          <button className="underline underline-offset-2" onClick={() => leaveAgency().then(() => nav('/'))}>Return to my workspace</button></div>}
         {support && <div role="status" className="px-4 md:px-8 py-2 text-sm bg-info/15 text-info border-b border-info/30">Support session — read-only view of this workspace. The customer can see and end this access. Reloading the page ends it.</div>}
         {bill?.banner && bill.banner.level !== 'info' && <div role="status" className={`px-4 md:px-8 py-2 text-sm flex flex-wrap items-center gap-x-3 border-b ${bill.banner.level === 'danger' ? 'bg-danger/10 text-danger border-danger/30' : 'bg-warn/10 text-warn border-warn/30'}`}><span>{bill.banner.message}</span>{role === 'admin' && <NavLink to="/billing" className="underline font-medium">Go to Billing</NavLink>}</div>}
-        <main id="main" tabIndex={-1} className="outline-none"><Suspense fallback={<Fallback />}><Outlet /></Suspense></main>
+        <main id="main" tabIndex={-1} className="outline-none"><Suspense fallback={<Fallback />}><Outlet key={agency?.id ?? 0} /></Suspense></main>
       </div>
       {calc && <Calculator onClose={() => setCalc(false)} />}
     </div>
