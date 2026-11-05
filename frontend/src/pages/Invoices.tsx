@@ -183,6 +183,17 @@ export default function Invoices() {
   const [openId, setOpenId] = useState<number | null>(Number(sp.get('open')) || null);
   const load = () => api(`/invoices${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`).then(setRows).catch((e) => { setNote({ ok: false, text: e.message }); setRows([]); });
   useOpenOnNew(() => setForm({}));
+  // "Create invoice" on a booking lands here with ?booking=ID — start a draft with that booking's client, currency and components as lines.
+  useEffect(() => {
+    const bid = Number(sp.get('booking')); if (!bid) return;
+    const n = new URLSearchParams(sp); n.delete('booking'); setSp(n, { replace: true });
+    api(`/bookings/${bid}`).then((b) => setForm({ initial: { client_id: b.client_id, booking_id: b.id, currency: b.currency, issue_date: today(), installments: [],
+      lines: b.components.map((c: any) => {
+        const cost = Number(c.unit_cost), qty = Number(c.quantity), net = Number(c.net_total);
+        const markup = cost > 0 && qty > 0 ? Math.round((net / (qty * cost) - 1) * 1e6) / 1e4 : Number(c.markup_pct);   // folds any discount into the markup, so the total matches the booking
+        return { product_type: ['flight', 'hotel', 'package', 'cruise', 'transfer'].includes(c.product_type) ? c.product_type : 'other', supplier_id: c.supplier_id ?? '', description: c.description, quantity: qty, unit_cost: cost, markup_pct: markup, tax_rate: Number(c.tax_rate) };
+      }) } })).catch((e) => setNote({ ok: false, text: e.message }));
+  }, []);
   useEffect(() => { const h = setTimeout(load, q ? 300 : 0); return () => clearTimeout(h); }, [q]);
   const finance = can('admin', 'finance_manager'), editor = can('admin', 'finance_manager', 'agent'), base = agency!.base_currency;
   const act = async (fn: () => Promise<any>, done: string) => { try { await fn(); setNote({ ok: true, text: done }); load(); } catch (e: any) { setNote({ ok: false, text: e.message }); } };
