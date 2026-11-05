@@ -69,7 +69,7 @@ async function assertQuoteRefs(t: Tenant, b: { client_id?: number | null; lead_i
 quotesRouter.get('/', async (req, res) => {
   const t = T(req), s = scope(req, 'q'), { status } = req.query as Record<string, string>;
   const rows = await t.query(
-    `SELECT q.id, q.quote_no, q.title, q.status, q.currency, q.valid_until, q.current_version, q.booking_id, q.created_at, c.name client_name, l.name lead_name, u.name owner_name,
+    `SELECT q.id, q.quote_no, q.title, q.status, q.currency, q.client_id, q.valid_until, q.current_version, q.booking_id, q.created_at, c.name client_name, l.name lead_name, u.name owner_name,
        (SELECT margin_pct FROM quote_versions v WHERE v.agency_id = q.agency_id AND v.quote_id = q.id AND v.version = q.current_version) margin_pct,
        (SELECT MIN(x.t) FROM (SELECT quote_id, version, option_name, SUM(net_total + tax_total) t FROM quote_components WHERE agency_id = ? GROUP BY quote_id, version, option_name) x WHERE x.quote_id = q.id AND x.version = q.current_version) from_total
      FROM quotes q LEFT JOIN clients c ON c.id = q.client_id AND c.agency_id = q.agency_id LEFT JOIN leads l ON l.id = q.lead_id AND l.agency_id = q.agency_id LEFT JOIN users u ON u.id = q.owner_id

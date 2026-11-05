@@ -31,7 +31,7 @@ clientsRouter.get('/:id', async (req, res) => {
   const t = T(req), id = idParam(req);
   const c = await t.get('clients', id);
   if (!c) throw new HttpError(404, 'Not found');
-  const invoices = await t.query('SELECT id, number, status, issue_date, due_date, total, amount_paid, currency FROM invoices WHERE agency_id = ? AND client_id = ? ORDER BY id DESC', [t.agencyId, id]);
+  const invoices = await t.query('SELECT id, number, status, issue_date, due_date, total, amount_paid, amount_credited, currency FROM invoices WHERE agency_id = ? AND client_id = ? ORDER BY id DESC', [t.agencyId, id]);
   const payments = await t.query('SELECT * FROM payments WHERE agency_id = ? AND client_id = ? ORDER BY paid_at DESC', [t.agencyId, id]);
   res.json({ ...c, invoices, payments });
 });
