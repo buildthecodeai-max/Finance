@@ -133,10 +133,69 @@ describe('journal vouchers: search, view and reverse', () => {
   });
 });
 
+describe('client-wise reports', () => {
+  let alpha: number, beta: number, invA: number;
+  const mkClient = async (name: string) => (await A.post('/clients', { name, email: `${name.replace(/\W/g, '')}@c.test`, currency: 'USD' })).body.id as number;
+  const issue = async (client: number, cost: number) => {
+    const r = await A.post('/invoices', { client_id: client, currency: 'USD', lines: [{ product_type: 'hotel', description: 'Trip', unit_cost: cost, markup_pct: 10, tax_rate: 0 }] });
+    const id = r.body.inv.id as number; await A.post(`/invoices/${id}/status`, { status: 'reviewed' }); await A.post(`/invoices/${id}/issue`); return id;
+  };
+  beforeAll(async () => {
+    alpha = await mkClient('Alpha Tours'); beta = await mkClient('Beta Voyages');
+    invA = await issue(alpha, 100); await issue(alpha, 200); await issue(beta, 1000);
+    const r = await A.post('/finance/receipts', { client_id: alpha, cash_account_id: cash, method: 'bank_transfer', amount: 110, allocations: [{ invoice_id: invA, amount: 110 }] });
+    expect(r.status).toBe(201);
+  });
+
+  it('sales by client ranks clients and shows profit, receipts and what they still owe', async () => {
+    const r = (await rep('sales-by-client')).body;
+    expect(r.rows.map((x: any[]) => x[0])).toEqual(['Beta Voyages', 'Alpha Tours', 'Total']);
+    expect(r.rows[0].slice(1)).toEqual([1, '1100.00', '1000.00', '100.00', '9.09', '0.00', '1100.00']);
+    expect(r.rows[1].slice(1)).toEqual([2, '330.00', '300.00', '30.00', '9.09', '110.00', '220.00']);
+    expect(r.rows[2].slice(1)).toEqual([3, '1430.00', '1300.00', '130.00', '9.09', '110.00', '1320.00']);
+    expect(r.links[1]).toBe(`/reports?report=client-statement&client=${alpha}`);
+    expect(r.reconcile[0]).toMatchObject({ ok: true });
+  });
+
+  it('sales by client respects the period', async () => {
+    const r = (await A.get('/reports/sales-by-client?from=2020-01-01&to=2020-12-31')).body;
+    expect(r.rows.every((x: any[]) => x[0] === 'Total' || x[2] === '0.00')).toBe(true);        // nothing was invoiced back then
+  });
+
+  it('client statement is that client’s ledger with a running balance', async () => {
+    const r = (await rep('client-statement', `&client_id=${alpha}`)).body;
+    expect(r.title).toMatch(/Alpha Tours/);
+    expect(r.rows[r.rows.length - 1].slice(3)).toEqual(['330.00', '110.00', '220.00']);
+    expect(r.reconcile[0]).toMatchObject({ ok: true });
+    expect((await rep('client-statement')).status).toBe(400);
+    expect((await rep('client-statement', '&client_id=99999999')).status).toBe(404);
+    expect((await rep('client-statement', `&client_id=${alpha}`, B)).status).toBe(404);             // another agency's client
+  });
+
+  it('existing reports can be narrowed to one client', async () => {
+    const all = (await rep('invoice-register')).body.rows, one = (await rep('invoice-register', `&client_id=${beta}`)).body;
+    expect(all.length).toBeGreaterThan(one.rows.length); expect(one.rows).toHaveLength(1); expect(one.rows[0][1]).toBe('Beta Voyages'); expect(one.title).toMatch(/Beta Voyages/);
+    const aging = (await rep('ar-aging-summary', `&client_id=${alpha}`)).body;
+    expect(aging.rows.map((x: any[]) => x[0])).toEqual(['Alpha Tours']); expect(aging.reconcile).toBeUndefined();   // a one-client slice cannot tie to the whole ledger
+    const pay = (await rep('payment-register', `&client_id=${alpha}`)).body;
+    expect(pay.rows.filter((x: any[]) => x[1] === 'inbound')).toHaveLength(1);
+    expect((await rep('payment-register', `&client_id=${beta}`)).body.rows.filter((x: any[]) => x[1] === 'inbound')).toHaveLength(0);
+  });
+
+  it('client reports are for finance roles and cannot be scheduled', async () => {
+    for (const n of ['sales-by-client', 'client-statement']) expect((await rep(n, `&client_id=${alpha}`, agent)).status).toBe(403);
+    const [me] = await sql('SELECT email FROM users WHERE id = ?', [A.userId]);
+    const sched = (name: string, report: string) => A.post('/automation/schedules', { name, report, range_kind: 'mtd', frequency: 'daily', format: 'pdf', recipients: [me.email] });
+    const no = await sched('CS', 'client-statement'); expect(no.status).toBe(400); expect(JSON.stringify(no.body)).toMatch(/report/i);
+    const ok = await sched('SBC', 'sales-by-client');
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+  });
+});
+
 describe('account detail, access and isolation', () => {
   it('shows activity for an account and counts transactions in the list', async () => {
     const d = (await viewer.get(`/accounting/accounts/${cash}`)).body;
-    expect(d).toMatchObject({ txns: 3, debit: 1200, credit: 200, nature: 'asset' }); expect(d.linked).toBeNull();
+    expect(d).toMatchObject({ txns: 4, debit: 1310, credit: 200, nature: 'asset' }); expect(d.linked).toBeNull();
     const list = (await A.get('/accounting/accounts?q=Owner')).body as any[];
     expect(list[0]).toMatchObject({ name: 'Owner Capital', txns: 1 });
     expect((await A.get('/accounting/accounts/99999999')).status).toBe(404);

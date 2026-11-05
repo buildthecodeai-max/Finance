@@ -17,10 +17,18 @@ const isCurrent = (to: string) => to >= new Date().toISOString().slice(0, 10);
 const ASOF = 'Aging uses current balances, so it is reconciled to the ledger only when the report date is today or later.';
 export type Gen = (t: Tenant, from: string, to: string, opts?: Record<string, string>) => Promise<Report>;
 /** Reports that need an extra parameter and so cannot be scheduled. */
-export const PARAM_REPORTS = new Set(['general-ledger']);
+export const PARAM_REPORTS = new Set(['general-ledger', 'client-statement']);
 /** Ledger-derived statements: finance roles only (the older operational reports keep their existing access). */
-const LEDGER_REPORTS = new Set(['trial-balance', 'balance-sheet', 'general-ledger', 'day-book', 'cash-book', 'payment-register', 'gl-pnl']);
+const LEDGER_REPORTS = new Set(['sales-by-client', 'client-statement', 'trial-balance', 'balance-sheet', 'general-ledger', 'day-book', 'cash-book', 'payment-register', 'gl-pnl']);
 const n2 = (v: any) => Number(v ?? 0).toFixed(2);
+/** Optional "just this client" filter shared by the client-aware reports. */
+async function clientFilter(t: Tenant, o?: Record<string, string>): Promise<{ id: number; name: string } | null> {
+  if (!o?.client_id) return null;
+  const id = Number(o.client_id); if (!id) throw new HttpError(400, 'Invalid client');
+  const c = await t.get('clients', id); if (!c) throw new HttpError(404, 'Client not found');
+  return c;
+}
+const forClient = (c: { name: string } | null) => (c ? ` — ${c.name}` : '');
 
 
 const BAL_AT = `(a.opening_dr - a.opening_cr + COALESCE((SELECT SUM(g.debit - g.credit) FROM gl_entries g WHERE g.agency_id = a.agency_id AND g.account_id = a.id AND g.entry_date <= ?),0))`;
@@ -51,18 +59,20 @@ export const GENERATORS: Record<string, Gen> = {
     return { title: `Cash Flow ${from} → ${to}`, columns: ['Month', 'Inflow', 'Outflow', 'Net', 'Cumulative'],
       rows: rows.map((r: any) => { run += r.inflow - r.outflow; return [r.m, n2(r.inflow), n2(r.outflow), n2(r.inflow - r.outflow), n2(run)]; }) };
   },
-  'ar-aging-summary': async (t, _f, to) => {
+  'ar-aging-summary': async (t, _f, to, o) => {
+    const cl = await clientFilter(t, o);
     const rows = await t.query(`SELECT c.name, SUM(CASE WHEN DATEDIFF(?,i.due_date)<=0 THEN b ELSE 0 END) current_,
       SUM(CASE WHEN DATEDIFF(?,i.due_date) BETWEEN 1 AND 30 THEN b ELSE 0 END) d30, SUM(CASE WHEN DATEDIFF(?,i.due_date) BETWEEN 31 AND 60 THEN b ELSE 0 END) d60,
       SUM(CASE WHEN DATEDIFF(?,i.due_date)>60 THEN b ELSE 0 END) d90, SUM(b) total
       FROM (SELECT *, (total-amount_credited-amount_paid)*fx_rate b FROM invoices) i JOIN clients c ON c.id=i.client_id AND c.agency_id=i.agency_id
-      WHERE i.agency_id = ? AND i.status IN ('sent','partially_paid','overdue') GROUP BY c.id, c.name ORDER BY total DESC`, [to, to, to, to, t.agencyId]);
-    return { title: `AR Aging Summary as at ${to}`, columns: ['Client', 'Current', '1-30', '31-60', '60+', 'Total'],
+      WHERE i.agency_id = ? AND i.status IN ('sent','partially_paid','overdue') ${cl ? 'AND i.client_id = ?' : ''} GROUP BY c.id, c.name ORDER BY total DESC`, [to, to, to, to, t.agencyId, ...(cl ? [cl.id] : [])]);
+    return { title: `AR Aging Summary as at ${to}${forClient(cl)}`, columns: ['Client', 'Current', '1-30', '31-60', '60+', 'Total'],
       rows: rows.map((r: any) => [r.name, n2(r.current_), n2(r.d30), n2(r.d60), n2(r.d90), n2(r.total)]) };
   },
-  'ar-aging-detail': async (t, _f, to) => {
-    const rows = await t.query(`SELECT i.number, c.name, i.due_date, i.currency, i.total, i.amount_paid, i.amount_credited, DATEDIFF(?, i.due_date) days FROM invoices i JOIN clients c ON c.id=i.client_id AND c.agency_id=i.agency_id WHERE i.agency_id = ? AND i.status IN ('sent','partially_paid','overdue') ORDER BY days DESC`, [to, t.agencyId]);
-    return { title: `AR Aging Detail as at ${to}`, columns: ['Invoice', 'Client', 'Due', 'Currency', 'Total', 'Paid', 'Balance', 'Days overdue'],
+  'ar-aging-detail': async (t, _f, to, o) => {
+    const cl = await clientFilter(t, o);
+    const rows = await t.query(`SELECT i.number, c.name, i.due_date, i.currency, i.total, i.amount_paid, i.amount_credited, DATEDIFF(?, i.due_date) days FROM invoices i JOIN clients c ON c.id=i.client_id AND c.agency_id=i.agency_id WHERE i.agency_id = ? AND i.status IN ('sent','partially_paid','overdue') ${cl ? 'AND i.client_id = ?' : ''} ORDER BY days DESC`, [to, t.agencyId, ...(cl ? [cl.id] : [])]);
+    return { title: `AR Aging Detail as at ${to}${forClient(cl)}`, columns: ['Invoice', 'Client', 'Due', 'Currency', 'Total', 'Paid', 'Balance', 'Days overdue'],
       rows: rows.map((r: any) => [r.number, r.name, r.due_date, r.currency, n2(r.total), n2(r.amount_paid + r.amount_credited), n2(r.total - r.amount_credited - r.amount_paid), Math.max(0, r.days)]) };
   },
   'commission-summary': async (t, from, to) => {
@@ -70,17 +80,19 @@ export const GENERATORS: Record<string, Gen> = {
     return { title: `Commission Summary ${from} → ${to}`, columns: ['Agent', 'Bookings', 'Selling', 'Cost', 'Overhead', 'Net commission', 'Agent payable'],
       rows: rows.map((r: any) => [r.agent, r.n, n2(r.sell), n2(r.cost), n2(r.oh), n2(r.net), n2(r.pay)]) };
   },
-  'revenue-by-destination': async (t, from, to) => {
-    const rows = await t.query(`SELECT COALESCE(b.destination,'Unspecified') d, COUNT(DISTINCT b.id) n, SUM(i.subtotal*i.fx_rate) rev FROM invoices i LEFT JOIN bookings b ON b.id=i.booking_id AND b.agency_id=i.agency_id WHERE i.agency_id = ? AND i.status NOT IN ('draft','void') AND i.issue_date BETWEEN ? AND ? GROUP BY d ORDER BY rev DESC`, [t.agencyId, from, to]);
-    return { title: `Booking Revenue by Destination ${from} → ${to}`, columns: ['Destination', 'Bookings', 'Revenue'], rows: rows.map((r: any) => [r.d, r.n, n2(r.rev)]) };
+  'revenue-by-destination': async (t, from, to, o) => {
+    const cl = await clientFilter(t, o);
+    const rows = await t.query(`SELECT COALESCE(b.destination,'Unspecified') d, COUNT(DISTINCT b.id) n, SUM(i.subtotal*i.fx_rate) rev FROM invoices i LEFT JOIN bookings b ON b.id=i.booking_id AND b.agency_id=i.agency_id WHERE i.agency_id = ? AND i.status NOT IN ('draft','void') AND i.issue_date BETWEEN ? AND ? ${cl ? 'AND i.client_id = ?' : ''} GROUP BY d ORDER BY rev DESC`, [t.agencyId, from, to, ...(cl ? [cl.id] : [])]);
+    return { title: `Booking Revenue by Destination ${from} → ${to}${forClient(cl)}`, columns: ['Destination', 'Bookings', 'Revenue'], rows: rows.map((r: any) => [r.d, r.n, n2(r.rev)]) };
   },
   'supplier-payments': async (t, from, to) => {
     const rows = await t.query(`SELECT s.name, COUNT(*) n, SUM(p.amount*p.fx_rate) amt FROM payments p JOIN suppliers s ON s.id=p.supplier_id AND s.agency_id=p.agency_id WHERE p.agency_id = ? AND p.voided = 0 AND p.direction='outbound' AND p.paid_at BETWEEN ? AND ? GROUP BY s.id, s.name ORDER BY amt DESC`, [t.agencyId, from, to]);
     return { title: `Supplier Payment Summary ${from} → ${to}`, columns: ['Supplier', 'Payments', 'Total paid'], rows: rows.map((r: any) => [r.name, r.n, n2(r.amt)]) };
   },
-  'invoice-register': async (t, from, to) => {
-    const rows = await t.query(`SELECT i.number, c.name, i.issue_date, i.due_date, i.status, i.currency, i.total, i.amount_paid FROM invoices i JOIN clients c ON c.id=i.client_id AND c.agency_id=i.agency_id WHERE i.agency_id = ? AND i.issue_date BETWEEN ? AND ? ORDER BY i.number`, [t.agencyId, from, to]);
-    return { title: `Invoice Register ${from} → ${to}`, columns: ['Number', 'Client', 'Issued', 'Due', 'Status', 'Currency', 'Total', 'Paid'],
+  'invoice-register': async (t, from, to, o) => {
+    const cl = await clientFilter(t, o);
+    const rows = await t.query(`SELECT i.number, c.name, i.issue_date, i.due_date, i.status, i.currency, i.total, i.amount_paid FROM invoices i JOIN clients c ON c.id=i.client_id AND c.agency_id=i.agency_id WHERE i.agency_id = ? AND i.issue_date BETWEEN ? AND ? ${cl ? 'AND i.client_id = ?' : ''} ORDER BY i.number`, [t.agencyId, from, to, ...(cl ? [cl.id] : [])]);
+    return { title: `Invoice Register ${from} → ${to}${forClient(cl)}`, columns: ['Number', 'Client', 'Issued', 'Due', 'Status', 'Currency', 'Total', 'Paid'],
       rows: rows.map((r: any) => [r.number, r.name, r.issue_date, r.due_date, r.status, r.currency, n2(r.total), n2(r.amount_paid)]) };
   },
   'ap-aging': async (t, _f, to) => {
@@ -163,24 +175,57 @@ export const GENERATORS: Record<string, Gen> = {
     if (isCurrent(to)) { const cur = await t.one<{ v: number }>(`SELECT COALESCE(SUM(${BALANCE_SQL}),0) v FROM accounts a WHERE a.agency_id = ? AND a.type_code = 110`, [t.agencyId]); out.reconcile = [rec('Closing cash & bank vs current ledger balances', sum(rows.map(cl)), cur!.v)]; }
     return out;
   },
-  'payment-register': async (t, from, to) => {
+  'payment-register': async (t, from, to, o) => {
+    const cl = await clientFilter(t, o);
     const ps = await t.query(`SELECT p.paid_at, p.direction, p.method, COALESCE(c.name, ic.name, s.name, '') party, p.reference, p.currency, p.amount, p.amount * p.fx_rate base
       FROM payments p LEFT JOIN clients c ON c.id = p.client_id AND c.agency_id = p.agency_id LEFT JOIN suppliers s ON s.id = p.supplier_id AND s.agency_id = p.agency_id
       LEFT JOIN invoices i ON i.id = p.invoice_id AND i.agency_id = p.agency_id LEFT JOIN clients ic ON ic.id = i.client_id AND ic.agency_id = p.agency_id
-      WHERE p.agency_id = ? AND p.voided = 0 AND p.paid_at BETWEEN ? AND ? ORDER BY p.paid_at, p.id`, [t.agencyId, from, to]);
+      WHERE p.agency_id = ? AND p.voided = 0 AND p.paid_at BETWEEN ? AND ? ${cl ? 'AND COALESCE(p.client_id, i.client_id) = ?' : ''} ORDER BY p.paid_at, p.id`, [t.agencyId, from, to, ...(cl ? [cl.id] : [])]);
     const inb = sum(ps.filter((p: any) => p.direction === 'inbound').map((p: any) => p.base)), out = sum(ps.filter((p: any) => p.direction === 'outbound').map((p: any) => p.base));
     const shown = ps.slice(0, LIMIT), blank = ['', '', '', '', '', ''];
-    return { title: `Payment Register ${from} → ${to}`, columns: ['Date', 'Direction', 'Method', 'Party', 'Reference', 'Currency', 'Amount', 'Amount (base)'],
+    return { title: `Payment Register ${from} → ${to}${forClient(cl)}`, columns: ['Date', 'Direction', 'Method', 'Party', 'Reference', 'Currency', 'Amount', 'Amount (base)'],
       rows: [...shown.map((p: any) => [p.paid_at, p.direction, p.method.replace(/_/g, ' '), p.party, p.reference ?? '', p.currency, n2(p.amount), n2(p.base)]),
         ['Total received', ...blank, n2(inb)], ['Total paid', ...blank, n2(out)], ['Net', ...blank, n2(inb - out)]],
       kinds: [...shown.map(() => ''), 'total', 'total', 'total'], note: ps.length > LIMIT ? `Showing the first ${LIMIT} of ${ps.length} payments; totals cover all of them.` : undefined };
   },
-  'departures': async (t, from, to) => {
+  'sales-by-client': async (t, from, to) => {
+    const sales = await t.query(`SELECT i.client_id id, COUNT(*) n, SUM(i.subtotal*i.fx_rate) sales, SUM(COALESCE(l.cost,0)*i.fx_rate) cost
+      FROM invoices i LEFT JOIN (SELECT agency_id, invoice_id, SUM(unit_cost*quantity) cost FROM invoice_lines WHERE agency_id = ? GROUP BY agency_id, invoice_id) l ON l.invoice_id = i.id AND l.agency_id = i.agency_id
+      WHERE i.agency_id = ? AND i.status NOT IN ('draft','void') AND i.issue_date BETWEEN ? AND ? GROUP BY i.client_id`, [t.agencyId, t.agencyId, from, to]);
+    const recd = await t.query(`SELECT COALESCE(p.client_id, i.client_id) id, SUM(p.amount*p.fx_rate) amt FROM payments p LEFT JOIN invoices i ON i.id = p.invoice_id AND i.agency_id = p.agency_id
+      WHERE p.agency_id = ? AND p.voided = 0 AND p.direction = 'inbound' AND p.paid_at BETWEEN ? AND ? GROUP BY COALESCE(p.client_id, i.client_id)`, [t.agencyId, from, to]);
+    const open = await t.query(`SELECT client_id id, SUM((total-amount_credited-amount_paid)*fx_rate) amt FROM invoices WHERE agency_id = ? AND status IN ('sent','partially_paid','overdue') GROUP BY client_id`, [t.agencyId]);
+    const names = new Map<number, string>((await t.query(`SELECT id, name FROM clients WHERE agency_id = ?`, [t.agencyId])).map((c: any) => [c.id, c.name]));
+    const m = new Map<number, { n: number; sales: number; cost: number; recd: number; open: number }>();
+    const row = (id: number) => { let r = m.get(id); if (!r) m.set(id, (r = { n: 0, sales: 0, cost: 0, recd: 0, open: 0 })); return r; };
+    for (const r of sales) Object.assign(row(r.id), { n: r.n, sales: r.sales, cost: r.cost });
+    for (const r of recd) if (r.id) row(r.id).recd = r.amt;
+    for (const r of open) row(r.id).open = r.amt;
+    const list = [...m.entries()].map(([id, r]) => ({ id, name: names.get(id) ?? `Client #${id}`, ...r })).sort((a, b) => b.sales - a.sales || b.open - a.open || a.name.localeCompare(b.name));
+    const shown = list.slice(0, LIMIT);
+    const tot = (f: (r: any) => number) => sum(list.map(f));
+    const margin = (s: number, c: number) => (s ? n2(((s - c) / s) * 100) : '');
+    const T = { n: list.reduce((s, r) => s + r.n, 0), sales: tot((r) => r.sales), cost: tot((r) => r.cost), recd: tot((r) => r.recd), open: tot((r) => r.open) };
+    return { title: `Sales by Client ${from} → ${to}`, columns: ['Client', 'Invoices', 'Sales (ex-tax)', 'Cost of sales', 'Profit', 'Margin %', 'Received', 'Outstanding'],
+      rows: [...shown.map((r) => [r.name, r.n, n2(r.sales), n2(r.cost), n2(r.sales - r.cost), margin(r.sales, r.cost), n2(r.recd), n2(r.open)]),
+        ['Total', T.n, n2(T.sales), n2(T.cost), n2(T.sales - T.cost), margin(T.sales, T.cost), n2(T.recd), n2(T.open)]],
+      links: [...shown.map((r) => `/reports?report=client-statement&client=${r.id}`), null], kinds: [...shown.map(() => ''), 'total'],
+      note: `Sales, cost and profit are for invoices issued in the period (draft and void excluded). Received is money recorded in the period; Outstanding is what clients still owe as at today. Click a client for their statement.${list.length > LIMIT ? ` Showing the first ${LIMIT} of ${list.length} clients; the total covers all of them.` : ''}` };
+  },
+  'client-statement': async (t, from, to, o) => {
+    const cl = await clientFilter(t, o); if (!cl) throw new HttpError(400, 'Choose a client for the statement');
+    const full = await t.get('clients', cl.id);
+    if (!full?.account_id) throw new HttpError(409, 'This client has no ledger account yet — post an invoice or receipt for them first');
+    const r = await GENERATORS['general-ledger'](t, from, to, { account_id: String(full.account_id) });
+    return { ...r, title: `Client Statement — ${cl.name}, ${from} → ${to}`, note: 'Everything posted to this client’s ledger account. Balance: positive = the client owes you, negative = you owe the client (for example an unallocated receipt).' };
+  },
+  'departures': async (t, from, to, o) => {
+    const cl = await clientFilter(t, o);
     const rows = await t.query(`SELECT b.reference, b.destination, b.travel_start, b.travel_end, b.status, c.name client,
       (SELECT COUNT(*) FROM itinerary_items x WHERE x.agency_id = b.agency_id AND x.booking_id = b.id) legs,
       COALESCE((SELECT SUM((i.total-i.amount_credited-i.amount_paid)*i.fx_rate) FROM invoices i WHERE i.agency_id = b.agency_id AND i.booking_id = b.id AND i.status IN ('sent','partially_paid','overdue')),0) due
-      FROM bookings b JOIN clients c ON c.id = b.client_id AND c.agency_id = b.agency_id WHERE b.agency_id = ? AND b.status NOT IN ('cancelled','lost','enquiry','quoted') AND b.travel_start BETWEEN ? AND ? ORDER BY b.travel_start`, [t.agencyId, from, to]);
-    return { title: `Departures ${from} → ${to}`, columns: ['Booking', 'Destination', 'Client', 'Departs', 'Returns', 'Status', 'Itinerary items', 'Balance due'], rows: rows.map((r: any) => [r.reference, r.destination ?? '', r.client, r.travel_start, r.travel_end ?? '', r.status, r.legs, n2(r.due)]) };
+      FROM bookings b JOIN clients c ON c.id = b.client_id AND c.agency_id = b.agency_id WHERE b.agency_id = ? AND b.status NOT IN ('cancelled','lost','enquiry','quoted') AND b.travel_start BETWEEN ? AND ? ${cl ? 'AND b.client_id = ?' : ''} ORDER BY b.travel_start`, [t.agencyId, from, to, ...(cl ? [cl.id] : [])]);
+    return { title: `Departures ${from} → ${to}${forClient(cl)}`, columns: ['Booking', 'Destination', 'Client', 'Departs', 'Returns', 'Status', 'Itinerary items', 'Balance due'], rows: rows.map((r: any) => [r.reference, r.destination ?? '', r.client, r.travel_start, r.travel_end ?? '', r.status, r.legs, n2(r.due)]) };
   },
 };
 
@@ -188,6 +233,7 @@ export const GENERATORS: Record<string, Gen> = {
 const RECONCILERS: Record<string, (t: Tenant, r: Report, from: string, to: string) => Promise<Reconcile[]>> = {
   'ar-aging-summary': async (t, r, _f, to) => arRec(t, r, to, 5),
   'ar-aging-detail': async (t, r, _f, to) => arRec(t, r, to, 6),
+  'sales-by-client': async (t, r, _f, to) => arRec(t, { ...r, rows: r.rows.slice(0, -1) }, to, 7),
   'ap-aging': async (t, r, _f, to) => {
     if (!isCurrent(to)) return [];
     const gl = await t.one(`SELECT COALESCE(SUM(${BALANCE_SQL}),0) v FROM accounts a JOIN suppliers s ON s.account_id = a.id AND s.agency_id = a.agency_id WHERE a.agency_id = ?`, [t.agencyId]);
@@ -211,8 +257,8 @@ export async function buildReport(t: Tenant, name: string, from: string, to: str
   const report = await gen(t, from, to, opts);
   const own = report.note;
   report.note = `${own ? own + ' ' : ''}Amounts are in ${(await t.agency()).base_currency}, converted at the exchange rate locked on each document when it was issued or paid (document currencies are shown where relevant).`;
-  const checks = await RECONCILERS[name]?.(t, report, from, to);
-  if (checks?.length) report.reconcile = checks; else if (name.includes('aging') && !isCurrent(to)) report.note += ` ${ASOF}`;
+  const checks = opts?.client_id && name !== 'client-statement' ? undefined : await RECONCILERS[name]?.(t, report, from, to);   // a one-client view cannot tie to the whole-ledger total
+  if (checks?.length) report.reconcile = checks; else if (name.includes('aging') && !opts?.client_id && !isCurrent(to)) report.note += ` ${ASOF}`;
   return report;
 }
 

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Download, FileSpreadsheet, FileText } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, Search } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { Page } from '../components/ui';
-import { today, useAccounts } from '../lookup';
+import { today, useAccounts, useList } from '../lookup';
 
 /** [key, label, what it tells you]. `ledger` reports are for finance roles; `asAt` reports are a position on one date. */
-interface Def { key: string; label: string; about: string; ledger?: boolean; asAt?: boolean; account?: boolean }
+interface Def { key: string; label: string; about: string; ledger?: boolean; asAt?: boolean; account?: boolean; client?: 'required' | 'optional' }
 const CATEGORIES: { label: string; reports: Def[] }[] = [
   { label: 'Financial statements', reports: [
     { key: 'gl-pnl', label: 'Profit & Loss', ledger: true, about: 'Income less costs and expenses, from posted ledger entries.' },
@@ -16,25 +16,29 @@ const CATEGORIES: { label: string; reports: Def[] }[] = [
     { key: 'cash-flow', label: 'Cash Flow', about: 'Money in and out by month, from recorded payments (voided payments excluded).' },
     { key: 'pnl', label: 'Sales-basis P&L', about: 'Profit from issued invoices and recorded expenses — a management view that can differ from the ledger P&L until everything is posted.' },
   ] },
+  { label: 'Clients', reports: [
+    { key: 'sales-by-client', label: 'Sales by Client', ledger: true, about: 'Every client side by side: sales, profit, what they paid and what they still owe. Click a client to open their statement.' },
+    { key: 'client-statement', label: 'Client Statement', ledger: true, client: 'required', about: 'One client’s account: every invoice, receipt and credit note with a running balance.' },
+  ] },
   { label: 'Ledgers & books', reports: [
     { key: 'general-ledger', label: 'General Ledger', ledger: true, account: true, about: 'Every posting to one account with a running balance. Click a voucher to open it.' },
     { key: 'day-book', label: 'Day Book', ledger: true, about: 'Every ledger posting in the period, in date order.' },
     { key: 'cash-book', label: 'Cash & Bank Book', ledger: true, about: 'Opening, receipts, payments and closing balance for each cash and bank account.' },
   ] },
   { label: 'Receivables', reports: [
-    { key: 'ar-aging-summary', label: 'AR Aging Summary', asAt: true, about: 'What each client owes, by how overdue it is. Reconciled to the ledger.' },
-    { key: 'ar-aging-detail', label: 'AR Aging Detail', asAt: true, about: 'Open invoices one by one.' },
-    { key: 'invoice-register', label: 'Invoice Register', about: 'All invoices issued in the period.' },
+    { key: 'ar-aging-summary', client: 'optional', label: 'AR Aging Summary', asAt: true, about: 'What each client owes, by how overdue it is. Reconciled to the ledger.' },
+    { key: 'ar-aging-detail', client: 'optional', label: 'AR Aging Detail', asAt: true, about: 'Open invoices one by one.' },
+    { key: 'invoice-register', client: 'optional', label: 'Invoice Register', about: 'All invoices issued in the period.' },
   ] },
   { label: 'Payables & payments', reports: [
     { key: 'ap-aging', label: 'Payables Aging', asAt: true, about: 'What is owed to suppliers, by how overdue it is. Reconciled to the ledger.' },
     { key: 'supplier-payments', label: 'Supplier Payments', about: 'Total paid to each supplier in the period.' },
-    { key: 'payment-register', label: 'Payment Register', ledger: true, about: 'Every payment received and made in the period, with totals.' },
+    { key: 'payment-register', client: 'optional', label: 'Payment Register', ledger: true, about: 'Every payment received and made in the period, with totals.' },
   ] },
   { label: 'Operations', reports: [
     { key: 'commission-summary', label: 'Commission Summary', about: 'Agent commission earned and payable.' },
-    { key: 'revenue-by-destination', label: 'Revenue by Destination', about: 'Booking revenue grouped by destination.' },
-    { key: 'departures', label: 'Departures', about: 'Upcoming departures with the balance still due.' },
+    { key: 'revenue-by-destination', client: 'optional', label: 'Revenue by Destination', about: 'Booking revenue grouped by destination.' },
+    { key: 'departures', client: 'optional', label: 'Departures', about: 'Upcoming departures with the balance still due.' },
   ] },
 ];
 
@@ -63,15 +67,29 @@ export default function Reports() {
   const [from, setFrom] = useState(`${y}-01-01`);
   const [to, setTo] = useState(today());
   const [account, setAccount] = useState(sp.get('account') ?? '');
+  const clients = useList('/clients');
+  const [clientId, setClientId] = useState(sp.get('client') ?? '');
+  const [clientText, setClientText] = useState('');
+  const [find, setFind] = useState('');
   const [rep, setRep] = useState<any>(null);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
   const [bump, setBump] = useState(0);
   const seq = useRef(0);
 
+  const shownCats = cats.map((c) => ({ ...c, reports: c.reports.filter((r) => !find.trim() || `${r.label} ${r.about}`.toLowerCase().includes(find.trim().toLowerCase())) })).filter((c) => c.reports.length);
   const def = all.find((r) => r.key === name) ?? all[0];
-  const q = (fmtName: string) => `/reports/${name}?from=${from}&to=${to}&format=${fmtName}${def?.account ? `&account_id=${account}` : ''}`;
-  const ready = !def?.account || !!account;
+  const q = (fmtName: string) => `/reports/${name}?from=${from}&to=${to}&format=${fmtName}${def?.account ? `&account_id=${account}` : ''}${def?.client && clientId ? `&client_id=${clientId}` : ''}`;
+  const ready = (!def?.account || !!account) && (def?.client !== 'required' || !!clientId);
+
+  // clients with the same name get their number so each can be picked unambiguously
+  const label = (c: any) => (clients.filter((x) => x.name.toLowerCase() === c.name.toLowerCase()).length > 1 ? `${c.name} (#${c.id})` : c.name);
+  const chooseClient = (text: string) => {
+    setClientText(text);
+    const c = clients.find((x) => label(x).toLowerCase() === text.trim().toLowerCase());
+    const id = c ? String(c.id) : '';
+    setClientId(id); if (id) sp.set('client', id); else sp.delete('client'); setSp(sp, { replace: true });
+  };
 
   const run = async () => {
     if (!ready) { setRep(null); setErr(''); return; }
@@ -84,7 +102,14 @@ export default function Reports() {
   const pick = (k: string) => { setName(k); setRep(null); setErr(''); sp.set('report', k); sp.delete('account'); setSp(sp, { replace: true }); };
 
   // run as soon as a report (or its account) is chosen, so a deep link from the ledger lands on real numbers
-  useEffect(() => { run(); }, [name, account, bump]);
+  useEffect(() => { run(); }, [name, account, clientId, bump]);
+
+  // follow the address bar, so a link such as a client row in "Sales by Client" lands straight on that client's statement
+  useEffect(() => {
+    const r = sp.get('report'); if (r && r !== name && all.some((x) => x.key === r)) { setName(r); setRep(null); setErr(''); }
+    const c = sp.get('client') ?? ''; if (c && c !== clientId) setClientId(c);
+  }, [sp]);
+  useEffect(() => { const c = clients.find((x) => String(x.id) === clientId); if (c && label(c) !== clientText) setClientText(label(c)); }, [clientId, clients]);
 
   const numeric: boolean[] = useMemo(() => !rep ? [] : rep.columns.map((c: string, i: number) => {
     const cells = rep.rows.map((r: any[]) => r[i]).filter((x: any) => x !== '' && x != null);
@@ -103,7 +128,11 @@ export default function Reports() {
       <div className="grid grid-cols-1 md:grid-cols-[230px_minmax(0,1fr)] gap-4">
         {/* report list: sidebar on desktop, dropdown on phones */}
         <div className="card p-0 overflow-hidden h-fit hidden md:block">
-          {cats.map((cat) => (
+          <div className="p-2 border-b border-line relative">
+            <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+            <input className="input pl-8 text-sm" placeholder="Find a report…" aria-label="Find a report" value={find} onChange={(e) => setFind(e.target.value)} />
+          </div>
+          {shownCats.map((cat) => (
             <div key={cat.label}>
               <div className="px-3 py-2 text-xs text-muted uppercase border-b border-line">{cat.label}</div>
               {cat.reports.map((r) => (
@@ -112,6 +141,7 @@ export default function Reports() {
               ))}
             </div>
           ))}
+          {shownCats.length === 0 && <div className="px-3 py-4 text-sm text-muted">No report matches “{find}”.</div>}
         </div>
 
         <div className="min-w-0">
@@ -128,6 +158,11 @@ export default function Reports() {
                   <select className="input" value={account} onChange={(e) => { setAccount(e.target.value); }}>
                     <option value="">Choose an account…</option>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
                   </select></div>
+              )}
+              {def?.client && (
+                <div className="min-w-[14rem] flex-1"><div className="text-xs text-muted mb-1">Client{def.client === 'optional' && ' (optional)'}</div>
+                  <input className="input" list="report-clients" placeholder={def.client === 'required' ? 'Start typing a client name…' : 'All clients — type to pick one'} value={clientText} onChange={(e) => chooseClient(e.target.value)} />
+                  <datalist id="report-clients">{clients.map((c) => <option key={c.id} value={label(c)} />)}</datalist></div>
               )}
               {!def?.asAt && <div><div className="text-xs text-muted mb-1">From</div><input className="input num" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>}
               <div><div className="text-xs text-muted mb-1">{def?.asAt ? 'As at' : 'To'}</div><input className="input num" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
@@ -190,7 +225,7 @@ export default function Reports() {
           {!rep && !err && !loading && (
             <div className="card flex flex-col items-center justify-center py-16 text-center">
               <Download size={32} className="text-muted mb-3" />
-              <p className="text-muted text-sm">{ready ? <>Click <b>Run</b> to generate this report.</> : 'Choose an account to see its ledger.'}</p>
+              <p className="text-muted text-sm">{ready ? <>Click <b>Run</b> to generate this report.</> : def?.client === 'required' && !clientId ? 'Choose a client to see their statement.' : 'Choose an account to see its ledger.'}</p>
             </div>
           )}
         </div>
