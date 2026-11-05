@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
+import { ClientPick } from '../components/ClientPick';
 import { isoDate, today, useList, useOpenOnNew } from '../lookup';
 import { AlertTriangle, Archive, ArchiveRestore, CheckCircle2, FilePlus2, Pencil, Plus, Search, X } from 'lucide-react';
 
@@ -38,16 +39,6 @@ const Banner = ({ ok, children, onClose }: { ok: boolean; children: any; onClose
   <div role={ok ? 'status' : 'alert'} className={`rounded-lg border text-sm px-3 py-2 mb-3 flex justify-between gap-3 ${ok ? 'border-success/30 bg-success/10 text-success' : 'border-danger/30 bg-danger/10 text-danger'}`}>
     <span>{children}</span>{onClose && <button className="opacity-70 hover:opacity-100" aria-label="Dismiss" onClick={onClose}><X size={14} /></button>}</div>
 );
-
-/** Client picker: type to search, pick from the list. Duplicate names get "(#id)" so they can be told apart. */
-function ClientPick({ clients, value, onChange, autoFocus }: { clients: any[]; value: string; onChange(id: string): void; autoFocus?: boolean }) {
-  const label = (c: any) => (clients.filter((x) => x.name.toLowerCase() === c.name.toLowerCase()).length > 1 ? `${c.name} (#${c.id})` : c.name);
-  const [text, setText] = useState('');
-  useEffect(() => { const c = clients.find((x) => String(x.id) === String(value)); if (c && label(c) !== text) setText(label(c)); }, [value, clients]);
-  const pick = (t: string) => { setText(t); const c = clients.find((x) => label(x).toLowerCase() === t.trim().toLowerCase()); onChange(c ? String(c.id) : ''); };
-  return <><input className="input" list="bk-clients" placeholder="Start typing a client name…" value={text} autoFocus={autoFocus} onChange={(e) => pick(e.target.value)} />
-    <datalist id="bk-clients">{clients.map((c) => <option key={c.id} value={label(c)} />)}</datalist></>;
-}
 
 /** Edit the details of an existing booking. Changes are written to the booking's change log, so a reason is required. */
 function EditBooking({ b, onClose, onSaved }: { b: any; onClose(): void; onSaved(): void }) {
