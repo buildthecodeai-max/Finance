@@ -257,7 +257,7 @@ export async function startSupportSession(req: Request, id: number, reasonIn: un
   await audit(req, 'support_session_start', id, `session ${r.insertId}, ${mins} min`, reason);
   await sec(id, req.platform!.userId, req.ip, 'support_access_granted', `Platform support (${req.platform!.email}) opened a read-only session for ${mins} min. Reason: ${reason}`);
   const t = new Tenant(id, { userId: null, ip: 'platform' });
-  for (const to of await admins(id)) await deliver(t, { kind: 'support_access', to, subject: 'Support accessed your workspace (read-only)', html: `<p>A TravelFinance Pro support engineer opened a <b>read-only</b> session on your workspace for ${mins} minutes.</p><p>Reason: ${reason.replace(/</g, '&lt;')}</p><p>You can end it at any time under Settings → Support access.</p>` });
+  for (const to of await admins(id)) await deliver(t, { kind: 'support_access', to, subject: 'Support accessed your workspace (read-only)', html: `<p>A Travel CRM support engineer opened a <b>read-only</b> session on your workspace for ${mins} minutes.</p><p>Reason: ${reason.replace(/</g, '&lt;')}</p><p>You can end it at any time under Settings → Support access.</p>` });
   return { token, session_id: r.insertId, expires_at: sqlTime(exp), agency: a };
 }
 export async function revokeSupportSession(req: Request, sessionId: number, reasonIn: unknown) {

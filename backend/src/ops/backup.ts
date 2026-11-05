@@ -65,7 +65,7 @@ async function decryptedStream(file: string): Promise<NodeJS.ReadableStream> {
   if (!pass) throw new Error('This backup is encrypted: set BACKUP_PASSPHRASE');
   const fd = fs.openSync(file, 'r'), size = fs.fstatSync(fd).size, head = Buffer.alloc(32), tag = Buffer.alloc(16);
   fs.readSync(fd, head, 0, 32, 0); fs.readSync(fd, tag, 0, 16, size - 16); fs.closeSync(fd);
-  if (!head.subarray(0, 4).equals(MAGIC)) throw new Error('Not a TravelFinance backup');
+  if (!head.subarray(0, 4).equals(MAGIC)) throw new Error('Not a Travel CRM backup');
   const d = crypto.createDecipheriv('aes-256-gcm', key(head.subarray(4, 20)), head.subarray(20, 32)); d.setAuthTag(tag);
   return fs.createReadStream(file, { start: 32, end: size - 17 }).pipe(d).pipe(zlib.createGunzip());
 }

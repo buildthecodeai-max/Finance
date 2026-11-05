@@ -1,4 +1,4 @@
-# TravelFinance Pro
+# Travel CRM
 
 Multi-tenant finance platform for travel agencies. React + Tailwind frontend, Express + TypeScript API, MySQL, Redis/BullMQ, Cloudflare R2.
 

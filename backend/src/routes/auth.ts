@@ -127,7 +127,7 @@ authRouter.post('/forgot', async (req, res) => {
       const link = `${config.appUrl}/reset-password/${token}`;
       if (!config.isProd && !config.sendgridKey && process.env.NODE_ENV !== 'test') console.log(`[dev] password reset link for ${u.email}: ${link}`);
       // not awaited: response time must not reveal whether an email was sent
-      void sendMail(u.email, 'Reset your TravelFinance Pro password', `<p>Hi ${String(u.name).replace(/</g, '&lt;')},</p><p>We received a request to reset your password. <a href="${link}">Choose a new password</a> — the link works once and expires in ${RESET_TTL_MIN} minutes.</p><p>If you didn't ask for this, you can ignore this email; your password has not changed.</p>`).catch((e) => console.error('reset mail failed', e?.message));
+      void sendMail(u.email, 'Reset your Travel CRM password', `<p>Hi ${String(u.name).replace(/</g, '&lt;')},</p><p>We received a request to reset your password. <a href="${link}">Choose a new password</a> — the link works once and expires in ${RESET_TTL_MIN} minutes.</p><p>If you didn't ask for this, you can ignore this email; your password has not changed.</p>`).catch((e) => console.error('reset mail failed', e?.message));
     }
   }
   res.json(generic);
@@ -146,7 +146,7 @@ authRouter.post('/reset', async (req, res) => {
   const [[u]]: any = await pool.query('SELECT email FROM users WHERE id = ?', [uid]);
   await pool.query('DELETE FROM login_attempts WHERE email_hash = ?', [sha256(String(u.email).toLowerCase())]);   // a locked-out user can sign in again
   await resetEvent(uid, req.ip, 'password_reset_completed');
-  void sendMail(u.email, 'Your TravelFinance Pro password was changed', '<p>Your password was just changed using a reset link. If this was not you, contact your administrator immediately.</p>').catch(() => {});
+  void sendMail(u.email, 'Your Travel CRM password was changed', '<p>Your password was just changed using a reset link. If this was not you, contact your administrator immediately.</p>').catch(() => {});
   res.json({ ok: true });   // 2FA, if enabled, is still required at sign-in: a reset link alone never bypasses it
 });
 
@@ -173,7 +173,7 @@ authRouter.post('/2fa/setup', async (req, res) => {
   if (u.totp_enabled && !(req.body?.code && authenticator.check(String(req.body.code), decrypt(u.totp_secret_enc)))) throw new HttpError(403, 'Enter your current 2FA code to change 2FA');
   const secret = authenticator.generateSecret();
   await pool.query('UPDATE users SET totp_secret_enc = ?, totp_enabled = 0 WHERE id = ?', [encrypt(secret), id]);
-  res.json({ secret, otpauth: authenticator.keyuri(u.email, 'TravelFinance Pro', secret) });
+  res.json({ secret, otpauth: authenticator.keyuri(u.email, 'Travel CRM', secret) });
 });
 
 authRouter.post('/2fa/enable', async (req, res) => {

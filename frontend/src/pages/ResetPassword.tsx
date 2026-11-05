@@ -11,7 +11,7 @@ async function post(path: string, body: unknown) {
 const Shell = ({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) => (
   <div className="min-h-screen flex flex-col p-6"><div className="flex justify-end"><ThemeMenuButton /></div>
     <main className="flex-1 grid place-items-center"><div className="w-full max-w-sm">
-      <div className="flex items-center gap-2.5 mb-8"><div className="h-9 w-9 rounded-xl bg-accent text-accent-ink grid place-items-center"><Plane size={19} /></div><span className="font-semibold">TravelFinance Pro</span></div>
+      <div className="flex items-center gap-2.5 mb-8"><div className="h-9 w-9 rounded-xl bg-accent text-accent-ink grid place-items-center"><Plane size={19} /></div><span className="font-semibold">Travel CRM</span></div>
       <h1 className="text-2xl font-semibold">{title}</h1><p className="text-sm text-muted mt-1 mb-6">{sub}</p>{children}</div></main></div>
 );
 

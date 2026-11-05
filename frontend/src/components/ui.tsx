@@ -17,7 +17,7 @@ export const Pill = ({ s }: { s: string }) => <span className={`pill capitalize 
 
 /* ---------- Layout ---------- */
 export const Page = ({ title, description, actions, children }: { title: string; description?: string; actions?: ReactNode; children: ReactNode }) => {
-  useEffect(() => { document.title = `${title} · TravelFinance Pro`; }, [title]);   // screen readers announce the page on navigation
+  useEffect(() => { document.title = `${title} · Travel CRM`; }, [title]);   // screen readers announce the page on navigation
   return (
   <div className="px-4 md:px-8 py-6 max-w-[1440px] mx-auto w-full">
     <div className="flex flex-wrap items-center justify-between gap-3 mb-6">

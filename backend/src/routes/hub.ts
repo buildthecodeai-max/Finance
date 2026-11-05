@@ -70,7 +70,7 @@ hubRouter.get('/webhooks/:id/deliveries', ADMIN, async (req, res) => {
 hubRouter.post('/deliveries/:id/retry', ADMIN, async (req, res) => { await W.retryDelivery(T(req), idParam(req)); res.json({ ok: true }); });
 hubRouter.post('/webhooks/:id/test', ADMIN, async (req, res) => {
   const t = T(req), id = idParam(req), ep = await t.get('webhook_endpoints', id); if (!ep) throw new HttpError(404, 'Endpoint not found');
-  await t.tx(async (tx) => { const { default: c } = await import('node:crypto'); const pk = await tx.rawInsert('webhook_events', { agency_id: t.agencyId, event_id: c.randomUUID(), type: 'ping', version: 1, payload: JSON.stringify({ message: 'Test event from TravelFinance Pro' }) });
+  await t.tx(async (tx) => { const { default: c } = await import('node:crypto'); const pk = await tx.rawInsert('webhook_events', { agency_id: t.agencyId, event_id: c.randomUUID(), type: 'ping', version: 1, payload: JSON.stringify({ message: 'Test event from Travel CRM' }) });
     await tx.rawInsert('webhook_deliveries', { agency_id: t.agencyId, endpoint_id: id, event_pk: pk, status: 'pending', next_attempt_at: new Date().toISOString().slice(0, 19).replace('T', ' ') }); });
   res.json(await W.processDue(20, t.agencyId));
 });

@@ -154,7 +154,7 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
       <div className={`flex items-center h-14 shrink-0 px-4 border-b border-line ${collapsed ? 'justify-center' : 'justify-between'}`}>
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="h-8 w-8 rounded-lg bg-accent text-accent-ink grid place-items-center shrink-0"><Plane size={17} strokeWidth={2.2} /></div>
-          {!collapsed && <div className="font-head font-extrabold text-[15px] tracking-tight truncate"><span className="text-accent">Travel</span>Finance</div>}
+          {!collapsed && <div className="font-head font-extrabold text-[15px] tracking-tight truncate"><span className="text-accent">Travel</span> CRM</div>}
         </div>
       </div>
       {!collapsed && (
@@ -219,7 +219,7 @@ export default function Layout() {
         <header className="sticky top-0 z-30 h-14 flex items-center gap-3 px-4 md:px-8 bg-bg/80 backdrop-blur border-b border-line">
           <button className="btn-icon lg:hidden -ml-2" onClick={() => setMobile(true)} aria-label="Open menu"><MenuIcon size={20} /></button>
           <nav aria-label="Breadcrumb" className="hidden md:flex items-center gap-1.5 text-sm text-muted min-w-0 shrink-0">
-            {g && <><span>{g}</span><ChevronRight size={14} /></>}<span className="text-fg font-medium truncate">{l ?? 'TravelFinance'}</span></nav>
+            {g && <><span>{g}</span><ChevronRight size={14} /></>}<span className="text-fg font-medium truncate">{l ?? 'Travel CRM'}</span></nav>
           <div className="flex-1 flex justify-center md:justify-end lg:justify-center px-0 md:px-4"><GlobalSearch /></div>
           <div className="flex items-center gap-1">
             {canCreate && (
