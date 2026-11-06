@@ -62,7 +62,7 @@ cd ../frontend && npm install && npm run dev   # http://localhost:5173 (proxies 
 - See `docs/R0_AUDIT.md` (findings) and `docs/ROADMAP.md` (status vs. the product blueprint).
 
 ## R2 — CRM, quotes, bookings
-Sidebar → **Sales & Bookings**: Leads (drag between stages), Quotes (multi-option, versioned), Bookings (workspace tabs), Operations (deadline/exception view + tasks).
+Sidebar → **Sales & Bookings**: Leads (drag between stages), Quotes (multi-option, versioned), Bookings (workspace tabs), Operations (your day in one list: lead follow-ups, tasks, departures, expiring quotes and unconfirmed suppliers, grouped Overdue / Today / Tomorrow / Coming up, with log-a-follow-up, done, move-to-another-day and call/email shortcuts).
 - Sending a quote prints a secure link once (`/q/<token>`); the client can accept, request changes or decline without an account. Set the agency minimum margin in Settings.
 - Public endpoints live under `/api/public/quotes/:token` — the only unauthenticated routes besides auth and webhooks.
 

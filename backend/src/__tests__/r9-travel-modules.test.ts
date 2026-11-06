@@ -359,3 +359,69 @@ describe('leads follow-up', () => {
     expect((await ops(agent)).some((r) => /Overdue Olivia/.test(r.title))).toBe(false);
   });
 });
+
+describe('operations worklist', () => {
+  const iso = (d: number) => new Date(Date.now() + d * 864e5).toISOString().slice(0, 10);
+  const tasks = async (who: Api) => (await who.get('/crm/tasks?status=open')).body as any[];
+
+  it('says who each deadline is about, how to reach them, and who owns it', async () => {
+    const cid = (await agent.post('/clients', { name: 'Reach Me Ltd', email: 'reach@example.com', phone: '+971500000001' })).body.id;
+    const bk = (await agent.post('/bookings', { client_id: cid, destination: 'Dubai', status: 'confirmed', travel_start: iso(3) })).body.id;
+    const qid = (await agent.post('/quotes', { title: 'Ops trip', client_id: cid, currency: 'USD', components: [{ option_name: 'O', product_type: 'hotel', description: 'x', unit_cost: 100, markup_pct: 20, quantity: 1 }] })).body.id;
+    await agent.post(`/quotes/${qid}/send`, { valid_until: iso(2) });
+    const lid = (await agent.post('/leads', { name: 'Call Me Carol', phone: '+971500000002', email: 'carol@example.com', next_action: 'Send options', next_action_at: iso(0) })).body.id;
+    const rows = (await agent.get('/ops/deadlines?days=14')).body as any[];
+    const dep = rows.find((r) => r.kind === 'departure' && r.ref_id === bk);
+    expect(dep).toMatchObject({ who: 'Reach Me Ltd', phone: '+971500000001', email: 'reach@example.com', owner_id: agent.userId }); expect(dep.owner_name).toBeTruthy();
+    expect(rows.find((r) => r.kind === 'quote_expiry' && r.ref_id === qid)).toMatchObject({ who: 'Reach Me Ltd', email: 'reach@example.com', detail: 'Ops trip', owner_id: agent.userId });
+    expect(rows.find((r) => r.kind === 'lead_followup' && r.ref_id === lid)).toMatchObject({ who: 'Call Me Carol', phone: '+971500000002', action: 'Send options', stage: 'new', owner_id: agent.userId });
+    const theirs = (await agent2.get('/ops/deadlines?days=14')).body as any[];
+    expect(theirs.some((r) => [bk, qid, lid].includes(r.ref_id) && ['departure', 'quote_expiry', 'lead_followup'].includes(r.kind))).toBe(false);   // still private to the owner
+  });
+
+  it('dates a passport problem by the departure, not by the day the passport lapses', async () => {
+    const cid = (await agent.post('/clients', { name: 'Passport Payer', phone: '+971500000003' })).body.id;
+    const bk = (await agent.post('/bookings', { client_id: cid, destination: 'Cairo', status: 'confirmed', travel_start: iso(5) })).body.id;
+    const tid = (await agent.post('/travellers', { first_name: 'Pass', last_name: 'Port', passport_no: 'Z9999999', passport_expiry: iso(60), client_id: cid })).body.id;
+    expect((await agent.post(`/bookings/${bk}/travellers`, { traveller_id: tid })).status).toBe(201);
+    const row = ((await agent.get('/ops/deadlines?days=14')).body as any[]).find((r) => r.kind === 'passport_expiry' && r.ref_id === bk);
+    expect(String(row.date).slice(0, 10)).toBe(iso(5));                                                // the departure — the day it can no longer be fixed
+    expect(row).toMatchObject({ who: 'Pass Port', phone: '+971500000003', severity: 'high', owner_id: agent.userId });   // no number of their own → the person who booked
+    expect(row.detail).toMatch(/^Passport expires \d{1,2} \w{3} \d{4}$/); expect(JSON.stringify(row)).not.toContain('Z9999999');
+  });
+
+  it('tells each task what it is about and how to reach them', async () => {
+    const cid = (await agent.post('/clients', { name: 'Linked Family', email: 'lf@example.com', phone: '+971500000005' })).body.id;
+    const bk = (await agent.post('/bookings', { client_id: cid, destination: 'Muscat', status: 'confirmed' })).body.id;
+    const lid = (await agent.post('/leads', { name: 'Task Lead', phone: '+971500000004' })).body.id;
+    await agent.post('/crm/tasks', { title: 'Call the lead', entity_type: 'lead', entity_id: lid });
+    await agent.post('/crm/tasks', { title: 'Brief the family', entity_type: 'booking', entity_id: bk, due_at: iso(1) });
+    await agent.post('/crm/tasks', { title: 'Float task with no link' });
+    const by = async (title: string) => (await tasks(agent)).find((k) => k.title === title);
+    expect(await by('Call the lead')).toMatchObject({ entity_label: 'Task Lead', entity_phone: '+971500000004', due_at: null });
+    const b = await by('Brief the family'); expect(b.entity_label).toMatch(/^BK-\S+ · Linked Family$/); expect(b).toMatchObject({ entity_phone: '+971500000005', entity_email: 'lf@example.com' });
+    expect(await by('Float task with no link')).toMatchObject({ entity_label: null, entity_phone: null });
+  });
+
+  it('lets a finished task be reopened — once, and only by someone allowed to', async () => {
+    const id = (await agent.post('/crm/tasks', { title: 'Ticked by mistake', due_at: iso(0) })).body.id;
+    expect((await agent.post(`/crm/tasks/${id}/reopen`)).status).toBe(409);                              // nothing to undo yet
+    expect((await agent.post(`/crm/tasks/${id}/complete`, {})).status).toBe(200);
+    expect((await tasks(agent)).some((k) => k.id === id)).toBe(false);
+    expect((await agent2.post(`/crm/tasks/${id}/reopen`)).status).toBe(404);                             // someone else's task
+    expect((await viewer.post(`/crm/tasks/${id}/reopen`)).status).toBe(403);
+    expect((await B.post(`/crm/tasks/${id}/reopen`)).status).toBe(404);                                  // another agency
+    expect((await agent.post(`/crm/tasks/${id}/reopen`)).status).toBe(200);
+    expect((await tasks(agent)).find((k) => k.id === id)).toMatchObject({ status: 'open', completed_at: null, completed_by: null });
+    expect((await agent.post(`/crm/tasks/${id}/reopen`)).status).toBe(409);
+  });
+
+  it('moves a task to another day without touching anything else about it', async () => {
+    const id = (await agent.post('/crm/tasks', { title: 'Keep my priority', priority: 'urgent', due_at: iso(-1), notes: 'bring the visa forms' })).body.id;
+    expect((await agent.put(`/crm/tasks/${id}`, { due_at: iso(3) })).status).toBe(200);
+    const t = (await tasks(agent)).find((k) => k.id === id);
+    expect(t).toMatchObject({ title: 'Keep my priority', priority: 'urgent', notes: 'bring the visa forms' }); expect(String(t.due_at).slice(0, 10)).toBe(iso(3));
+    expect((await agent.put(`/crm/tasks/${id}`, { due_at: null })).status).toBe(200);
+    expect((await tasks(agent)).find((k) => k.id === id).due_at).toBeNull();
+  });
+});

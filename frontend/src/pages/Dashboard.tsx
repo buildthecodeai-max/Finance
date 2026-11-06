@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Banknote, Briefcase, Check, ChevronRight, CircleCheck, HandCoins, Plus, Wallet } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
+import { recordPath } from '../lookup';
 import { Page, Pill, Skeleton, Table } from '../components/ui';
 import { useChartColors } from '../theme';
 
@@ -44,7 +45,7 @@ export default function Dashboard() {
   const todo: { n: number; text: string; to: string; tone: 'danger' | 'warn' | 'info' }[] = [
     { n: at.overdue_invoices, text: `overdue invoice${at.overdue_invoices === 1 ? '' : 's'} — ${money(at.overdue_amount, cur)} to collect`, to: '/invoices?tab=overdue', tone: 'danger' as const },
     { n: at.leads_due, text: `lead follow-up${at.leads_due === 1 ? '' : 's'} due — people waiting to hear from you`, to: '/leads?tab=followup', tone: 'warn' as const },
-    { n: at.tasks_overdue, text: `overdue task${at.tasks_overdue === 1 ? '' : 's'}`, to: '/operations', tone: 'danger' as const },
+    { n: at.tasks_overdue, text: `overdue task${at.tasks_overdue === 1 ? '' : 's'}`, to: '/operations?when=overdue&type=task', tone: 'danger' as const },
     { n: at.visas_late, text: `visa decision${at.visas_late === 1 ? '' : 's'} later than expected — chase the embassy`, to: '/visas?tab=embassy', tone: 'warn' as const },
     { n: at.quotes_changes, text: `quote${at.quotes_changes === 1 ? '' : 's'} where the client asked for changes`, to: '/quotes?tab=changes', tone: 'warn' as const },
     { n: at.quotes_accepted, text: `accepted quote${at.quotes_accepted === 1 ? '' : 's'} ready to turn into a booking`, to: '/quotes?tab=accepted', tone: 'info' as const },
@@ -68,7 +69,7 @@ export default function Dashboard() {
           {todo.length ? <ul className="divide-y divide-line/60">{todo.map((x) => <li key={x.to + x.text}><button onClick={() => nav(x.to)} className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface2/50 rounded"><span className={`num text-lg font-semibold w-8 text-right ${TONE[x.tone]}`}>{x.n}</span><span className="text-sm flex-1">{x.text}</span><ChevronRight size={15} className="text-muted" /></button></li>)}</ul>
             : <p className="text-sm text-muted">No overdue invoices, late visas or waiting quotes. New things that need you will show up here.</p>}</div>
         <div className="card"><h3 className="font-semibold mb-2">Coming up · next 14 days</h3>
-          {soon.length ? <ul className="space-y-2 max-h-56 overflow-auto">{soon.filter((x) => !['overdue_task'].includes(x.kind)).slice(0, 8).map((x, i) => <li key={i}><button className="text-left w-full text-sm hover:bg-surface2/50 rounded px-1 -mx-1" onClick={() => nav(x.ref_type === 'booking' ? `/bookings/${x.ref_id}` : x.ref_type === 'quote' ? `/quotes/${x.ref_id}` : '/operations')}><span className="num text-xs text-muted mr-2">{String(x.date).slice(5, 10)}</span>{x.title}</button></li>)}</ul>
+          {soon.length ? <ul className="space-y-2 max-h-56 overflow-auto">{soon.filter((x) => !['overdue_task'].includes(x.kind)).slice(0, 8).map((x, i) => <li key={i}><button className="text-left w-full text-sm hover:bg-surface2/50 rounded px-1 -mx-1" onClick={() => nav(recordPath(x.ref_type, x.ref_id) ?? '/operations')}><span className="num text-xs text-muted mr-2">{String(x.date).slice(5, 10)}</span>{x.title}</button></li>)}</ul>
             : <p className="text-sm text-muted">Nothing scheduled — no departures, expiries or birthdays in the next two weeks.</p>}
           {soon.length > 0 && <button className="text-xs text-accent underline mt-2" onClick={() => nav('/operations')}>See everything on Operations</button>}</div></div>
 

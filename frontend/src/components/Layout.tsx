@@ -1,7 +1,7 @@
 import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Banknote, BarChart3, BookOpen, Briefcase, Building2, CalendarClock, Calculator as CalcIcon, Check, ChevronDown, ChevronRight, ChevronsLeft, ChevronsUpDown,
+  ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Banknote, BarChart3, BookOpen, Briefcase, Building2, CalendarClock, ClipboardCheck, Calculator as CalcIcon, Check, ChevronDown, ChevronRight, ChevronsLeft, ChevronsUpDown,
   Coins, CreditCard, FileMinus, FileSignature, FileText, HandCoins, LineChart, Truck, LayoutDashboard, Library, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Percent, Plane, Plus, ScrollText, Search, Settings, MoonStar, ShieldCheck, Stamp, Sun, Target, Ticket, TrendingUp, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api } from '../api';
@@ -9,6 +9,7 @@ import { useAuth, AgencyRef } from '../auth';
 import { ThemeMode, useTheme } from '../theme';
 import Calculator from './Calculator';
 import Fallback from './Fallback';
+import { MenuBtn, Popover } from './ui';
 
 type Role = AgencyRef['role'];
 interface Item { to: string; label: string; icon: ReactNode; roles?: Role[]; module?: string; children?: Item[] }
@@ -67,24 +68,6 @@ const FLAT = GROUPS.flatMap((g) => g.items.flatMap((i) => (i.children ? i.childr
 const findItem = (p: string) => FLAT.find((i) => i.to === p);
 const labelFor = (p: string) => findItem(p)?.label ?? (p.startsWith('/umrah/') ? 'Umrah group' : p.startsWith('/bookings/') ? 'Booking' : p.startsWith('/quotes/') ? 'Quote' : undefined);
 const groupFor = (p: string) => findItem(p)?.group ?? (p.startsWith('/bookings/') ? 'Bookings' : p.startsWith('/quotes/') ? 'Sales' : p.startsWith('/umrah/') ? 'Bookings' : '');
-
-/* ---------- small popover ---------- */
-function Popover({ trigger, children, align = 'right', width = 'w-56' }: { trigger: (open: boolean, toggle: () => void) => ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right'; width?: string }) {
-  const [open, setOpen] = useState(false); const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false); const k = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', h); document.addEventListener('keydown', k); return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
-  }, [open]);
-  return (
-    <div className="relative" ref={ref}>{trigger(open, () => setOpen((o) => !o))}
-      {open && <div className={`absolute z-50 mt-2 ${width} ${align === 'right' ? 'right-0' : 'left-0'} bg-surface border border-line rounded-xl shadow-pop p-1.5`}>{children(() => setOpen(false))}</div>}
-    </div>
-  );
-}
-const MenuBtn = ({ onClick, children, active }: { onClick(): void; children: ReactNode; active?: boolean }) => (
-  <button onClick={onClick} className={`flex w-full items-center gap-2.5 px-2.5 py-2 text-sm rounded-lg text-left hover:bg-surface2 ${active ? 'text-accent' : ''}`}>{children}</button>
-);
 
 /* ---------- theme switch ---------- */
 function ThemeMenu() {
@@ -255,7 +238,7 @@ export default function Layout() {
           <div className="flex items-center gap-1">
             {canCreate && (
               <Popover width="w-52" trigger={(_o, t) => <button className="btn !px-3" onClick={t}><Plus size={16} /><span className="hidden sm:inline">Create</span></button>}>
-                {(close) => ([['New quote', '/quotes/new', FileSignature], ['New lead', '/leads?new=1', Target], ['New booking', '/bookings?new=1', Briefcase], ['New ticket invoice', '/ticket-invoices?new=1', Ticket], ['New invoice', '/invoices?new=1', FileText],
+                {(close) => ([['New quote', '/quotes/new', FileSignature], ['New lead', '/leads?new=1', Target], ['New task', '/operations?new=1', ClipboardCheck], ['New booking', '/bookings?new=1', Briefcase], ['New ticket invoice', '/ticket-invoices?new=1', Ticket], ['New invoice', '/invoices?new=1', FileText],
                   ...(agency?.role !== 'agent' ? [['Client receipt', '/client-receipts?new=1', HandCoins], ['Supplier bill', '/supplier-bills?new=1', Truck], ['Journal voucher', '/journal?new=1', NotebookPen]] : [])] as [string, string, any][]).map(([label, to, Icon]) => (
                   <MenuBtn key={to} onClick={() => { close(); nav(to); }}><Icon size={15} className="text-muted" />{label}</MenuBtn>))}
               </Popover>)}

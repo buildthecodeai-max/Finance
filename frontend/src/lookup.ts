@@ -23,3 +23,7 @@ export function useOpenOnNew(open: () => void) {
   const [sp, setSp] = useSearchParams();
   useEffect(() => { if (sp.get('new')) { open(); sp.delete('new'); setSp(sp, { replace: true }); } }, [sp]);
 }
+
+/** Where to see the record something refers to (a lead, quote, booking or client), or null when it isn't tied to one. */
+export const recordPath = (type?: string | null, id?: number | null): string | null =>
+  !type || !id ? null : ({ booking: `/bookings/${id}`, quote: `/quotes/${id}`, lead: `/leads?open=${id}`, client: `/clients?open=${id}` } as Record<string, string>)[type] ?? null;

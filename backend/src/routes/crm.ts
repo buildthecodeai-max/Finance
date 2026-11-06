@@ -157,11 +157,23 @@ const Task = z.object({
   owner_id: opt(z.number().int()), entity_type: opt(z.enum(['lead', 'client', 'quote', 'booking'])), entity_id: opt(z.number().int()), notes: opt(z.string().max(500)),
 });
 
+// What a task hangs off, in words (lead/client name, quote number, booking reference + client), and a phone/email to reach them where the record has one.
+const ABOUT_ONE = (sel: string, from: string) => `(SELECT ${sel} FROM ${from} WHERE x.agency_id = k.agency_id AND x.id = k.entity_id)`;
+const TASK_ABOUT = `CASE k.entity_type
+    WHEN 'lead' THEN ${ABOUT_ONE('x.name', 'leads x')} WHEN 'client' THEN ${ABOUT_ONE('x.name', 'clients x')} WHEN 'quote' THEN ${ABOUT_ONE('x.quote_no', 'quotes x')}
+    WHEN 'booking' THEN ${ABOUT_ONE(`CONCAT(x.reference, COALESCE(CONCAT(' · ', c.name), ''))`, 'bookings x LEFT JOIN clients c ON c.id = x.client_id AND c.agency_id = x.agency_id')} END entity_label,
+  CASE k.entity_type
+    WHEN 'lead' THEN ${ABOUT_ONE('x.phone', 'leads x')} WHEN 'client' THEN ${ABOUT_ONE('x.phone', 'clients x')}
+    WHEN 'booking' THEN ${ABOUT_ONE('c.phone', 'bookings x LEFT JOIN clients c ON c.id = x.client_id AND c.agency_id = x.agency_id')} END entity_phone,
+  CASE k.entity_type
+    WHEN 'lead' THEN ${ABOUT_ONE('x.email', 'leads x')} WHEN 'client' THEN ${ABOUT_ONE('x.email', 'clients x')}
+    WHEN 'booking' THEN ${ABOUT_ONE('c.email', 'bookings x LEFT JOIN clients c ON c.id = x.client_id AND c.agency_id = x.agency_id')} END entity_email`;
+
 crmRouter.get('/tasks', async (req, res) => {
   const t = T(req), { mine, status, entity_type, entity_id } = req.query as Record<string, string>;
   const agent = req.ctx!.role === 'agent';
   res.json(await t.query(
-    `SELECT k.*, u.name owner_name FROM tasks k LEFT JOIN users u ON u.id = k.owner_id WHERE k.agency_id = ?
+    `SELECT k.*, u.name owner_name, ${TASK_ABOUT} FROM tasks k LEFT JOIN users u ON u.id = k.owner_id WHERE k.agency_id = ?
      ${mine || agent ? 'AND k.owner_id = ?' : ''} ${status ? 'AND k.status = ?' : ''} ${entity_type ? 'AND k.entity_type = ? AND k.entity_id = ?' : ''}
      ORDER BY k.status = 'open' DESC, k.due_at IS NULL, k.due_at, FIELD(k.priority,'urgent','high','normal','low') LIMIT 500`,
     [t.agencyId, ...(mine || agent ? [req.ctx!.userId] : []), ...(status ? [status] : []), ...(entity_type ? [entity_type, Number(entity_id)] : [])]));
@@ -192,6 +204,12 @@ crmRouter.post('/tasks/:id/complete', requireRole(...ALL_EDITORS), async (req, r
   await t.update('tasks', id, { status: 'done', completed_at: new Date().toISOString().slice(0, 19).replace('T', ' '), completed_by: req.ctx!.userId, ...(notes ? { notes } : {}) });
   res.json({ ok: true });
 });
+crmRouter.post('/tasks/:id/reopen', requireRole(...ALL_EDITORS), async (req, res) => {   // the undo for "done"
+  const id = idParam(req), k = await myTask(req, id);
+  if (k.status !== 'done') throw new HttpError(409, 'Task is not done');
+  await T(req).update('tasks', id, { status: 'open', completed_at: null, completed_by: null });
+  res.json({ ok: true });
+});
 
 // ---------- Operations: upcoming deadlines across the agency ----------
 opsRouter.get('/deadlines', requireRole('admin', 'finance_manager', 'agent', 'viewer'), async (req, res) => {
@@ -199,28 +217,39 @@ opsRouter.get('/deadlines', requireRole('admin', 'finance_manager', 'agent', 'vi
   const bs = scope(req, 'b', { owner: 'agent_id' }), qs = scope(req, 'q'), ls = scope(req, 'l');
   const mine = req.ctx!.role === 'agent';
   const rows = await Promise.all([
-    t.query(`SELECT 'departure' kind, b.travel_start date, CONCAT(b.reference, ' departs', COALESCE(CONCAT(' — ', b.destination), '')) title, 'booking' ref_type, b.id ref_id, 'info' severity
-             FROM bookings b WHERE b.agency_id = ?${bs.sql} AND b.travel_start BETWEEN ? AND ? AND b.status IN ('confirmed','in_service')`, [t.agencyId, ...bs.params, from, to]),
+    t.query(`SELECT 'departure' kind, b.travel_start date, CONCAT(b.reference, ' departs', COALESCE(CONCAT(' — ', b.destination), '')) title, 'booking' ref_type, b.id ref_id, 'info' severity,
+               cl.name who, cl.phone, cl.email, b.agent_id owner_id, u.name owner_name
+             FROM bookings b LEFT JOIN clients cl ON cl.id = b.client_id AND cl.agency_id = b.agency_id LEFT JOIN users u ON u.id = b.agent_id
+             WHERE b.agency_id = ?${bs.sql} AND b.travel_start BETWEEN ? AND ? AND b.status IN ('confirmed','in_service')`, [t.agencyId, ...bs.params, from, to]),
     t.query(`SELECT 'unconfirmed_supplier' kind, c.service_start date, CONCAT(b.reference, ': ', c.description, ' not confirmed') title, 'booking' ref_type, b.id ref_id,
-               IF(c.service_start <= DATE_ADD(CURDATE(), INTERVAL 7 DAY), 'high', 'medium') severity
+               IF(c.service_start <= DATE_ADD(CURDATE(), INTERVAL 7 DAY), 'high', 'medium') severity, s.name who, NULL phone, s.email, b.agent_id owner_id, u.name owner_name
              FROM booking_components c JOIN bookings b ON b.id = c.booking_id AND b.agency_id = c.agency_id
+             LEFT JOIN suppliers s ON s.id = c.supplier_id AND s.agency_id = c.agency_id LEFT JOIN users u ON u.id = b.agent_id
              WHERE c.agency_id = ?${bs.sql} AND c.confirmation_status IN ('pending','requested','waitlisted') AND c.service_start BETWEEN ? AND ? AND b.status IN ('confirmed','in_service')`, [t.agencyId, ...bs.params, from, to]),
-    t.query(`SELECT 'quote_expiry' kind, q.valid_until date, CONCAT('Quote ', q.quote_no, ' expires') title, 'quote' ref_type, q.id ref_id, 'medium' severity
-             FROM quotes q WHERE q.agency_id = ?${qs.sql} AND q.status = 'sent' AND q.valid_until BETWEEN ? AND ?`, [t.agencyId, ...qs.params, from, to]),
-    t.query(`SELECT 'passport_expiry' kind, tr.passport_expiry date, CONCAT(tr.first_name, ' ', tr.last_name, ': passport expires within 6 months of travel (', b.reference, ')') title, 'booking' ref_type, b.id ref_id, 'high' severity
+    t.query(`SELECT 'quote_expiry' kind, q.valid_until date, CONCAT('Quote ', q.quote_no, ' expires') title, 'quote' ref_type, q.id ref_id, 'medium' severity,
+               COALESCE(cl.name, ld.name) who, COALESCE(cl.phone, ld.phone) phone, COALESCE(cl.email, ld.email) email, q.title detail, q.owner_id, u.name owner_name
+             FROM quotes q LEFT JOIN clients cl ON cl.id = q.client_id AND cl.agency_id = q.agency_id LEFT JOIN leads ld ON ld.id = q.lead_id AND ld.agency_id = q.agency_id LEFT JOIN users u ON u.id = q.owner_id
+             WHERE q.agency_id = ?${qs.sql} AND q.status = 'sent' AND q.valid_until BETWEEN ? AND ?`, [t.agencyId, ...qs.params, from, to]),
+    // Dated by the departure — the day it can no longer be fixed — not by the day the passport lapses (which may be months away, or already past).
+    t.query(`SELECT 'passport_expiry' kind, b.travel_start date, CONCAT(tr.first_name, ' ', tr.last_name, ': passport expires within 6 months of travel (', b.reference, ')') title, 'booking' ref_type, b.id ref_id, 'high' severity,
+               CONCAT(tr.first_name, ' ', tr.last_name) who, COALESCE(tr.phone, cl.phone) phone, COALESCE(tr.email, cl.email) email, CONCAT('Passport expires ', DATE_FORMAT(tr.passport_expiry, '%e %b %Y')) detail, b.agent_id owner_id, u.name owner_name
              FROM travellers tr JOIN booking_travellers bt ON bt.traveller_id = tr.id AND bt.agency_id = tr.agency_id JOIN bookings b ON b.id = bt.booking_id AND b.agency_id = bt.agency_id
+             LEFT JOIN clients cl ON cl.id = b.client_id AND cl.agency_id = b.agency_id LEFT JOIN users u ON u.id = b.agent_id
              WHERE tr.agency_id = ?${bs.sql} AND tr.passport_expiry IS NOT NULL AND b.travel_start BETWEEN ? AND ? AND tr.passport_expiry < DATE_ADD(COALESCE(b.travel_end, b.travel_start), INTERVAL 6 MONTH)
                AND b.status IN ('confirmed','in_service')`, [t.agencyId, ...bs.params, from, to]),
     // Birthdays of travellers on live bookings (the people you may want to greet or upsell to).
-    t.query(`SELECT 'birthday' kind, x.next_bday date, CONCAT(x.name, ' turns ', YEAR(x.next_bday) - YEAR(x.dob), ' on this date (', x.ref, ')') title, 'booking' ref_type, x.booking_id ref_id, 'info' severity FROM (
-               SELECT CONCAT(tr.first_name, ' ', tr.last_name) name, tr.dob, MIN(b.id) booking_id, MIN(b.reference) ref,
+    t.query(`SELECT 'birthday' kind, x.next_bday date, CONCAT(x.name, ' turns ', YEAR(x.next_bday) - YEAR(x.dob), ' on this date (', x.ref, ')') title, 'booking' ref_type, x.booking_id ref_id, 'info' severity,
+               x.name who, x.phone, x.email, x.agent_id owner_id, u.name owner_name FROM (
+               SELECT CONCAT(tr.first_name, ' ', tr.last_name) name, tr.dob, tr.phone, tr.email, MIN(b.id) booking_id, MIN(b.reference) ref, MIN(b.agent_id) agent_id,
                       DATE_ADD(tr.dob, INTERVAL YEAR(CURDATE()) - YEAR(tr.dob) + (DATE_FORMAT(CURDATE(), '%m%d') > DATE_FORMAT(tr.dob, '%m%d')) YEAR) next_bday
                FROM travellers tr JOIN booking_travellers bt ON bt.traveller_id = tr.id AND bt.agency_id = tr.agency_id JOIN bookings b ON b.id = bt.booking_id AND b.agency_id = bt.agency_id
                WHERE tr.agency_id = ?${bs.sql} AND tr.dob IS NOT NULL AND b.archived_at IS NULL AND b.status IN ('enquiry','quoted','awaiting_client','confirmed','in_service') GROUP BY tr.id) x
+             LEFT JOIN users u ON u.id = x.agent_id
              WHERE x.next_bday BETWEEN ? AND ?`, [t.agencyId, ...bs.params, from, to]),
     // Lead follow-ups: due in the window, or already overdue (they stay on the list until someone acts).
-    t.query(`SELECT 'lead_followup' kind, l.next_action_at date, CONCAT('Follow up with ', l.name, COALESCE(CONCAT(' — ', l.next_action), '')) title, 'lead' ref_type, l.id ref_id, IF(l.next_action_at < ?, 'high', 'medium') severity
-             FROM leads l WHERE l.agency_id = ?${ls.sql} AND l.stage NOT IN ('won','lost') AND l.next_action_at IS NOT NULL AND l.next_action_at <= ?`, [from, t.agencyId, ...ls.params, to]),
+    t.query(`SELECT 'lead_followup' kind, l.next_action_at date, CONCAT('Follow up with ', l.name, COALESCE(CONCAT(' — ', l.next_action), '')) title, 'lead' ref_type, l.id ref_id, IF(l.next_action_at < ?, 'high', 'medium') severity,
+               l.name who, l.phone, l.email, l.next_action action, l.stage, l.destination detail, l.owner_id, u.name owner_name
+             FROM leads l LEFT JOIN users u ON u.id = l.owner_id WHERE l.agency_id = ?${ls.sql} AND l.stage NOT IN ('won','lost') AND l.next_action_at IS NOT NULL AND l.next_action_at <= ?`, [from, t.agencyId, ...ls.params, to]),
     t.query(`SELECT 'task' kind, k.due_at date, k.title, k.entity_type ref_type, k.entity_id ref_id, IF(k.priority IN ('urgent','high'),'high','medium') severity
              FROM tasks k WHERE k.agency_id = ? AND k.status = 'open' AND k.due_at BETWEEN ? AND ? ${mine ? 'AND k.owner_id = ?' : ''}`, [t.agencyId, from, to, ...(mine ? [req.ctx!.userId] : [])]),
     t.query(`SELECT 'overdue_task' kind, k.due_at date, k.title, k.entity_type ref_type, k.entity_id ref_id, 'high' severity

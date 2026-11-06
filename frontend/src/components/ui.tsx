@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useId, useRef } from 'react';
+import { ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { AlertCircle, Inbox, Plus, Save, Trash2, X } from 'lucide-react';
 
 /* ---------- Status pill: one tone per meaning, real status text ---------- */
@@ -68,6 +68,13 @@ export const Err = ({ e }: { e: string }) => (e ? (
   <div role="alert" className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 text-danger text-sm px-3 py-2 mb-3"><AlertCircle size={16} className="mt-0.5 shrink-0" /><span>{e}</span></div>
 ) : null);
 
+/** A short confirmation (or warning) that can be dismissed and can offer one follow-up action, such as Undo. */
+export const Banner = ({ ok = true, children, onClose, action }: { ok?: boolean; children: ReactNode; onClose?(): void; action?: { label: string; onClick(): void } }) => (
+  <div role={ok ? 'status' : 'alert'} className={`rounded-lg border text-sm px-3 py-2 mb-3 flex justify-between gap-3 ${ok ? 'border-success/30 bg-success/10 text-success' : 'border-warn/30 bg-warn/10 text-warn'}`}>
+    <span className="min-w-0">{children}</span>
+    <span className="flex items-start gap-3 shrink-0">{action && <button type="button" className="font-medium underline" onClick={action.onClick}>{action.label}</button>}{onClose && <button type="button" className="opacity-70 hover:opacity-100" aria-label="Dismiss" onClick={onClose}><X size={14} /></button>}</span></div>
+);
+
 export const Num = ({ v, set, ...p }: { v: any; set(n: any): void } & React.InputHTMLAttributes<HTMLInputElement>) => (
   <input {...p} type="number" step="any" className="input num text-right" value={v ?? ''} onChange={(e) => set(e.target.value === '' ? '' : Number(e.target.value))} />
 );
@@ -109,3 +116,21 @@ export const Modal = ({ title, onClose, children, wide }: { title: string; onClo
     </div>
   );
 };
+
+/* ---------- small popover ---------- */
+export function Popover({ trigger, children, align = 'right', width = 'w-56' }: { trigger: (open: boolean, toggle: () => void) => ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right'; width?: string }) {
+  const [open, setOpen] = useState(false); const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false); const k = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', h); document.addEventListener('keydown', k); return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
+  }, [open]);
+  return (
+    <div className="relative" ref={ref}>{trigger(open, () => setOpen((o) => !o))}
+      {open && <div className={`absolute z-50 mt-2 ${width} ${align === 'right' ? 'right-0' : 'left-0'} bg-surface border border-line rounded-xl shadow-pop p-1.5`}>{children(() => setOpen(false))}</div>}
+    </div>
+  );
+}
+export const MenuBtn = ({ onClick, children, active }: { onClick(): void; children: ReactNode; active?: boolean }) => (
+  <button onClick={onClick} className={`flex w-full items-center gap-2.5 px-2.5 py-2 text-sm rounded-lg text-left hover:bg-surface2 ${active ? 'text-accent' : ''}`}>{children}</button>
+);
