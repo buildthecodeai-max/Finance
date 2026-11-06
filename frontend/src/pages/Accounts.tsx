@@ -6,6 +6,7 @@ import { useAuth } from '../auth';
 import { Err, Field, Modal, Num, Page, Pill } from '../components/ui';
 import { today, useList } from '../lookup';
 import { voucherHref } from '../voucherLink';
+import { viewPdf } from '../components/PdfViewer';
 
 const NATURES = [
   { key: 'asset', label: 'Assets' }, { key: 'liability', label: 'Liabilities' }, { key: 'equity', label: 'Equity' },
@@ -31,7 +32,9 @@ function LedgerPanel({ acc, onClose }: { acc: any; onClose: () => void }) {
   };
   useEffect(() => { run(); }, [acc.id]);
   const exportFile = async (fmt: 'pdf' | 'xlsx') => {
-    try { window.open((await api(`/reports/general-ledger?account_id=${acc.id}&from=${from}&to=${to}&format=${fmt}`)).url); }
+    const get = async () => (await api(`/reports/general-ledger?account_id=${acc.id}&from=${from}&to=${to}&format=${fmt}`)).url;
+    if (fmt === 'pdf') return viewPdf(get, `Ledger — ${acc.name ?? 'account'}`);
+    try { window.open(await get()); }
     catch (e: any) { setErr(e.message); }
   };
   const csv = () => d && saveCsv(`ledger-${acc.code}.csv`, [

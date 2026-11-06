@@ -5,6 +5,7 @@ import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Page, Pill, Skeleton, Table } from '../components/ui';
 import { today, useOpenOnNew } from '../lookup';
+import { viewPdf } from '../components/PdfViewer';
 
 const TYPES = ['flight', 'hotel', 'package', 'cruise', 'transfer', 'other'];
 const PAYABLE = ['sent', 'partially_paid', 'overdue'];
@@ -162,7 +163,7 @@ function InvoiceDetail({ id, clientName, onClose, onChange, onEdit, onCopy }: { 
         {finance && inv.status === 'draft' && <button className="btn" disabled={busy} onClick={() => run(() => api(`/invoices/${id}/status`, 'POST', { status: 'reviewed' }), 'Marked as reviewed — it is ready to send.')}>Mark reviewed</button>}
         {finance && ['reviewed', ...PAYABLE].includes(inv.status) && <button className="btn" disabled={busy} onClick={() => run(() => api(`/invoices/${id}/send`, 'POST'), `Invoice ${inv.number} emailed to ${clientName ?? 'the client'}.`)}>{inv.status === 'reviewed' ? 'Send to client' : 'Re-send to client'}</button>}
         {finance && issued && outstanding > 0.005 && inv.status !== 'void' && <button className="btn" onClick={() => nav(`/client-receipts?client=${inv.client_id}`)}>Receive payment</button>}
-        {inv.status !== 'draft' && <button className="btn-ghost" onClick={() => run(async () => window.open((await api(`/invoices/${id}/pdf-url`)).url))}>Download PDF</button>}
+        {inv.status !== 'draft' && <button className="btn-ghost" onClick={() => viewPdf(async () => (await api(`/invoices/${id}/pdf-url`)).url, `Invoice ${inv.number}`)}>View PDF</button>}
         {editor && <button className="btn-ghost inline-flex items-center gap-1" onClick={() => onCopy(initial())}><Copy size={14} />Duplicate</button>}
         {finance && issued && inv.status !== 'void' && <button className="btn-ghost" onClick={() => nav('/credit-notes')}>Credit note…</button>}
         {finance && inv.status !== 'void' && inv.status !== 'credited' && (voiding
@@ -272,7 +273,7 @@ export default function Invoices() {
               {finance && r.status === 'draft' && <button className="btn" onClick={() => act(() => api(`/invoices/${r.id}/status`, 'POST', { status: 'reviewed' }), `${r.number} is reviewed and ready to send.`)}>Mark reviewed</button>}
               {finance && r.status === 'reviewed' && <button className="btn" onClick={() => act(() => api(`/invoices/${r.id}/send`, 'POST'), `${r.number} was emailed to ${r.client_name}.`)}>Send</button>}
               {finance && PAYABLE.includes(r.status) && balance(r) > 0.005 && <button className="btn" onClick={() => nav(`/client-receipts?client=${r.client_id}`)}>Receive payment</button>}
-              {r.status !== 'draft' && <button className="btn-ghost" onClick={() => act(async () => window.open((await api(`/invoices/${r.id}/pdf-url`)).url), `PDF for ${r.number} opened.`)}>PDF</button>}</div> },
+              {r.status !== 'draft' && <button className="btn-ghost" onClick={() => viewPdf(async () => (await api(`/invoices/${r.id}/pdf-url`)).url, `Invoice ${r.number}`)}>PDF</button>}</div> },
           ]} />
       )}
       {rows && rows.length >= 500 && <p className="text-xs text-muted mt-2">Showing the latest 500 invoices. Use the search box to find older ones.</p>}

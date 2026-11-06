@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Page, Pill, Table } from '../components/ui';
+import { viewPdf } from '../components/PdfViewer';
 
 const TRIGGERS: Record<string, string> = { invoice_overdue: 'Invoice overdue by ≥ N days', quote_expiring: 'Quote expires within N days', departure_upcoming: 'Departure within N days', bill_due: 'Supplier bill due within N days' };
 const CLIENT = ['invoice_overdue', 'quote_expiring', 'departure_upcoming'];
@@ -70,7 +71,7 @@ export default function Automation() {
         <Field label="Recipients" hint="Team members only, comma-separated (max 5)."><input className="input" value={form.recipients} onChange={(e) => setForm({ ...form, recipients: e.target.value })} /></Field>
         <div className="flex justify-end"><button className="btn" disabled={form.name.trim().length < 2} onClick={saveSched}>Create schedule</button></div></Modal>}
       {runs && <Modal title={`History — ${runs.s.name}`} onClose={() => setRuns(null)}><Table rows={runs.rows} empty="Not run yet" cols={[{ h: 'Run', render: (r: any) => <span className="num text-xs">{r.run_key}</span> }, { h: 'Result', render: (r: any) => <><Pill s={r.status === 'ok' ? 'paid' : r.status === 'failed' ? 'void' : 'pending'} />{r.error && <span className="text-xs text-danger ml-2">{r.error}</span>}{r.reconciled === 0 && <span className="text-xs text-warn ml-2">did not reconcile</span>}</> },
-        { h: 'Rows', right: true, render: (r: any) => r.row_count ?? '' }, { h: '', render: (r: any) => r.file_key && <button className="btn-ghost" onClick={async () => window.open((await api(`/automation/report-runs/${r.id}/download`)).url)}>Download</button> }]} /></Modal>}
+        { h: 'Rows', right: true, render: (r: any) => r.row_count ?? '' }, { h: '', render: (r: any) => r.file_key && <button className="btn-ghost" onClick={async () => { const get = async () => (await api(`/automation/report-runs/${r.id}/download`)).url; if (String(r.file_key).toLowerCase().endsWith('.pdf')) viewPdf(get, `${r.report ?? 'Report'} — ${String(r.created_at ?? '').slice(0, 10)}`); else window.open(await get()); }}>{String(r.file_key).toLowerCase().endsWith('.pdf') ? 'View' : 'Download'}</button> }]} /></Modal>}
     </Page>
   );
 }

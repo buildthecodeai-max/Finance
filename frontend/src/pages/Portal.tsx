@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Download, Plane, XCircle } from 'lucide-react';
 import { Err, Pill } from '../components/ui';
 import { ThemeMenuButton } from '../components/ThemeToggle';
+import { viewPdf } from '../components/PdfViewer';
 
 const money = (n: number, c: string) => new Intl.NumberFormat('en', { style: 'currency', currency: c }).format(n);
 const day = (d: string | null) => (d ? String(d).slice(0, 10) : '');
@@ -18,7 +19,7 @@ export default function Portal() {
   const load = () => call(token).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [token]);
   const pay = async (id: number) => { setBusy(id); try { window.location.href = (await call(token, `/invoices/${id}/pay`, 'POST')).url; } catch (e: any) { setErr(e.message); setBusy(0); } };
-  const pdf = async (id: number) => { try { window.open((await call(token, `/invoices/${id}/pdf`)).url); } catch (e: any) { setErr(e.message); } };
+  const pdf = (id: number) => viewPdf(async () => (await call(token, `/invoices/${id}/pdf`)).url, 'Invoice');
   const send = async () => {
     try { await call(token, '/requests', 'POST', { subject: form.subject, message: form.message, ...(form.booking_id ? { booking_id: Number(form.booking_id) } : {}) }); setForm({ subject: '', message: '', booking_id: '' }); setSent(true); setErr(''); load(); }
     catch (e: any) { setErr(e.message); }

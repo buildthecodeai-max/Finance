@@ -39,7 +39,7 @@ export default function ChequeFormat() {
         {group('Date', 'date')}{group('Amount', 'amount')}{group('Party', 'party')}{group('Words', 'words')}
       </div>
       <div className="card max-w-4xl mt-4 text-sm text-warn bg-warn/10">Notes: all measurements are in centimetres. Use Preview, then print on plain paper over a real cheque to align.</div>
-      <button className="btn-ghost mt-4" disabled={!f.id} onClick={async () => printHtml((await api(`/cheque-formats/${f.id}/preview`)).html)}><Eye size={15} /> Preview</button>
+      <button className="btn-ghost mt-4" disabled={!f.id} onClick={async () => printHtml((await api(`/cheque-formats/${f.id}/preview`)).html, 'Cheque preview')}><Eye size={15} /> Preview</button>
     </Page>
   );
 }

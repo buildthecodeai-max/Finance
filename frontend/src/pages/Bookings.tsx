@@ -5,6 +5,7 @@ import { useAuth } from '../auth';
 import { Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
 import { ClientPick } from '../components/ClientPick';
 import { SendSms } from '../components/SendSms';
+import { viewPdf } from '../components/PdfViewer';
 import { isoDate, today, useList, useOpenOnNew } from '../lookup';
 import { AlertTriangle, Archive, ArchiveRestore, CheckCircle2, FilePlus2, Pencil, Plus, Search, X } from 'lucide-react';
 
@@ -223,7 +224,7 @@ export function BookingWorkspace() {
     cid ? await api(`/bookings/${id}/components/${cid}`, 'PUT', body) : await api(`/bookings/${id}/components`, 'POST', body); setComp(null);
   }, 'Item saved.');
   const addTask = () => { if (task.trim()) run(async () => { await api('/crm/tasks', 'POST', { title: task.trim(), entity_type: 'booking', entity_id: b.id, ...(taskDue ? { due_at: taskDue } : {}) }); setTask(''); setTaskDue(''); }, 'Task added.'); };
-  const openVoucher = (c: any) => run(async () => { window.open((await api(`/bookings/${id}/components/${c.id}/voucher-url`)).url); }, c.confirmation_status === 'confirmed' ? 'Voucher opened.' : 'Voucher opened — it is marked provisional until the supplier confirms.');
+  const openVoucher = (c: any) => viewPdf(async () => (await api(`/bookings/${id}/components/${c.id}/voucher-url`)).url, `${VOUCHER[c.product_type] ?? 'Voucher'} — ${b.reference}${c.confirmation_status === 'confirmed' ? '' : ' (provisional)'}`);
   const days = [...new Set(b.itinerary.map((i: any) => i.day_no))].sort((x: any, y: any) => x - y) as number[];
   const dayDate = (n: number) => { if (!b.travel_start) return ''; const d = new Date(`${day(b.travel_start)}T00:00:00`); d.setDate(d.getDate() + n - 1); return niceDay(d); };
   const w = when(b.travel_start, b.travel_end); const nights = b.travel_start && b.travel_end ? Math.max(0, Math.round((Date.parse(day(b.travel_end)) - Date.parse(day(b.travel_start))) / 864e5)) : null;

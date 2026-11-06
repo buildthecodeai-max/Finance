@@ -5,6 +5,7 @@ import { api } from '../api';
 import { useAuth } from '../auth';
 import { Page } from '../components/ui';
 import { today, useAccounts, useList } from '../lookup';
+import { viewPdf } from '../components/PdfViewer';
 
 /** [key, label, what it tells you]. `ledger` reports are for finance roles; `asAt` reports are a position on one date. */
 interface Def { key: string; label: string; about: string; ledger?: boolean; asAt?: boolean; account?: boolean; client?: 'required' | 'optional' }
@@ -98,7 +99,7 @@ export default function Reports() {
     catch (e: any) { if (mine === seq.current) { setErr(e.message); setRep(null); } }
     finally { if (mine === seq.current) setLoading(false); }
   };
-  const exp = async (f: 'pdf' | 'xlsx') => { try { window.open((await api(q(f))).url); } catch (e: any) { setErr(e.message); } };
+  const exp = async (f: 'pdf' | 'xlsx') => { if (f === 'pdf') return viewPdf(async () => (await api(q(f))).url, rep?.title ?? 'Report'); try { window.open((await api(q(f))).url); } catch (e: any) { setErr(e.message); } };
   const pick = (k: string) => { setName(k); setRep(null); setErr(''); sp.set('report', k); sp.delete('account'); setSp(sp, { replace: true }); };
 
   // run as soon as a report (or its account) is chosen, so a deep link from the ledger lands on real numbers

@@ -4,6 +4,7 @@ import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Page, Pill, Table } from '../components/ui';
 import { today, useAccounts } from '../lookup';
+import { viewPdf } from '../components/PdfViewer';
 
 const STEPS = ['draft', 'validated', 'submitted', 'approved', 'exported', 'processing', 'paid'];
 const FILE: Record<string, string[]> = { USD: ['ach', 'csv'], AUD: ['aba', 'csv'] };
@@ -111,7 +112,7 @@ export default function PaymentRuns() {
           {w && (r.status === 'approved' || (SETTLING(r.status) && pending.length > 0)) && (FILE[r.currency] ?? ['csv']).map((f) => <button key={f} className={r.status === 'approved' ? 'btn' : 'btn-ghost'} onClick={() => download(f)}>{r.status === 'approved' ? 'Export ' : 'Re-download '}{f.toUpperCase()}</button>)}
           {w && r.status === 'exported' && <button className="btn-ghost" onClick={() => post('processing')}>Mark processing</button>}
           {w && SETTLING(r.status) && pending.length > 0 && <button className="btn" onClick={record}>Record settlement</button>}
-          {['paid', 'partially_paid'].includes(r.status) && view.items.some((i: any) => i.status === 'paid') && <button className="btn-ghost" onClick={async () => window.open((await api(`/finance/payment-runs/${r.id}/remittance`, 'POST')).url)}>Remittance PDF</button>}
+          {['paid', 'partially_paid'].includes(r.status) && view.items.some((i: any) => i.status === 'paid') && <button className="btn-ghost" onClick={() => viewPdf(async () => (await api(`/finance/payment-runs/${r.id}/remittance`, 'POST')).url, `Remittance advice — run #${view.run.id}`)}>Remittance PDF</button>}
         </div></Modal>}
     </Page>
   );

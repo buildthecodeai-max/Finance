@@ -74,6 +74,7 @@ if (useLocal && !config.isProd)
   app.get('/api/dev-files', (req, res) => {
     const { key, exp, sig, name } = req.query as Record<string, string>;
     if (!key || !verifyLocal(key, Number(exp), String(sig))) throw new HttpError(403, 'Link expired or invalid');
+    if ((name || key).toLowerCase().endsWith('.pdf')) return void res.type('application/pdf').sendFile(key, { root: LOCAL_DIR, headers: { 'Content-Disposition': `inline; filename="${(name || path.basename(key)).replace(/["\\r\n]/g, '_')}"` } });
     res.download(key, name || path.basename(key), { root: LOCAL_DIR });
   });
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: process.env.NODE_ENV === 'test' ? 5000 : 50 }), authRouter);

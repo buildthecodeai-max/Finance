@@ -43,6 +43,9 @@ export async function getFile(key: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+/** PDFs are served inline so the app can show them in its own viewer (the browser's PDF toolbar still offers save/print); everything else downloads. */
+const isPdf = (name?: string) => !!name && name.toLowerCase().endsWith('.pdf');
+
 export async function signedUrl(agencyId: number, key: string, filename?: string) {
   if (!key.startsWith(`agency-${agencyId}/`)) throw new Error('Forbidden key');
   if (useLocal) {
@@ -54,7 +57,8 @@ export async function signedUrl(agencyId: number, key: string, filename?: string
     new GetObjectCommand({
       Bucket: config.r2.bucket,
       Key: key,
-      ResponseContentDisposition: filename ? `attachment; filename="${filename}"` : undefined,
+      ResponseContentDisposition: filename ? `${isPdf(filename) ? 'inline' : 'attachment'}; filename="${filename}"` : undefined,
+      ResponseContentType: isPdf(filename) ? 'application/pdf' : undefined,
     }),
     { expiresIn: config.r2.signedTtl },
   );

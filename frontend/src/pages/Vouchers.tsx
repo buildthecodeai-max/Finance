@@ -5,8 +5,10 @@ import { useAuth } from '../auth';
 import { Err, Field, Num, Page, Pill, Table } from '../components/ui';
 import { today, useAccounts, useList } from '../lookup';
 import { X } from 'lucide-react';
+import { viewHtml } from '../components/PdfViewer';
 
-export const printHtml = (html: string) => { const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300); } };
+/** Shows a printable document inside the app, with a Print button. */
+export const printHtml = (html: string, title = 'Print preview') => viewHtml(html, title);
 
 export default function Vouchers({ kind }: { kind: 'receipt' | 'payment' }) {
   const { can } = useAuth(); const [sp, setSp] = useSearchParams();

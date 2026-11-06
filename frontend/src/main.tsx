@@ -1,4 +1,5 @@
 import React, { lazy, Suspense } from 'react';
+import { DocViewerHost } from './components/PdfViewer';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import './index.css';
@@ -65,7 +66,7 @@ function Guard() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode><ThemeProvider><BrowserRouter><AuthProvider><Routes>
+  <React.StrictMode><ThemeProvider><BrowserRouter><AuthProvider><DocViewerHost /><Routes>
     <Route path="/login" element={<Login />} />
     <Route path="/platform" element={<Suspense fallback={<Fallback />}><Platform /></Suspense>} />
     <Route path="/support" element={<Suspense fallback={<Fallback />}><SupportEntry /></Suspense>} />
