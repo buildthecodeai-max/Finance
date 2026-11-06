@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
-import { Err, Field, Num, Page, Pill, Table } from '../components/ui';
+import { Err, Field, Modal, Num, Page, Pill, Table } from '../components/ui';
+import { viewPdf } from '../components/PdfViewer';
 import { today, useAccounts, useList, useOpenOnNew } from '../lookup';
-import { printHtml } from './Vouchers';
-import { Check, Plus, Printer, Save } from 'lucide-react';
+import { Check, Mail, Plus, Printer, Save } from 'lucide-react';
 
 const NUMF = (keys: [string, string][]) => keys;
 const TAX_FIELDS = NUMF([['sp_yi', 'SP + YI'], ['rg_cvt', 'RG/CVT'], ['yq', 'YQ'], ['ced', 'CED'], ['pb_adv_yq', 'PB/Adv YQ'], ['xz', 'XZ'], ['yd', 'YD'], ['kb', 'KB'], ['xt_ur_us', 'XT/UR/US'], ['other_tax', 'Other Tax']]);
@@ -58,7 +58,7 @@ export default function TicketInvoices() {
   const clients = useAccounts([120]); const vendors = useAccounts([210, 211]); const agents = useAccounts([123, 124, 210]);
   const airlines = useList('/airlines'); const branches = useList('/accounting/branches'); const depts = useList('/accounting/departments'); const staff = useList('/accounting/lookup?types=0');
   const [rows, setRows] = useState<any[]>([]); const [inv, setInv] = useState<any>(null); const [idx, setIdx] = useState(0); const [tab, setTab] = useState<'list' | 'details'>('details');
-  const [calc, setCalc] = useState<any>(null); const [err, setErr] = useState(''); const [q, setQ] = useState('');
+  const [calc, setCalc] = useState<any>(null); const [err, setErr] = useState(''); const [q, setQ] = useState(''); const [mail, setMail] = useState<any>(null); const [note, setNote] = useState('');
   const load = () => api(`/tickets/invoices${q ? `?q=${encodeURIComponent(q)}` : ''}`).then(setRows);
   useOpenOnNew(() => { setInv(blankInv()); setIdx(0); setTab('details'); });
   useEffect(() => { load(); }, [q]);
@@ -99,9 +99,16 @@ export default function TicketInvoices() {
       <button className="btn" onClick={save} disabled={readOnly}><Save size={15} /> Save</button>
       {inv.id && writer && !inv.supervised && <button className="btn" onClick={() => act(`/tickets/invoices/${inv.id}/supervise`)}><Check size={15} /> Supervise (post)</button>}
       {inv.id && writer && inv.supervised && <button className="btn-ghost" onClick={() => act(`/tickets/invoices/${inv.id}/repost`)}>Re-Post</button>}
-      {inv.id && <button className="btn-ghost" onClick={() => printHtml(`<html><body style="font-family:Arial"><h2>${agency?.name}</h2><h3>Invoice ${inv.invoice_no}</h3><p>${inv.client_name ?? ''} — ${inv.invoice_date}</p><table border=1 cellpadding=6 style="border-collapse:collapse"><tr><th>Passenger</th><th>Ticket</th><th>Route</th><th>Amount</th></tr>${inv.lines.map((l: any) => `<tr><td>${l.passenger_name ?? ''}</td><td>${l.ticket_no ?? ''}</td><td>${l.route ?? ''}</td><td align=right>${(l.receivable_fc ?? 0).toFixed(2)}</td></tr>`).join('')}</table><h3>Total ${total('receivable').toFixed(2)}</h3></body></html>`)}><Printer size={15} /> Print</button>}
+      {inv.id && <button className="btn-ghost" title="Client copy with your letterhead — print it or save it as PDF" onClick={() => viewPdf(async () => (await api(`/tickets/invoices/${inv.id}/pdf-url`)).url, `Ticket invoice ${inv.invoice_no}`)}><Printer size={15} /> Print / PDF</button>}
+      {inv.id && inv.supervised && <button className="btn-ghost" onClick={() => setMail({ to: '', message: '' })}><Mail size={15} /> Send to client</button>}
       {inv.id && writer && <button className="btn-ghost text-danger" onClick={() => confirm('Delete invoice and its ledger entries?') && act(`/tickets/invoices/${inv.id}`, 'DELETE')}>Delete</button>}</>}>
-      <Err e={err} />
+      <Err e={err} />{note && <div role="status" className="rounded-lg border border-success/30 bg-success/10 text-success text-sm px-3 py-2 mb-3 flex justify-between gap-3"><span>{note}</span><button className="opacity-70" aria-label="Dismiss" onClick={() => setNote('')}>✕</button></div>}
+      {mail && <Modal title={`Send ${inv.invoice_no} to the client`} onClose={() => setMail(null)}>
+        <p className="text-sm text-muted mb-3">The client's copy is emailed as a PDF attachment, with your letterhead. It shows fare, taxes, charges and the total — never your costs or commission.</p>
+        <Field label="Email to" hint="Leave blank to use the client's email on file"><input className="input" type="email" value={mail.to} onChange={(e) => setMail({ ...mail, to: e.target.value })} placeholder="client@example.com" autoFocus /></Field>
+        <Field label="Message (optional)"><textarea className="input" rows={3} value={mail.message} onChange={(e) => setMail({ ...mail, message: e.target.value })} placeholder="e.g. Please confirm the names match the passports." /></Field>
+        <Err e={mail.err ?? ''} /><div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setMail(null)}>Cancel</button>
+          <button className="btn" disabled={mail.busy} onClick={async () => { setMail({ ...mail, busy: true, err: '' }); try { const r = await api(`/tickets/invoices/${inv.id}/send`, 'POST', { to: mail.to.trim() || undefined, message: mail.message.trim() || undefined }); setNote(r.delivery === 'sent' ? `Sent to ${r.to}.` : r.delivery === 'skipped' ? `Email isn't configured on this server, so nothing was sent to ${r.to}. Use Print / PDF to send it yourself.` : `The email to ${r.to} failed. Try again, or use Print / PDF.`); setMail(null); } catch (e: any) { setMail({ ...mail, busy: false, err: e.message }); } }}>{mail.busy ? 'Sending…' : 'Send'}</button></div></Modal>}
       <div className="card grid grid-cols-2 lg:grid-cols-4 gap-x-4 mb-4">
         <Field label="Invoice ID"><input className="input num" value={inv.invoice_no ?? '(New)'} disabled /></Field>
         <Field label="Invoice Date *"><input className="input num" type="date" value={inv.invoice_date ?? ''} onChange={h('invoice_date')} disabled={readOnly} /></Field>

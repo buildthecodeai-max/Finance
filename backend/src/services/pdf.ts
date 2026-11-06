@@ -94,8 +94,47 @@ export function invoiceHtml(a: any, inv: any, lines: any[], client: any, install
   </body></html>`;
 }
 
-export function tableHtml(title: string, columns: string[], rows: any[][]) {
-  return `<html><head><style>${css}</style></head><body><h1 style="font-size:20px">${esc(title)}</h1>
+/** The agency's letterhead: logo (when set), name, address and tax number. Used by every client-facing document. */
+export function letterheadHtml(a: any, logo?: { data: string; mime: string } | null) {
+  const img = logo ? `<img src="data:${logo.mime};base64,${logo.data}" style="max-height:64px;max-width:200px;object-fit:contain;display:block;margin-bottom:6px" alt="logo">` : '';
+  return `<div>${img}<div class="brand">${esc(a.name)}</div><div class="addr">${esc(a.address ?? '')}</div>${a.tax_number ? `<div class="addr" style="margin-top:6px"><b>Tax no:</b> ${esc(a.tax_number)}</div>` : ''}</div>`;
+}
+
+export function tableHtml(title: string, columns: string[], rows: any[][], brand?: { agency: any; logo?: { data: string; mime: string } | null }) {
+  const head = brand ? `<div class="bar"></div><div style="margin-bottom:14px">${letterheadHtml(brand.agency, brand.logo)}</div>` : '';
+  return `<html><head><style>${css}</style></head><body>${head}<h1 style="font-size:20px">${esc(title)}</h1>
   <table><tr>${columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>
   ${rows.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</table></body></html>`;
+}
+
+/**
+ * Client copy of a ticket invoice. Shows what the client pays — fare, taxes, charges, total — and never the agency's cost, commission or profit.
+ * Amounts stay in each line's own currency.
+ */
+export function ticketInvoiceHtml(a: any, inv: any, client: any, logo?: { data: string; mime: string } | null) {
+  const cur = (l: any) => l.currency || a.base_currency || 'USD', d10 = (v: unknown) => (v ? String(v).slice(0, 10) : '');
+  const charges = (l: any) => Math.round((Number(l.psf) + Number(l.other_charges) + Number(l.vat) + Number(l.wh_client)) * 100) / 100;
+  const draft = inv.status !== 'confirmed';
+  const byCur = new Map<string, number>(); for (const l of inv.lines) byCur.set(cur(l), Math.round(((byCur.get(cur(l)) ?? 0) + Number(l.receivable_fc)) * 100) / 100);
+  const route = (l: any) => [l.route || l.sector, [d10(l.dep_date), d10(l.return_date)].filter(Boolean).join(' → ')].filter(Boolean).join('<br>');
+  const pay = payRows(a);
+  return `<html><head><meta charset="utf-8"><style>${css}
+.tk td{padding:10px;border-bottom:1px solid #eceff4;vertical-align:top}.tk th{background:#0f172a;color:#fff;text-align:left;padding:9px 10px;font-size:9.5px;text-transform:uppercase;letter-spacing:.8px}
+.tk tr{page-break-inside:avoid}.pax{font-weight:700;font-size:12px}.sm{color:#6b7686;font-size:10.5px}.tkn{font-variant-numeric:tabular-nums;letter-spacing:.3px}
+</style></head><body>
+  <div class="bar"></div>
+  <div class="top">${letterheadHtml(a, logo)}
+    <div style="text-align:right"><h1>TICKET INVOICE</h1><div style="margin:6px 0 8px;font-size:13px;font-weight:600">${esc(inv.invoice_no)}</div><span class="badge ${draft ? 'draft' : 'paid'}">${draft ? 'Draft' : 'Issued'}</span></div></div>
+  <div class="meta"><div><div class="lbl">Invoice date</div><div class="val">${esc(d10(inv.invoice_date))}</div></div><div><div class="lbl">Due date</div><div class="val">${esc(d10(inv.due_date) || '—')}</div></div>
+    <div><div class="lbl">Reference</div><div class="val">${esc(inv.ref_no || inv.stax_invoice_no || '—')}</div></div><div><div class="lbl">Terms</div><div class="val">${esc(inv.payment_terms || '—')}</div></div></div>
+  <div class="billto"><div class="lbl">Billed to</div><div class="name">${esc(client?.name ?? inv.client_name ?? '')}</div>${client?.email ? `<div class="m">${esc(client.email)}</div>` : ''}${client?.phone ? `<div class="m">${esc(client.phone)}</div>` : ''}${client?.address ? `<div class="m" style="white-space:pre-line">${esc(client.address)}</div>` : ''}</div>
+  <table class="tk"><tr><th style="width:24%">Passenger</th><th style="width:30%">Ticket &amp; itinerary</th><th class="r">Fare</th><th class="r">Taxes</th><th class="r">Charges</th><th class="r">Total</th></tr>
+  ${inv.lines.map((l: any) => `<tr><td><div class="pax">${esc(l.passenger_name ?? '')}</div><div class="sm">${esc(l.pax_type ?? '')}${l.passport ? ` · Passport ${esc(l.passport)}` : ''}</div></td>
+    <td><span class="chip">${esc(l.airline_name ?? 'Ticket')}</span><span class="tkn">${esc(l.ticket_no ?? '')}</span><div class="sm" style="margin-top:3px">${route(l)}</div>${l.pnr || l.confirmation_no ? `<div class="sm">Booking ref: <b>${esc(l.pnr || l.confirmation_no)}</b>${l.fare_class ? ` · Class ${esc(l.fare_class)}` : ''}</div>` : ''}</td>
+    <td class="r">${fmt(Number(l.fare_inc), cur(l))}</td><td class="r">${fmt(Number(l.taxes_inc), cur(l))}</td><td class="r">${fmt(charges(l) - Number(l.discount), cur(l))}${Number(l.discount) > 0 ? `<div class="sm">incl. discount −${fmt(Number(l.discount), cur(l))}</div>` : ''}</td>
+    <td class="r"><b>${fmt(Number(l.receivable_fc), cur(l))}</b></td></tr>`).join('')}</table>
+  ${[...byCur.entries()].map(([c, v]) => `<div class="due-box"><span>Total payable (${esc(c)})</span><span>${fmt(v, c)}</span></div>`).join('')}
+  ${inv.remarks ? `<h3>Notes</h3><div class="note">${esc(inv.remarks)}</div>` : ''}
+  ${pay.length ? `<h3>How to pay</h3><div class="pay"><table>${pay.map(([k, v]) => `<tr><td class="m" style="width:34%">${esc(k)}</td><td><b>${esc(v)}</b></td></tr>`).join('')}</table></div>` : ''}
+  <div class="thanks">Thank you for travelling with ${esc(a.name)}. Please keep this invoice with your travel documents.</div></body></html>`;
 }

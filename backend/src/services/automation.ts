@@ -7,6 +7,7 @@ import { buildReport } from '../routes/reports.js';
 import { putFile, fileKey } from '../storage.js';
 import ExcelJS from 'exceljs';
 import { htmlToPdf, tableHtml, esc } from './pdf.js';
+import { agencyLogoData } from './vouchers.js';
 
 const nowSql = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const system = (agencyId: number) => new Tenant(agencyId, { userId: null, ip: 'automation' });
@@ -149,13 +150,13 @@ export function nextRun(s: { frequency: string; weekday?: number | null; day_of_
   return cand > after ? cand : `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-${String(dom).padStart(2, '0')}`;
 }
 
-export async function reportFile(report: Awaited<ReturnType<typeof buildReport>>, format: string): Promise<{ buf: Buffer; ext: string; mime: string }> {
+export async function reportFile(report: Awaited<ReturnType<typeof buildReport>>, format: string, brand?: { agency: any; logo?: { data: string; mime: string } | null }): Promise<{ buf: Buffer; ext: string; mime: string }> {
   if (format === 'xlsx') {
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet(report.title.slice(0, 31)); ws.addRow(report.columns).font = { bold: true };
     report.rows.forEach((r) => ws.addRow(r.map((v) => (typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v)))); ws.columns.forEach((c) => (c.width = 20));
     return { buf: Buffer.from(await wb.xlsx.writeBuffer()), ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
   }
-  if (format === 'pdf') return { buf: await htmlToPdf(tableHtml(report.title, report.columns, report.rows)), ext: 'pdf', mime: 'application/pdf' };
+  if (format === 'pdf') return { buf: await htmlToPdf(tableHtml(report.title, report.columns, report.rows, brand)), ext: 'pdf', mime: 'application/pdf' };
   const cell = (v: unknown) => { const s = String(v ?? ''); return /[",\r\n]/.test(s) || /^[=+\-@]/.test(s) ? `"${(/^[=+\-@]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s) ? "'" : '') + s.replace(/"/g, '""')}"` : s; };
   return { buf: Buffer.from([report.columns, ...report.rows].map((r) => r.map(cell).join(',')).join('\r\n')), ext: 'csv', mime: 'text/csv' };
 }
@@ -165,7 +166,7 @@ export async function executeSchedule(t: Tenant, s: any, runKey: string) {
   const [ins]: any = await pool.query(`INSERT IGNORE INTO report_runs (agency_id, schedule_id, run_key, status) VALUES (?,?,?, 'running')`, [t.agencyId, s.id, runKey]);
   if (ins.affectedRows === 0) return { skipped: true };
   try {
-    const [from, to] = rangeFor(s.range_kind, today()), report = await buildReport(t, s.report, from, to), f = await reportFile(report, s.format);
+    const [from, to] = rangeFor(s.range_kind, today()), report = await buildReport(t, s.report, from, to), f = await reportFile(report, s.format, s.format === 'pdf' ? { agency: await t.agency(), logo: await agencyLogoData(await t.agency()) } : undefined);
     const key = await putFile(fileKey(t.agencyId, 'scheduled-reports', `${s.report}-${runKey}-${s.id}.${f.ext}`), f.buf, f.mime);
     const bad = report.reconcile?.filter((c) => !c.ok) ?? [];
     const preview = `<table cellpadding="4" style="border-collapse:collapse;font-size:12px"><tr>${report.columns.map((c) => `<th align="left">${esc(c)}</th>`).join('')}</tr>${report.rows.slice(0, 50).map((r) => `<tr>${r.map((v) => `<td>${esc(String(v))}</td>`).join('')}</tr>`).join('')}</table>${report.rows.length > 50 ? `<p>…and ${report.rows.length - 50} more rows (full file under Automation → Schedules).</p>` : ''}`;

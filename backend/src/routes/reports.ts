@@ -1,3 +1,4 @@
+import { agencyLogoData } from '../services/vouchers.js';
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import { HttpError, requireRole } from '../auth.js';
@@ -280,7 +281,7 @@ reportsRouter.get('/:name', (req, res, next) => (LEDGER_REPORTS.has(req.params.n
     ws.columns.forEach((c) => (c.width = 20));
     buf = Buffer.from(await wb.xlsx.writeBuffer()); ext = 'xlsx'; mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   } else if (format === 'pdf') {
-    buf = await htmlToPdf(tableHtml(`${report.title}`, report.columns, report.rows) .replace('</body>', `<p style="color:#6b7686;font-size:10px;margin-top:14px">${(report as any).note}</p></body>`)); ext = 'pdf'; mime = 'application/pdf';
+    buf = await htmlToPdf(tableHtml(`${report.title}`, report.columns, report.rows, { agency: await t.agency(), logo: await agencyLogoData(await t.agency()) }).replace('</body>', `<p style="color:#6b7686;font-size:10px;margin-top:14px">${(report as any).note}</p></body>`)); ext = 'pdf'; mime = 'application/pdf';
   } else throw new HttpError(400, 'format must be json, xlsx or pdf');
   const key = await putFile(fileKey(t.agencyId, 'reports', `${req.params.name}.${ext}`), buf, mime);
   res.json({ url: await signedUrl(t.agencyId, key, `${req.params.name}.${ext}`) });

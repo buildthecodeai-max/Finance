@@ -3,8 +3,13 @@ import { z } from 'zod';
 import { ALL_EDITORS, HttpError, WRITERS, requireRole } from '../auth.js';
 import { Tenant } from '../db.js';
 import { nextDocNo, postVoucher, sysAccount, unpostVoucher } from '../services/accounting.js';
-import { r2, today } from '../services/money.js';
+import { fmt, r2, today } from '../services/money.js';
 import { idParam, parse, T } from './util.js';
+import { config } from '../config.js';
+import { fileKey, putFile, signedUrl } from '../storage.js';
+import { esc, htmlToPdf, ticketInvoiceHtml } from '../services/pdf.js';
+import { agencyLogoData } from '../services/vouchers.js';
+import { deliver } from '../services/portal.js';
 
 export const ticketsRouter = Router();
 
@@ -137,6 +142,33 @@ async function loadScoped(req: any, id: number) {
 }
 
 ticketsRouter.get('/invoices/:id', async (req, res) => res.json(await loadScoped(req, idParam(req))));
+
+/** The client's copy as a PDF (letterhead, passengers, itinerary, totals, how to pay). Drafts print with a "Draft" badge. */
+async function renderClientCopy(t: Tenant, req: any, id: number) {
+  const inv = await loadScoped(req, id), agency = await t.agency();
+  const client = await t.one('SELECT * FROM clients WHERE agency_id = ? AND account_id = ?', [t.agencyId, inv.client_account_id]);
+  const pdf = await htmlToPdf(ticketInvoiceHtml(agency, inv, client, await agencyLogoData(agency)), { footer: `${agency.name} · ${inv.invoice_no}` });
+  return { inv, client, agency, pdf, name: `${inv.invoice_no}.pdf` };
+}
+ticketsRouter.get('/invoices/:id/pdf-url', async (req, res) => {
+  const t = T(req), { pdf, name } = await renderClientCopy(t, req, idParam(req));
+  const key = await putFile(fileKey(t.agencyId, 'ticket-invoices', name), pdf, 'application/pdf');
+  res.json({ url: await signedUrl(t.agencyId, key, name), expiresIn: config.r2.signedTtl });
+});
+/** Emails the client's copy (PDF attached). Only issued (supervised) invoices go to clients. */
+ticketsRouter.post('/invoices/:id/send', requireRole(...ALL_EDITORS), async (req, res) => {
+  const b = parse(z.object({ to: z.string().email().optional(), message: z.string().max(1000).optional() }), req.body), t = T(req);
+  const id = idParam(req), pre = await loadScoped(req, id);
+  if (pre.status !== 'confirmed') throw new HttpError(409, 'Confirm (supervise) this invoice before sending it to the client');
+  const onFile = await t.one('SELECT email FROM clients WHERE agency_id = ? AND account_id = ?', [t.agencyId, pre.client_account_id]);
+  const to = b.to ?? onFile?.email;
+  if (!to) throw new HttpError(400, `${pre.client_name} has no email address on file — enter one to send to`);
+  const { inv, client, agency, pdf, name } = await renderClientCopy(t, req, id);
+  const total = (inv.lines as any[]).reduce((s, l) => s + Number(l.receivable_fc), 0);
+  const delivery = await deliver(t, { kind: 'ticket_invoice', ref_table: 'ticket_invoices', ref_id: inv.id, to, subject: `Your ticket invoice ${inv.invoice_no} from ${agency.name}`, attachments: [{ filename: name, content: pdf, type: 'application/pdf' }],
+    html: `<p>Dear ${esc(client?.name ?? inv.client_name)},</p><p>Please find attached your ticket invoice <b>${esc(inv.invoice_no)}</b> (${inv.lines.length} ticket${inv.lines.length === 1 ? '' : 's'}, total ${fmt(r2(total), inv.lines[0]?.currency ?? agency.base_currency)}).</p>${b.message ? `<p>${esc(b.message)}</p>` : ''}<p>Kind regards,<br>${esc(agency.name)}</p>` });
+  res.json({ delivery, to });
+});
 
 ticketsRouter.post('/invoices', requireRole(...ALL_EDITORS), async (req, res) => {
   const { lines, ...h } = parse(Header, req.body); const t = T(req);

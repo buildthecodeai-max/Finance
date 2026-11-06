@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { sha256 } from '../crypto.js';
 import { HttpError } from '../errors.js';
 import { Tenant, pool } from '../db.js';
-import { sendMail } from './email.js';
+import { sendMail, type Attachment } from './email.js';
 import { r2 } from './money.js';
 
 const PAYABLE = ['sent', 'partially_paid', 'overdue'];
@@ -24,10 +24,10 @@ export const gateway = {
 };
 
 /** Email with a delivery record: sent / failed (with the error) / skipped (mail not configured). Never throws. */
-export async function deliver(t: Tenant, d: { kind: string; ref_table?: string; ref_id?: number; to: string; subject: string; html: string }) {
+export async function deliver(t: Tenant, d: { kind: string; ref_table?: string; ref_id?: number; to: string; subject: string; html: string; attachments?: Attachment[] }) {
   let status: 'sent' | 'failed' | 'skipped' = 'sent', error: string | null = null;
   if (!config.sendgridKey) status = 'skipped';
-  else try { await sendMail(d.to, d.subject, d.html); } catch (e: any) { status = 'failed'; error = String(e?.message ?? e).slice(0, 300); }
+  else try { await sendMail(d.to, d.subject, d.html, d.attachments); } catch (e: any) { status = 'failed'; error = String(e?.message ?? e).slice(0, 300); }
   await pool.query('INSERT INTO delivery_log (agency_id, kind, ref_table, ref_id, recipient, subject, status, error, created_by) VALUES (?,?,?,?,?,?,?,?,?)',
     [t.agencyId, d.kind, d.ref_table ?? null, d.ref_id ?? null, d.to, d.subject.slice(0, 250), status, error, t.actor.userId ?? null]);
   return status;

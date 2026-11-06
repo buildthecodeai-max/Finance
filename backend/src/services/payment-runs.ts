@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { HttpError } from '../errors.js';
 import { Tenant } from '../db.js';
 import { decrypt } from '../crypto.js';
-import { esc } from './pdf.js';
+import { esc, css, letterheadHtml } from './pdf.js';
+import { agencyLogoData } from './vouchers.js';
 import { assertSecondApprover } from './accounting.js';
 import { payBillIn } from './finance.js';
 import { BankFormat, FORMAT_CURRENCY, PayeeRow, buildBankFile, payeeProblems } from './bank-files.js';
@@ -240,15 +241,15 @@ export async function runDetail(t: Tenant, id: number) {
 
 /** One remittance page per supplier, listing only the bills the bank actually paid. */
 export async function remittanceHtml(t: Tenant, id: number) {
-  const { run, items } = await runDetail(t, id), agency = await t.agency();
+  const { run, items } = await runDetail(t, id), agency = await t.agency(), head = letterheadHtml(agency, await agencyLogoData(agency));
   const paid = items.filter((i: any) => i.status === 'paid');
   if (!paid.length) throw new HttpError(409, 'Nothing has been paid in this run yet');
   const by = new Map<number, any[]>();
   for (const i of paid) by.set(i.supplier_id, [...(by.get(i.supplier_id) ?? []), i]);
-  const pages = [...by.values()].map((rows) => `<div style="page-break-after:always"><h2 style="color:#00A586">Remittance Advice</h2>
-    <p><b>${esc(agency.name)}</b> → <b>${esc(rows[0].supplier_name)}</b></p><p>Payment run #${run.id}</p>
+  const pages = [...by.values()].map((rows) => `<div style="page-break-after:always"><div style="height:6px;background:#00A586;border-radius:3px;margin-bottom:14px"></div>${head}<h2 style="color:#00A586;margin-top:18px">Remittance Advice</h2>
+    <p>To: <b>${esc(rows[0].supplier_name)}</b></p><p>Payment run #${run.id}</p>
     <table style="width:100%;border-collapse:collapse"><tr style="text-align:left"><th>Your invoice</th><th>Our ref</th><th>Paid on</th><th style="text-align:right">Amount</th></tr>
     ${rows.map((r) => `<tr><td>${esc(r.supplier_ref)}</td><td>${esc(r.bill_no)}</td><td>${esc(String(r.settled_date).slice(0, 10))}</td><td style="text-align:right">${esc(fmt(r.amount, run.currency))}</td></tr>`).join('')}</table>
     <h3 style="text-align:right">Total ${esc(fmt(r2(rows.reduce((s, r) => s + r.amount, 0)), run.currency))}</h3></div>`);
-  return `<html><body style="font-family:Inter,Arial;font-size:12px">${pages.join('')}</body></html>`;
+  return `<html><head><meta charset="utf-8"><style>${css}</style></head><body style="font-family:Inter,Arial;font-size:12px">${pages.join('')}</body></html>`;
 }

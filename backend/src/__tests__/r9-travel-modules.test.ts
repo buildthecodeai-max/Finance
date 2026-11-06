@@ -280,3 +280,28 @@ describe('dashboard attention list', () => {
     const bd = (await B.get('/dashboard')).body; expect(bd.attention.quotes_accepted).toBe(0); expect(bd.counts.quotes).toBe(0);
   });
 });
+
+describe('ticket invoice client copy', () => {
+  const inv = { invoice_no: 'TK-000009', status: 'confirmed', invoice_date: '2026-11-06', due_date: '2026-11-20', remarks: 'Pay <b>soon</b>', client_name: 'Acme',
+    lines: [{ passenger_name: 'MALIK/SARA MS', pax_type: 'Adult', ticket_no: '2352148809001', airline_name: 'TURKISH AIRLINES', route: 'KHI-IST-KHI', dep_date: '2026-12-01', pnr: 'X7K2QD', currency: 'USD',
+      fare_inc: 520, taxes_inc: 85, psf: 10, other_charges: 0, vat: 0, wh_client: 0, discount: 0, receivable_fc: 615, payable_fc: 548.6, com_rec: 36.4, com_paid: 0, profit_fc: 66.4, payable: 548.6, profit: 66.4 }] };
+  it('shows the client what they pay, with the logo, and never the agency cost, commission or profit', async () => {
+    const { ticketInvoiceHtml } = await import('../services/pdf.js');
+    const html = ticketInvoiceHtml({ name: 'Horizon', address: '1 Road', base_currency: 'USD', bank_name: 'Bank X' }, inv, { name: 'Acme Corp', email: 'ap@acme.test' }, { data: 'QUJD', mime: 'image/png' });
+    expect(html).toContain('TICKET INVOICE'); expect(html).toContain('MALIK/SARA MS'); expect(html).toContain('2352148809001'); expect(html).toContain('X7K2QD'); expect(html).toContain('$615.00');
+    expect(html).toContain('data:image/png;base64,QUJD'); expect(html).toContain('Bank X'); expect(html).toContain('Issued');
+    for (const secret of ['548.6', '548.60', '36.4', '66.4', '66.40']) expect(html).not.toContain(secret);
+    expect(html).toContain('Pay &lt;b&gt;soon'); expect(html).not.toContain('Pay <b>soon');                 // free text is escaped
+    expect(ticketInvoiceHtml({ name: 'H' }, { ...inv, status: 'tentative' }, null, null)).toContain('Draft');
+  });
+  it('only sends confirmed invoices, and needs an address to send to', async () => {
+    const acc = s.client;                                         // a customer ledger account with no client record, hence no email on file
+    const created = await A.post('/tickets/invoices', ticketBody(acc, s.airline)); expect(created.status, JSON.stringify(created.body)).toBe(201); const id = created.body.id;
+    const early = await A.post(`/tickets/invoices/${id}/send`, {}); expect(early.status).toBe(409); expect(early.body.error).toMatch(/supervise/i);
+    await A.post(`/tickets/invoices/${id}/supervise`);
+    const noMail = await A.post(`/tickets/invoices/${id}/send`, {}); expect(noMail.status).toBe(400); expect(noMail.body.error).toMatch(/no email/i);
+    expect((await viewer.post(`/tickets/invoices/${id}/send`, { to: 'x@example.com' })).status).toBe(403);
+    expect((await B.post(`/tickets/invoices/${id}/send`, { to: 'x@example.com' })).status).toBe(404);
+    expect((await B.get(`/tickets/invoices/${id}/pdf-url`)).status).toBe(404);
+  });
+});

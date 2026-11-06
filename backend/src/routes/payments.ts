@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { HttpError, WRITERS, requireRole } from '../auth.js';
 import { decrypt } from '../crypto.js';
 import { fileKey, putFile, signedUrl } from '../storage.js';
-import { htmlToPdf, esc } from '../services/pdf.js';
+import { htmlToPdf, esc, css, letterheadHtml } from '../services/pdf.js';
+import { agencyLogoData } from '../services/vouchers.js';
 import { syncInvoicePaid } from '../services/invoicing.js';
 import { createReceipt } from '../services/finance.js';
 import { ensureSys } from '../services/accounting.js';
@@ -80,9 +81,10 @@ paymentsRouter.post('/runs/:id/remittance', requireRole(...WRITERS), async (req,
   const agency = await t.agency();
   const items = await t.query(
     `SELECT p.*, s.name supplier_name FROM payments p JOIN suppliers s ON s.id = p.supplier_id AND s.agency_id = p.agency_id WHERE p.agency_id = ? AND p.run_id = ?`, [t.agencyId, id]);
-  const html = `<html><body style="font-family:Inter,Arial;font-size:12px">${items.map((p: any) => `
-    <div style="page-break-after:always"><h2 style="color:#00A586">Remittance Advice</h2>
-    <p><b>${esc(agency.name)}</b> → <b>${esc(p.supplier_name)}</b></p>
+  const head = letterheadHtml(agency, await agencyLogoData(agency));
+  const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><body style="font-family:Inter,Arial;font-size:12px">${items.map((p: any) => `
+    <div style="page-break-after:always"><div style="height:6px;background:#00A586;border-radius:3px;margin-bottom:14px"></div>${head}<h2 style="color:#00A586;margin-top:18px">Remittance Advice</h2>
+    <p>To: <b>${esc(p.supplier_name)}</b></p>
     <p>Payment date: ${esc(p.paid_at)}<br>Reference: ${esc(p.reference)}</p>
     <h3>${fmt(p.amount, p.currency)}</h3></div>`).join('')}</body></html>`;
   const key = await putFile(fileKey(t.agencyId, 'remittance', `run-${id}.pdf`), await htmlToPdf(html), 'application/pdf');
