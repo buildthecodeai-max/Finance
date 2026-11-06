@@ -5,8 +5,8 @@ import { useAuth } from '../auth';
 import { Err, Page, Table } from '../components/ui';
 
 const SEV: Record<string, string> = { high: 'bg-danger/15 text-danger', medium: 'bg-warn/15 text-warn', info: 'bg-info/15 text-info' };
-const KIND: Record<string, string> = { departure: 'Departure', unconfirmed_supplier: 'Unconfirmed supplier', quote_expiry: 'Quote expiry', passport_expiry: 'Passport expiry', birthday: 'Birthday', task: 'Task due', overdue_task: 'Overdue task' };
-const ROUTE: Record<string, (id: number) => string> = { booking: (id) => `/bookings/${id}`, quote: (id) => `/quotes/${id}`, lead: () => '/leads', client: () => '/clients' };
+const KIND: Record<string, string> = { departure: 'Departure', unconfirmed_supplier: 'Unconfirmed supplier', quote_expiry: 'Quote expiry', passport_expiry: 'Passport expiry', birthday: 'Birthday', lead_followup: 'Lead follow-up', task: 'Task due', overdue_task: 'Overdue task' };
+const ROUTE: Record<string, (id: number) => string> = { booking: (id) => `/bookings/${id}`, quote: (id) => `/quotes/${id}`, lead: (id) => `/leads?open=${id}`, client: () => '/clients' };
 
 export default function Operations() {
   const nav = useNavigate(); const { can } = useAuth();

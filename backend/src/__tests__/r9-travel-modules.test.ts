@@ -305,3 +305,57 @@ describe('ticket invoice client copy', () => {
     expect((await B.get(`/tickets/invoices/${id}/pdf-url`)).status).toBe(404);
   });
 });
+
+describe('leads follow-up', () => {
+  const iso = (d: number) => new Date(Date.now() + d * 864e5).toISOString().slice(0, 10);
+  const lead = (over: Record<string, unknown> = {}) => ({ name: 'Follow Me', email: `fm-${Math.random().toString(36).slice(2, 8)}@example.com`, ...over });
+
+  it('reports real contact (not system notes) and the quotes raised for a lead', async () => {
+    const id = (await agent.post('/leads', lead())).body.id;
+    await agent.put(`/leads/${id}`, { stage: 'contacted' });                                         // writes a system note — that is not "contact"
+    const row = async () => ((await agent.get('/leads')).body as any[]).find((l) => l.id === id);
+    expect((await row()).last_contact_at).toBeNull(); expect((await row()).quote_count).toBe(0);
+    await agent.post('/crm/activities', { entity_type: 'lead', entity_id: id, kind: 'call', body: 'Rang about the Bali dates' });
+    expect((await row()).last_contact_at).toBeTruthy();
+    const q = await agent.post('/quotes', { title: 'For the lead', lead_id: id, currency: 'USD', components: [{ option_name: 'O', product_type: 'hotel', description: 'x', unit_cost: 100, markup_pct: 20, quantity: 1 }] });
+    expect(q.status).toBe(201);
+    const d = (await agent.get(`/leads/${id}`)).body; expect(d.quotes).toHaveLength(1); expect(d.quotes[0].id).toBe(q.body.id); expect(d.owner_name).toBeTruthy(); expect((await row()).quote_count).toBe(1);
+    expect((await agent2.get(`/leads/${id}`)).status).toBe(404);                                        // still private to its owner
+  });
+  it('remembers why a lead was lost only while it is lost', async () => {
+    const id = (await A.post('/leads', lead())).body.id;
+    await A.put(`/leads/${id}`, { stage: 'lost', lost_reason: 'Price too high' });
+    expect((await A.get(`/leads/${id}`)).body.lost_reason).toBe('Price too high');
+    await A.put(`/leads/${id}`, { stage: 'negotiating' });
+    const back = (await A.get(`/leads/${id}`)).body; expect(back.stage).toBe('negotiating'); expect(back.lost_reason).toBeNull();
+  });
+  it('rejects a trip that ends before it starts and a budget that runs backwards', async () => {
+    expect((await A.post('/leads', lead({ travel_start: '2027-02-10', travel_end: '2027-02-01' }))).status).toBe(400);
+    expect((await A.post('/leads', lead({ budget_min: 500, budget_max: 100 }))).status).toBe(400);
+    const id = (await A.post('/leads', lead({ travel_start: '2027-03-10', travel_end: '2027-03-17' }))).body.id;
+    expect((await A.put(`/leads/${id}`, { travel_end: '2027-03-01' })).status).toBe(400);               // checked against the dates already saved
+    expect((await A.put(`/leads/${id}`, { travel_end: '2027-03-20' })).status).toBe(200);
+  });
+  it('answers the live duplicate check across leads and clients, within the agency', async () => {
+    const email = `dupe-${Math.random().toString(36).slice(2, 8)}@example.com`;
+    await A.post('/leads', lead({ name: 'Existing Lead', email })); await A.post('/clients', { name: 'Existing Client', email: `c-${email}`, phone: '+923009990001' });
+    const byEmail = (await A.get(`/leads/duplicates?email=${encodeURIComponent(email)}`)).body as any[]; expect(byEmail.map((d) => d.type)).toEqual(['lead']);
+    const byPhone = (await A.get('/leads/duplicates?phone=%2B923009990001')).body as any[]; expect(byPhone.map((d) => d.name)).toContain('Existing Client');
+    expect((await A.get('/leads/duplicates')).body).toEqual([]);
+    expect((await B.get(`/leads/duplicates?email=${encodeURIComponent(email)}`)).body).toEqual([]);
+  });
+  it('lists due follow-ups on Operations and the dashboard, per owner, and drops them once the lead closes', async () => {
+    const mine = (await agent.post('/leads', lead({ name: 'Overdue Olivia', next_action: 'Send Bali options', next_action_at: iso(-2) }))).body.id;
+    const later = (await agent.post('/leads', lead({ name: 'Later Larry', next_action: 'Check in', next_action_at: iso(3) }))).body.id;
+    const ops = async (who: Api) => ((await who.get('/ops/deadlines?days=7')).body as any[]).filter((r) => r.kind === 'lead_followup');
+    const mineOps = await ops(agent); const olivia = mineOps.find((r) => /Overdue Olivia/.test(r.title));
+    expect(olivia).toMatchObject({ severity: 'high', ref_type: 'lead', ref_id: mine }); expect(olivia.title).toMatch(/Send Bali options/);
+    expect(mineOps.find((r) => /Later Larry/.test(r.title))).toMatchObject({ severity: 'medium', ref_id: later });
+    expect((await ops(agent2)).some((r) => /Olivia|Larry/.test(r.title))).toBe(false);                    // another agent's leads stay private
+    expect((await ops(B)).length).toBe(0);
+    expect((await agent.get('/dashboard')).body.attention.leads_due).toBeGreaterThanOrEqual(1);
+    expect((await agent2.get('/dashboard')).body.attention.leads_due).toBe(0);
+    await agent.put(`/leads/${mine}`, { stage: 'won' });
+    expect((await ops(agent)).some((r) => /Overdue Olivia/.test(r.title))).toBe(false);
+  });
+});

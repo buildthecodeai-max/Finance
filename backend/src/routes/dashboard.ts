@@ -23,7 +23,8 @@ dashboardRouter.get('/', async (req, res) => {
   // "What needs doing" counts. Agents only see their own records, and never agency-wide money.
   const agent = req.ctx!.role === 'agent', qs = scope(req, 'q'), bs = scope(req, 'b', { owner: 'agent_id' }), vs = scope(req, 'v', { owner: 'owner_id' });
   const one = async (sql: string, params: any[]) => (await t.one<any>(sql, params)) ?? {};
-  const [qt, bk, inv, visa, task, counts] = await Promise.all([
+  const ls = scope(req, 'l');
+  const [qt, bk, inv, visa, task, counts, lead] = await Promise.all([
     one(`SELECT SUM(q.status = 'accepted') accepted, SUM(q.status = 'changes_requested') changes, SUM(q.status = 'sent' AND q.valid_until BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)) expiring
          FROM quotes q WHERE q.agency_id = ?${qs.sql}`, [a, ...qs.params]),
     one(`SELECT COUNT(*) n FROM bookings b WHERE b.agency_id = ?${bs.sql} AND b.archived_at IS NULL AND b.status = 'confirmed' AND b.travel_start BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)`, [a, ...bs.params]),
@@ -34,9 +35,10 @@ dashboardRouter.get('/', async (req, res) => {
     one(`SELECT COUNT(*) n FROM tasks k WHERE k.agency_id = ? AND k.status = 'open' AND k.due_at < CURDATE() ${agent ? 'AND k.owner_id = ?' : ''}`, [a, ...(agent ? [req.ctx!.userId] : [])]),
     one(`SELECT (SELECT COUNT(*) FROM clients WHERE agency_id = ? AND archived_at IS NULL) clients, (SELECT COUNT(*) FROM quotes WHERE agency_id = ?) quotes,
                 (SELECT COUNT(*) FROM bookings WHERE agency_id = ? AND archived_at IS NULL) bookings, (SELECT COUNT(*) FROM invoices WHERE agency_id = ?) invoices`, [a, a, a, a]),
+    one(`SELECT COUNT(*) n FROM leads l WHERE l.agency_id = ?${ls.sql} AND l.stage NOT IN ('won','lost') AND l.next_action_at IS NOT NULL AND l.next_action_at <= CURDATE()`, [a, ...ls.params]),
   ]);
   const n = (v: any) => Number(v ?? 0);
-  const attention = { quotes_accepted: n(qt.accepted), quotes_changes: n(qt.changes), quotes_expiring: n(qt.expiring), departing_7d: n(bk.n), overdue_invoices: n(inv.overdue_n), overdue_amount: n(inv.overdue_amt), invoices_ready: n(inv.ready), invoices_draft: n(inv.drafts), visas_late: n(visa.n), tasks_overdue: n(task.n) };
+  const attention = { quotes_accepted: n(qt.accepted), quotes_changes: n(qt.changes), quotes_expiring: n(qt.expiring), departing_7d: n(bk.n), overdue_invoices: n(inv.overdue_n), overdue_amount: n(inv.overdue_amt), invoices_ready: n(inv.ready), invoices_draft: n(inv.drafts), visas_late: n(visa.n), tasks_overdue: n(task.n), leads_due: n(lead.n) };
   const series = (rows: { m: string; v: number }[]) => [...rows].sort((x, y) => x.m.localeCompare(y.m)).map((r) => r.v);
   const total = (rows: { v: number }[]) => rows.reduce((s, r) => s + r.v, 0);
   res.json({

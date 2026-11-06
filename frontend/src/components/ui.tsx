@@ -8,6 +8,7 @@ const TONE: Record<Tone, string> = {
 };
 const STATUS_TONE: Record<string, Tone> = {
   paid: 'success', collected: 'success', docs_received: 'info', docs_pending: 'warn', in_process: 'info', closed: 'success', approved: 'success', accepted: 'success', converted: 'success', confirmed: 'success', ticketed: 'success', done: 'success', in_service: 'success', travel_completed: 'success', won: 'success', cleared: 'success', reconciled: 'success', matched: 'success', posted: 'success', issued: 'success', received: 'success', active: 'success',
+  new: 'info', contacted: 'info', negotiating: 'warn',
   draft: 'warn', trialing: 'info', grace: 'warn', past_due: 'warn', suspended: 'danger', critical: 'danger', warn: 'warn', info: 'info', validated: 'info', processing: 'info', failed: 'danger', reviewed: 'warn', sent: 'warn', accrued: 'warn', pending: 'warn', requested: 'warn', waitlisted: 'warn', enquiry: 'warn', quoted: 'warn', awaiting_client: 'warn', tentative: 'warn', unmatched: 'warn', pending_approval: 'warn',
   overdue: 'danger', void: 'danger', declined: 'danger', expired: 'danger', cancelled: 'danger', lost: 'danger', refunded: 'danger', voided: 'danger', rejected: 'danger', reversed: 'danger',
   reversal: 'info',

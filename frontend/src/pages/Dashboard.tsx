@@ -43,6 +43,7 @@ export default function Dashboard() {
   const at = d.attention, cn = d.counts;
   const todo: { n: number; text: string; to: string; tone: 'danger' | 'warn' | 'info' }[] = [
     { n: at.overdue_invoices, text: `overdue invoice${at.overdue_invoices === 1 ? '' : 's'} — ${money(at.overdue_amount, cur)} to collect`, to: '/invoices?tab=overdue', tone: 'danger' as const },
+    { n: at.leads_due, text: `lead follow-up${at.leads_due === 1 ? '' : 's'} due — people waiting to hear from you`, to: '/leads?tab=followup', tone: 'warn' as const },
     { n: at.tasks_overdue, text: `overdue task${at.tasks_overdue === 1 ? '' : 's'}`, to: '/operations', tone: 'danger' as const },
     { n: at.visas_late, text: `visa decision${at.visas_late === 1 ? '' : 's'} later than expected — chase the embassy`, to: '/visas?tab=embassy', tone: 'warn' as const },
     { n: at.quotes_changes, text: `quote${at.quotes_changes === 1 ? '' : 's'} where the client asked for changes`, to: '/quotes?tab=changes', tone: 'warn' as const },

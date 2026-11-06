@@ -42,23 +42,40 @@ async function leadRefs(t: Tenant, b: Record<string, any>) {
 leadsRouter.get('/', async (req, res) => {
   const t = T(req), { stage, q } = req.query as Record<string, string>, s = scope(req, 'l');
   res.json(await t.query(
-    `SELECT l.*, u.name owner_name FROM leads l LEFT JOIN users u ON u.id = l.owner_id WHERE l.agency_id = ?${s.sql}
+    `SELECT l.*, u.name owner_name,
+       (SELECT MAX(a.created_at) FROM activities a WHERE a.agency_id = l.agency_id AND a.entity_type = 'lead' AND a.entity_id = l.id AND a.kind <> 'system') last_contact_at,
+       (SELECT COUNT(*) FROM quotes q WHERE q.agency_id = l.agency_id AND q.lead_id = l.id) quote_count
+     FROM leads l LEFT JOIN users u ON u.id = l.owner_id WHERE l.agency_id = ?${s.sql}
      ${stage ? 'AND l.stage = ?' : ''} ${q ? 'AND (l.name LIKE ? OR l.email LIKE ? OR l.destination LIKE ?)' : ''} ORDER BY l.updated_at DESC LIMIT 500`,
     [t.agencyId, ...s.params, ...(stage ? [stage] : []), ...(q ? [`%${q}%`, `%${q}%`, `%${q}%`] : [])]));
 });
 
+/** Live "is this person already here?" check for the new-lead form: matches on email or phone, across leads and clients. */
+leadsRouter.get('/duplicates', async (req, res) => {
+  const { email, phone } = req.query as Record<string, string>;
+  res.json(await duplicates(T(req), email?.trim() || null, phone?.trim() || null));
+});
+
 leadsRouter.get('/:id', async (req, res) => {
-  const t = T(req), id = idParam(req), lead = await findScoped(t, req, 'leads', id);
+  const t = T(req), id = idParam(req), lead = await findScoped(t, req, 'leads', id), qs = scope(req, 'q');
   res.json({
-    ...lead,
+    ...lead, owner_name: lead.owner_id ? (await t.one('SELECT u.name FROM users u JOIN memberships m ON m.user_id = u.id AND m.agency_id = ? WHERE u.id = ?', [t.agencyId, lead.owner_id]))?.name ?? null : null,
+    quotes: await t.query(`SELECT q.id, q.quote_no, q.title, q.status FROM quotes q WHERE q.agency_id = ? AND q.lead_id = ?${qs.sql} ORDER BY q.id DESC`, [t.agencyId, id, ...qs.params]),
     activities: await t.query(`SELECT a.*, u.name user_name FROM activities a LEFT JOIN users u ON u.id = a.created_by WHERE a.agency_id = ? AND a.entity_type = 'lead' AND a.entity_id = ? ORDER BY a.id DESC`, [t.agencyId, id]),
     tasks: await t.query(`SELECT * FROM tasks WHERE agency_id = ? AND entity_type = 'lead' AND entity_id = ? ORDER BY status, due_at`, [t.agencyId, id]),
     duplicates: await duplicates(t, lead.email, lead.phone, id),
   });
 });
 
+/** A trip cannot end before it starts, and a budget range must run low to high. */
+function checkRanges(start: unknown, end: unknown, min: unknown, max: unknown) {
+  const d = (v: unknown) => (v ? String(v).slice(0, 10) : '');
+  if (d(start) && d(end) && d(end) < d(start)) throw new HttpError(400, 'The travel end date is before the start date');
+  if (min != null && max != null && Number(max) < Number(min)) throw new HttpError(400, 'The maximum budget is below the minimum');
+}
+
 leadsRouter.post('/', requireRole(...ALL_EDITORS), async (req, res) => {
-  const b = parse(Lead, req.body), t = T(req);
+  const b = parse(Lead, req.body), t = T(req); checkRanges(b.travel_start, b.travel_end, b.budget_min, b.budget_max);
   if (req.ctx!.role === 'agent') b.owner_id = req.ctx!.userId; else b.owner_id ??= req.ctx!.userId;
   if (req.ctx!.branchId) b.branch_id = req.ctx!.branchId;
   await leadRefs(t, b);
@@ -72,6 +89,8 @@ leadsRouter.put('/:id', requireRole(...ALL_EDITORS), async (req, res) => {
   assertCanEdit(req, cur);
   const b = parse(Lead.partial(), req.body);
   if (req.ctx!.role === 'agent') delete b.owner_id; // agents can't reassign
+  checkRanges(b.travel_start ?? cur.travel_start, b.travel_end ?? cur.travel_end, b.budget_min ?? cur.budget_min, b.budget_max ?? cur.budget_max);
+  if (b.stage && b.stage !== 'lost' && cur.stage === 'lost') b.lost_reason = null;   // reopening a lead forgets why it was lost
   await leadRefs(t, b);
   await t.tx(async (tx) => {
     await tx.update('leads', id, b);
@@ -177,7 +196,7 @@ crmRouter.post('/tasks/:id/complete', requireRole(...ALL_EDITORS), async (req, r
 // ---------- Operations: upcoming deadlines across the agency ----------
 opsRouter.get('/deadlines', requireRole('admin', 'finance_manager', 'agent', 'viewer'), async (req, res) => {
   const t = T(req), days = Math.min(Number(req.query.days) || 30, 180), from = today(), to = addDays(from, days);
-  const bs = scope(req, 'b', { owner: 'agent_id' }), qs = scope(req, 'q');
+  const bs = scope(req, 'b', { owner: 'agent_id' }), qs = scope(req, 'q'), ls = scope(req, 'l');
   const mine = req.ctx!.role === 'agent';
   const rows = await Promise.all([
     t.query(`SELECT 'departure' kind, b.travel_start date, CONCAT(b.reference, ' departs', COALESCE(CONCAT(' — ', b.destination), '')) title, 'booking' ref_type, b.id ref_id, 'info' severity
@@ -199,6 +218,9 @@ opsRouter.get('/deadlines', requireRole('admin', 'finance_manager', 'agent', 'vi
                FROM travellers tr JOIN booking_travellers bt ON bt.traveller_id = tr.id AND bt.agency_id = tr.agency_id JOIN bookings b ON b.id = bt.booking_id AND b.agency_id = bt.agency_id
                WHERE tr.agency_id = ?${bs.sql} AND tr.dob IS NOT NULL AND b.archived_at IS NULL AND b.status IN ('enquiry','quoted','awaiting_client','confirmed','in_service') GROUP BY tr.id) x
              WHERE x.next_bday BETWEEN ? AND ?`, [t.agencyId, ...bs.params, from, to]),
+    // Lead follow-ups: due in the window, or already overdue (they stay on the list until someone acts).
+    t.query(`SELECT 'lead_followup' kind, l.next_action_at date, CONCAT('Follow up with ', l.name, COALESCE(CONCAT(' — ', l.next_action), '')) title, 'lead' ref_type, l.id ref_id, IF(l.next_action_at < ?, 'high', 'medium') severity
+             FROM leads l WHERE l.agency_id = ?${ls.sql} AND l.stage NOT IN ('won','lost') AND l.next_action_at IS NOT NULL AND l.next_action_at <= ?`, [from, t.agencyId, ...ls.params, to]),
     t.query(`SELECT 'task' kind, k.due_at date, k.title, k.entity_type ref_type, k.entity_id ref_id, IF(k.priority IN ('urgent','high'),'high','medium') severity
              FROM tasks k WHERE k.agency_id = ? AND k.status = 'open' AND k.due_at BETWEEN ? AND ? ${mine ? 'AND k.owner_id = ?' : ''}`, [t.agencyId, from, to, ...(mine ? [req.ctx!.userId] : [])]),
     t.query(`SELECT 'overdue_task' kind, k.due_at date, k.title, k.entity_type ref_type, k.entity_id ref_id, 'high' severity
