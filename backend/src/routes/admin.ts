@@ -5,6 +5,9 @@ import { requireRole } from '../auth.js';
 import { idParam, parse, T } from './util.js';
 import { pool } from '../db.js';
 import { fileKey, putFile, signedUrl } from '../storage.js';
+import { DEFAULT_TEMPLATE, TEMPLATES, TEMPLATE_KEYS, isTemplateKey } from '../services/invoiceTemplates.js';
+import { sampleInvoiceHtml } from '../services/invoicePreview.js';
+import { agencyLogoData } from '../services/vouchers.js';
 
 export const adminRouter = Router();
 const FINANCE = requireRole('admin', 'finance_manager');
@@ -12,7 +15,7 @@ const FINANCE = requireRole('admin', 'finance_manager');
 // ---- Agency settings ----
 const publicSettings = (a: any) => ({ id: a.id, name: a.name, base_currency: a.base_currency, tax_label: a.tax_label, address: a.address, timezone: a.timezone, invoice_prefix: a.invoice_prefix, min_margin_pct: a.min_margin_pct, approval_threshold: a.approval_threshold, dual_control_runs: !!a.dual_control_runs, bill_tolerance_pct: a.bill_tolerance_pct, fx_max_age_days: a.fx_max_age_days, commission_trigger: a.commission_trigger, locked_through: a.locked_through,
   tax_number: a.tax_number, bank_name: a.bank_name, bank_account_name: a.bank_account_name, bank_account_number: a.bank_account_number, bank_routing: a.bank_routing,
-  bank_iban: a.bank_iban, bank_swift: a.bank_swift, payment_instructions: a.payment_instructions, has_logo: !!a.logo_key });
+  bank_iban: a.bank_iban, bank_swift: a.bank_swift, payment_instructions: a.payment_instructions, has_logo: !!a.logo_key, invoice_template: isTemplateKey(a.invoice_template) ? a.invoice_template : DEFAULT_TEMPLATE });
 
 adminRouter.get('/settings', async (req, res) => res.json(publicSettings(await T(req).agency())));
 
@@ -22,7 +25,7 @@ adminRouter.put('/settings', requireRole('admin'), async (req, res) => {
     timezone: z.string().min(1).max(50).refine((tz) => { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; } }, 'Unknown time zone').optional(),
     invoice_prefix: z.string().max(10).optional(), min_margin_pct: z.number().min(0).max(100).optional(), approval_threshold: z.number().min(0).optional(), dual_control_runs: z.boolean().optional(), bill_tolerance_pct: z.number().min(0).max(100).optional(), fx_max_age_days: z.number().int().min(0).max(365).optional(), commission_trigger: z.enum(['booking_confirmed', 'client_paid', 'travel_completed', 'supplier_paid']).optional(),
     tax_number: z.string().max(40).nullish(), bank_name: z.string().max(100).nullish(), bank_account_name: z.string().max(150).nullish(), bank_account_number: z.string().max(40).nullish(),
-    bank_routing: z.string().max(30).nullish(), bank_iban: z.string().max(40).nullish(), bank_swift: z.string().max(15).nullish(), payment_instructions: z.string().max(500).nullish(), base_currency: z.string().length(3).optional(), reason: z.string().min(3).optional(),
+    bank_routing: z.string().max(30).nullish(), bank_iban: z.string().max(40).nullish(), bank_swift: z.string().max(15).nullish(), payment_instructions: z.string().max(500).nullish(), invoice_template: z.enum(TEMPLATE_KEYS).optional(), base_currency: z.string().length(3).optional(), reason: z.string().min(3).optional(),
   }), req.body);
   const t = T(req); const before = await t.agency();
   const { reason, ...fields } = b;
@@ -38,6 +41,20 @@ adminRouter.put('/settings', requireRole('admin'), async (req, res) => {
     await t.event('update', 'agencies', t.agencyId, publicSettings(before), fields, reason);
   }
   res.json(publicSettings(await t.agency()));
+});
+
+// ---- Invoice designs: the agency picks one default for every client-facing invoice (PUT /settings { invoice_template }) ----
+adminRouter.get('/invoice-templates', async (req, res) => {
+  const a = await T(req).agency();
+  res.json({ selected: isTemplateKey(a.invoice_template) ? a.invoice_template : DEFAULT_TEMPLATE, templates: TEMPLATES.map(({ key, name, about }) => ({ key, name, about })) });
+});
+
+/** One design drawn with a made-up booking and the agency's own letterhead, logo and bank details. ?doc=ticket shows the ticket invoice instead. */
+adminRouter.get('/invoice-templates/:key/preview', async (req, res) => {
+  const key = req.params.key;
+  if (!isTemplateKey(key)) throw new HttpError(404, 'Unknown invoice design');
+  const agency = await T(req).agency();
+  res.json({ html: sampleInvoiceHtml(agency, await agencyLogoData(agency), key, req.query.doc === 'ticket' ? 'ticket' : 'invoice') });
 });
 
 // ---- Agency logo upload / delete ----
