@@ -1,19 +1,20 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Banknote, Briefcase, Check, ChevronRight, CircleCheck, HandCoins, Plus, Wallet } from 'lucide-react';
+import { AlertTriangle, Banknote, Briefcase, Check, ChevronRight, CircleCheck, HandCoins, Plus, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { recordPath } from '../lookup';
 import { Page, Pill, Skeleton, Table } from '../components/ui';
 import { useChartColors } from '../theme';
 
-function Kpi({ label, hint, value, trend, cur, icon, to }: { label: string; hint: string; value: number; trend: number[]; cur: string; icon: ReactNode; to: string }) {
+function Kpi({ label, hint, value, trend, cur, icon, to, lowerIsBetter }: { label: string; hint: string; value: number; trend: number[]; cur: string; icon: ReactNode; to: string; lowerIsBetter?: boolean }) {
   const c = useChartColors(); const id = `g-${label.replace(/\W/g, '')}`; const nav = useNavigate();
+  const last = trend[trend.length - 1], prev = trend[trend.length - 2], delta = trend.length > 1 && prev ? Math.round(((last - prev) / Math.abs(prev)) * 100) : null;
   return (
     <button type="button" onClick={() => nav(to)} title={`${hint} — click for details`} className="card !p-0 overflow-hidden text-left hover:bg-surface2/60 transition-colors">
       <div className="p-4 pb-2 flex items-start justify-between">
-        <div><div className="text-xs font-medium text-muted">{label}</div><div className="num text-xl sm:text-[26px] font-semibold tracking-tight mt-1">{money(value, cur)}</div><div className="text-[11px] text-muted mt-0.5">{hint}</div></div>
+        <div><div className="text-xs font-medium text-muted">{label}</div><div className="num text-xl sm:text-[26px] font-semibold tracking-tight mt-1">{money(value, cur)}</div><div className="text-[11px] text-muted mt-0.5">{hint}</div>{delta !== null && <div className={`mt-1.5 inline-flex items-center gap-1 text-xs font-medium ${delta === 0 ? 'text-muted' : (delta > 0) !== !!lowerIsBetter ? 'text-success' : 'text-danger'}`}>{delta > 0 ? <TrendingUp size={13} /> : delta < 0 ? <TrendingDown size={13} /> : null}{delta > 0 ? '+' : ''}{delta}% <span className="font-normal text-muted">vs last month</span></div>}</div>
         <div className="hidden sm:grid h-9 w-9 rounded-lg bg-accent/10 text-accent place-items-center">{icon}</div>
       </div>
       <div className="h-14" aria-hidden>{trend.length > 1 && (
@@ -27,6 +28,8 @@ function Kpi({ label, hint, value, trend, cur, icon, to }: { label: string; hint
 const ChartCard = ({ title, sub, children }: { title: string; sub?: string; children: ReactNode }) => (
   <div className="card"><div className="mb-3"><h3 className="font-semibold">{title}</h3>{sub && <p className="text-xs text-muted">{sub}</p>}</div><div className="h-52">{children}</div></div>
 );
+
+const ago = (t: string) => { const m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : m < 10080 ? `${Math.round(m / 1440)} d ago` : new Date(t).toLocaleDateString(); };
 
 export default function Dashboard() {
   const { agency, user, can } = useAuth(); const c = useChartColors(); const nav = useNavigate(); const editor = can('admin', 'finance_manager', 'agent');
@@ -64,6 +67,13 @@ export default function Dashboard() {
       {newbie && editor && <div className="card mb-4"><h3 className="font-semibold mb-1">Getting started</h3><p className="text-xs text-muted mb-3">Four steps to your first sale. Each one opens the right screen.</p>
         <ol className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">{steps.map(([l, done, to], i) => <li key={l}><button onClick={() => nav(to)} className={`w-full text-left rounded-lg border px-3 py-2 text-sm flex items-center gap-2 ${done ? 'border-success/40 bg-success/10 text-success' : 'border-line hover:bg-surface2'}`}><span className={`h-5 w-5 rounded-full grid place-items-center text-[11px] shrink-0 ${done ? 'bg-success text-white' : 'bg-surface2 text-muted'}`}>{done ? <Check size={12} /> : i + 1}</span>{l}</button></li>)}</ol></div>}
 
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-1.5">
+        <Kpi label="Revenue" hint="Invoiced, before tax" value={k.revenue.value} trend={k.revenue.trend} cur={cur} icon={<Banknote size={18} />} to="/invoices" />
+        <Kpi label="Trips sold" hint="Total value of invoices" value={k.bookings.value} trend={k.bookings.trend} cur={cur} icon={<Briefcase size={18} />} to="/bookings" />
+        <Kpi label="Owed to you" hint="Unpaid client invoices" value={k.outstandingAr.value} trend={k.outstandingAr.trend} cur={cur} icon={<Wallet size={18} />} to="/invoices?tab=unpaid" lowerIsBetter />
+        <Kpi label="Commission earned" hint="After deductions" value={k.netCommission.value} trend={k.netCommission.trend} cur={cur} icon={<HandCoins size={18} />} to="/commissions" />
+      </div>
+      <p className="text-xs text-muted mb-6">Totals cover the last 12 months, except “Owed to you”, which is everything unpaid today.</p>
       <div className="grid lg:grid-cols-3 gap-4 mb-4">
         <div className="card lg:col-span-2"><h3 className="font-semibold mb-2 flex items-center gap-2">{todo.length ? <><AlertTriangle size={16} className="text-warn" />Needs your attention</> : <><CircleCheck size={16} className="text-success" />You're all caught up</>}</h3>
           {todo.length ? <ul className="divide-y divide-line/60">{todo.map((x) => <li key={x.to + x.text}><button onClick={() => nav(x.to)} className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface2/50 rounded"><span className={`num text-lg font-semibold w-8 text-right ${TONE[x.tone]}`}>{x.n}</span><span className="text-sm flex-1">{x.text}</span><ChevronRight size={15} className="text-muted" /></button></li>)}</ul>
@@ -73,13 +83,6 @@ export default function Dashboard() {
             : <p className="text-sm text-muted">Nothing scheduled — no departures, expiries or birthdays in the next two weeks.</p>}
           {soon.length > 0 && <button className="text-xs text-accent underline mt-2" onClick={() => nav('/operations')}>See everything on Operations</button>}</div></div>
 
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-1">
-        <Kpi label="Revenue" hint="Invoiced, before tax" value={k.revenue.value} trend={k.revenue.trend} cur={cur} icon={<Banknote size={18} />} to="/invoices" />
-        <Kpi label="Trips sold" hint="Total value of invoices" value={k.bookings.value} trend={k.bookings.trend} cur={cur} icon={<Briefcase size={18} />} to="/bookings" />
-        <Kpi label="Owed to you" hint="Unpaid client invoices" value={k.outstandingAr.value} trend={k.outstandingAr.trend} cur={cur} icon={<Wallet size={18} />} to="/invoices?tab=unpaid" />
-        <Kpi label="Commission earned" hint="After deductions" value={k.netCommission.value} trend={k.netCommission.trend} cur={cur} icon={<HandCoins size={18} />} to="/commissions" />
-      </div>
-      <p className="text-xs text-muted mb-4">Totals cover the last 12 months, except “Owed to you”, which is everything unpaid today.</p>
       <div className="grid lg:grid-cols-3 gap-4 mb-4">
         <ChartCard title="Who is late paying" sub="Unpaid invoices by how many days past their due date">
           <ResponsiveContainer><BarChart data={aging} margin={{ top: 8, right: 0, left: 0, bottom: 0 }}><CartesianGrid vertical={false} stroke={c.grid} strokeDasharray="3 3" /><XAxis dataKey="name" {...axis} /><YAxis hide /><Tooltip {...tip} />
@@ -100,7 +103,7 @@ export default function Dashboard() {
         <div><h3 className="font-semibold mb-2">Recent activity</h3>
           <div className="card !p-0"><ul className="divide-y divide-line/70 max-h-[28rem] overflow-auto">
             {d.activity.map((a: any) => <li key={a.id} className="px-4 py-3 text-sm"><span className="font-medium">{a.user ?? 'System'}</span> <span className="text-muted">{a.action}d</span> {a.entity.replace(/_/g, ' ').replace(/s$/, '')} <span className="num text-muted">#{a.entity_id}</span>
-              <div className="text-xs text-muted mt-0.5">{new Date(a.created_at).toLocaleString()}</div></li>)}
+              <div className="text-xs text-muted mt-0.5" title={new Date(a.created_at).toLocaleString()}>{ago(a.created_at)}</div></li>)}
             {!d.activity.length && <li className="px-4 py-8 text-center text-sm text-muted">No activity yet</li>}</ul></div></div>
       </div>
     </Page>
