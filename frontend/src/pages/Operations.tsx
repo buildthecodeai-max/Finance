@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Cake, Check, CheckCircle2, ClipboardCheck, Clock, FileSignature, Mail, Pencil, Phone, Plane, Plus, Search, Stamp, Target, Truck } from 'lucide-react';
+import { AlertCircle, Cake, CalendarRange, Check, CheckCircle2, ClipboardCheck, Clock, FileSignature, Mail, Pencil, Phone, Plane, Plus, Search, Stamp, Target, Truck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../auth';
@@ -207,9 +207,10 @@ export default function Operations() {
   };
   const openIt = (it: Item) => { const p = recordPath(it.ref_type, it.ref_id); if (p) nav(p); else if (it.task && write) setForm({ ...it.task, due_at: d10(it.task.due_at), notes: it.task.notes ?? '', owner_id: it.task.owner_id ?? '', who: it.who }); };
 
-  const stat = (title: string, value: number, sub: string, tone: string, on: boolean, pick: () => void) => (
-    <button type="button" aria-pressed={on} onClick={() => (on ? clear() : pick())} className={`card text-left hover:bg-surface2/70 transition-colors ${on ? 'ring-1 ring-accent' : ''}`}>
-      <div className="text-xs text-muted">{title}</div><div className={`text-xl font-semibold num mt-0.5 ${tone}`}>{value}</div><div className="text-[11px] sm:text-xs text-muted mt-0.5">{sub}</div></button>);
+  const stat = (title: string, value: number, sub: string, tone: string, on: boolean, pick: () => void, Icon: LucideIcon) => (
+    <button type="button" aria-pressed={on} onClick={() => (on ? clear() : pick())} className={`card text-left hover:bg-surface2/70 transition-colors ${on ? 'ring-2 ring-accent' : ''} ${tone && value ? (tone.includes('danger') ? 'border-l-4 !border-l-danger' : 'border-l-4 !border-l-warn') : ''}`}>
+      <div className="flex items-start justify-between gap-2"><div className="text-xs font-medium text-muted">{title}</div><span className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 ${value && tone ? (tone.includes('danger') ? 'bg-danger/10 text-danger' : 'bg-warn/10 text-warn') : 'bg-accent/10 text-accent'}`}><Icon size={15} /></span></div>
+      <div className={`text-2xl font-semibold num mt-1 ${tone}`}>{value}</div><div className="text-[11px] sm:text-xs text-muted mt-0.5 truncate">{sub}</div></button>);
   const undated = openTasks.filter((i) => !i.date).length;
 
   return (
@@ -217,15 +218,15 @@ export default function Operations() {
       actions={write && <button className="btn inline-flex items-center gap-1" onClick={() => setForm(blankTask())}><Plus size={16} />New task</button>}>
       {loading ? <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-20" />)}</div> : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-          {stat('Overdue', overdue.length, overdue.length ? breakdown(overdue) : 'Nothing overdue — nice', overdue.length ? 'text-danger' : '', when === 'overdue', () => { setWhen('overdue'); setType(''); })}
-          {stat('Due today', dueToday.length, dueToday.length ? breakdown(dueToday) : 'Nothing due today', dueToday.length ? 'text-warn' : '', when === 'today', () => { setWhen('today'); setType(''); })}
-          {stat('Next 7 days', soon.length, soon.length ? breakdown(soon) : 'Nothing coming up', '', when === 'soon', () => { setWhen('soon'); setType(''); })}
-          {stat('Open tasks', openTasks.length, openTasks.length ? (undated ? `${undated} with no date` : 'All have a date') : 'No tasks open', '', type === 'task' && !when, () => { setType('task'); setWhen(''); })}</div>)}
+          {stat('Overdue', overdue.length, overdue.length ? breakdown(overdue) : 'Nothing overdue — nice', overdue.length ? 'text-danger' : '', when === 'overdue', () => { setWhen('overdue'); setType(''); }, AlertCircle)}
+          {stat('Due today', dueToday.length, dueToday.length ? breakdown(dueToday) : 'Nothing due today', dueToday.length ? 'text-warn' : '', when === 'today', () => { setWhen('today'); setType(''); }, Clock)}
+          {stat('Next 7 days', soon.length, soon.length ? breakdown(soon) : 'Nothing coming up', '', when === 'soon', () => { setWhen('soon'); setType(''); }, CalendarRange)}
+          {stat('Open tasks', openTasks.length, openTasks.length ? (undated ? `${undated} with no date` : 'All have a date') : 'No tasks open', '', type === 'task' && !when, () => { setType('task'); setWhen(''); }, ClipboardCheck)}</div>)}
 
       {note && <Banner ok={note.ok} onClose={() => setNote(null)} action={note.undo ? { label: 'Undo', onClick: () => { const u = note.undo!; setNote(null); u(); } } : undefined}>{note.text}</Banner>}
       <Err e={form || fu ? '' : err} />
 
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      {(items.length > 0 || filtered) && <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-1 basis-full min-w-0" role="group" aria-label="Show">
           <Chip on={!type} onClick={() => setType('')}>All<span className="ml-1.5 text-xs opacity-70 num">{pool.length}</span></Chip>
           {CAT_KEYS.filter((c) => pool.some((i) => i.cat === c) || type === c).map((c) => <Chip key={c} on={type === c} onClick={() => setType(type === c ? '' : c)}>{CATS[c].label}<span className="ml-1.5 text-xs opacity-70 num">{pool.filter((i) => i.cat === c).length}</span></Chip>)}</div>
@@ -233,12 +234,12 @@ export default function Operations() {
         {canAssign && showOwner && <select className="input w-auto" aria-label="Whose items" value={ownerF} onChange={(e) => setOwnerF(e.target.value)}><option value="">Everyone’s</option>{user && <option value={String(user.id)}>Just mine</option>}{ownerList.filter(([id]) => id !== user?.id).map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}</select>}
         {filtered && <button type="button" className="text-xs text-accent underline" onClick={clear}>Clear filters</button>}
         <select className="input w-auto sm:ml-auto" aria-label="How far ahead to look" title="How far ahead to look for departures, quotes and follow-ups" value={days} onChange={(e) => setDays(Number(e.target.value))}>{[7, 14, 30, 60, 90].map((d) => <option key={d} value={d}>Look ahead {d} days</option>)}</select>
-      </div>
+      </div>}
 
       {loading ? <Skeleton className="h-72" /> : !items.length ? (
-        <div className="card text-center py-12"><CheckCircle2 size={28} className="mx-auto text-success mb-2" /><div className="text-sm font-medium mb-1">Nothing needs your attention</div>
-          <p className="text-xs text-muted max-w-sm mx-auto mb-4">Lead follow-ups that are due, quotes about to expire, trips about to leave and the tasks you add will all show up here, in the order you should do them.</p>
-          {write && <button className="btn inline-flex items-center gap-1" onClick={() => setForm(blankTask())}><Plus size={16} />Add a task</button>}</div>
+        <div className="card text-center py-16"><span className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full bg-success/10 text-success"><CheckCircle2 size={28} /></span><div className="text-base font-semibold mb-1">You’re all caught up</div>
+          <p className="text-sm text-muted max-w-md mx-auto mb-5">Follow-ups that are due, quotes about to expire, trips about to leave and the tasks you add will appear here in the order you should do them.</p>
+          <div className="flex flex-wrap justify-center gap-2">{write && <button className="btn inline-flex items-center gap-1" onClick={() => setForm(blankTask())}><Plus size={16} />Add a task</button>}<button className="btn-ghost" onClick={() => nav('/leads')}>Go to leads</button><button className="btn-ghost" onClick={() => nav('/bookings')}>Go to bookings</button></div></div>
       ) : !shown.length ? (
         <div className="card text-center py-10"><div className="text-sm font-medium mb-1">{q ? `Nothing matches “${q}”` : 'Nothing here'}</div><p className="text-xs text-muted mb-3">{filtered ? 'Try a different filter.' : 'You’re all caught up.'}</p>{filtered && <button className="btn-ghost" onClick={clear}>Show everything</button>}</div>
       ) : <>
