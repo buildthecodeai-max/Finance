@@ -131,7 +131,7 @@ describe('support sessions', () => {
 describe('plan management', () => {
   it('creates and edits plans without a reason, validates features, and changes take effect for agencies on the plan', async () => {
     const code = `tp-${rnd()}`, body = { code, name: 'Test Plan', description: 'x', price_monthly: 10, price_yearly: 100, trial_days: 7, max_seats: 2, max_branches: 1, max_bookings_month: 5, features: ['portal'], support_level: 'email', active: true, sort: 50 };
-    expect((await P('POST', '/plans', { ...body, features: ['teleportation'] })).status).toBe(400); expect((await P('POST', '/plans', { ...body, code: 'Bad Code!' })).status).toBe(400);
+    expect((await P('POST', '/plans', { ...body, features: ['bad, name'] })).status).toBe(400); expect((await P('POST', '/plans', { ...body, code: 'Bad Code!' })).status).toBe(400);
     const id = (await P('POST', '/plans', body)).body.id; expect((await P('POST', '/plans', body)).status).toBe(409);
     const T1 = await newAgency('PlatPlan'); await P('POST', `/agencies/${T1.agencyId}/set-plan`, { plan: code, reason: 'Pilot customer plan' });
     expect((await T1.get('/billing/subscription')).body.limits.seats).toBe(2); expect((await T1.get('/automation/rules')).status).toBe(402);
@@ -218,5 +218,16 @@ describe('two-person approval for suspensions', () => {
   it('can be switched off for single-operator installations, and stays refused when no second admin could approve', async () => {
     const { config } = await import('../config.js'); const X = await newAgency('SingleOp'); (config as any).platformTwoPerson = false;
     try { const r = await P('POST', `/agencies/${X.agencyId}/suspend`, { reason: 'Single operator install' }); expect(r.status).toBe(200); expect((await sub(X)).status).toBe('suspended'); } finally { (config as any).platformTwoPerson = true; }
+  });
+  it('plans can change currency and carry custom features and sub-features', async () => {
+    const code = `tc-${rnd()}`, body = { code, name: 'Custom Plan', price_monthly: 10, price_yearly: 100, trial_days: 7, max_seats: 2, max_branches: 1, max_bookings_month: 5, features: ['portal', 'Priority onboarding', 'Reports', 'Reports > Excel export'], support_level: 'email', active: true, sort: 51 };
+    const id = (await P('POST', '/plans', body)).body.id; expect(id).toBeTruthy();
+    expect((await P('GET', '/plans')).body.find((p: any) => p.code === code)).toMatchObject({ currency: 'USD', features: ['portal', 'Priority onboarding', 'Reports', 'Reports > Excel export'] });
+    expect((await P('PUT', `/plans/${id}`, { ...body, features: ['portal', 'portal'] })).status).toBe(400);
+    expect((await P('PUT', `/plans/${id}`, { ...body, features: ['A > B > C'] })).status).toBe(400);
+    const u = await P('PUT', `/plans/${id}`, { ...body, currency: 'eur', features: ['portal', 'Reports'] }); expect(u.status).toBe(200);
+    expect((await P('GET', '/plans')).body.find((p: any) => p.code === code)).toMatchObject({ currency: 'EUR', features: ['portal', 'Reports'] });
+    expect((await P('GET', '/audit')).body.find((a: any) => a.action === 'plan_update' && /currency: USD → EUR/.test(a.detail))).toBeTruthy();
+    await sql('UPDATE plans SET active = 0 WHERE id = ?', [id]);
   });
 });

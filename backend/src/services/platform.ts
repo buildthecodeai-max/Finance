@@ -269,7 +269,13 @@ export async function revokeSupportSession(req: Request, sessionId: number, reas
 export const MODULE_CODES = ['crm', 'ticketing', 'finance', 'accounting', 'insights'] as const;
 export type ModuleCode = (typeof MODULE_CODES)[number];
 export interface PlanIn { code?: string; name: string; description?: string | null; price_monthly: number; price_yearly: number; currency?: string; trial_days: number; max_seats: number | null; max_branches: number | null; max_bookings_month: number | null; features: string[]; allowed_modules: string[] | null; support_level: string; stripe_price_monthly?: string | null; stripe_price_yearly?: string | null; active: boolean; sort: number }
-const checkFeatures = (f: string[]) => { const bad = f.filter((x) => !(FEATURES as readonly string[]).includes(x)); if (bad.length) throw new HttpError(400, `Unknown feature(s): ${bad.join(', ')}`); };
+/** Built-in codes (portal, api …) switch real functionality on. Any other text is a feature the plan advertises; "Parent > Sub" is a sub-feature. */
+const checkFeatures = (f: string[]) => {
+  const bad = f.filter((x) => !(FEATURES as readonly string[]).includes(x) && !/^[^,<>;|]{1,40}( > [^,<>;|>]{1,40})?$/.test(x) || x !== x.trim());
+  if (bad.length) throw new HttpError(400, `Feature names must be 1–40 characters without commas or < > : ${bad.join(' / ')}`);
+  if (new Set(f).size !== f.length) throw new HttpError(400, 'A feature is listed twice');
+  if (f.join(',').length > 1500) throw new HttpError(400, 'Too many features for one plan');
+};
 const checkModules = (m: string[] | null) => { if (!m) return; const bad = m.filter((x) => !(MODULE_CODES as readonly string[]).includes(x)); if (bad.length) throw new HttpError(400, `Unknown module(s): ${bad.join(', ')}`); };
 const parseModules = (v: any): string[] | null => { if (v === null || v === undefined) return null; const s = String(v); return s === '' ? null : s.split(',').filter(Boolean); };
 export async function listPlans() {
@@ -286,10 +292,10 @@ export async function createPlan(req: Request, b: PlanIn) {
 export async function updatePlan(req: Request, id: number, b: PlanIn, reasonIn: unknown) {
   const reason = needReason(reasonIn); checkFeatures(b.features); checkModules(b.allowed_modules);
   const [[cur]]: any = await pool.query('SELECT * FROM plans WHERE id = ?', [id]); if (!cur) throw new HttpError(404, 'Plan not found');
-  const planState = (r: any) => ({ name: r.name, price_monthly: Number(r.price_monthly), price_yearly: Number(r.price_yearly), trial_days: r.trial_days, max_seats: r.max_seats, max_branches: r.max_branches, max_bookings_month: r.max_bookings_month, features: String(r.features ?? ''), allowed_modules: r.allowed_modules ?? null, active: !!r.active });
-  await pool.query(`UPDATE plans SET name = ?, description = ?, price_monthly = ?, price_yearly = ?, trial_days = ?, max_seats = ?, max_branches = ?, max_bookings_month = ?, features = ?, allowed_modules = ?, support_level = ?, stripe_price_monthly = ?, stripe_price_yearly = ?, active = ?, sort = ? WHERE id = ?`,
-    [b.name, b.description ?? null, b.price_monthly, b.price_yearly, b.trial_days, b.max_seats, b.max_branches, b.max_bookings_month, b.features.join(','), b.allowed_modules ? b.allowed_modules.join(',') : null, b.support_level, b.stripe_price_monthly ?? null, b.stripe_price_yearly ?? null, b.active ? 1 : 0, b.sort, id]);
-  const diff = Object.entries({ price_monthly: b.price_monthly, price_yearly: b.price_yearly, max_seats: b.max_seats, max_branches: b.max_branches, max_bookings_month: b.max_bookings_month, features: b.features.join(','), allowed_modules: (b.allowed_modules ?? []).join(','), active: b.active ? 1 : 0 }).filter(([k, v]) => String((cur as any)[k] ?? '') !== String(v)).map(([k, v]) => `${k}: ${(cur as any)[k]} → ${v}`).join('; ');
+  const planState = (r: any) => ({ name: r.name, price_monthly: Number(r.price_monthly), price_yearly: Number(r.price_yearly), currency: r.currency, trial_days: r.trial_days, max_seats: r.max_seats, max_branches: r.max_branches, max_bookings_month: r.max_bookings_month, features: String(r.features ?? ''), allowed_modules: r.allowed_modules ?? null, active: !!r.active });
+  await pool.query(`UPDATE plans SET name = ?, description = ?, price_monthly = ?, price_yearly = ?, currency = ?, trial_days = ?, max_seats = ?, max_branches = ?, max_bookings_month = ?, features = ?, allowed_modules = ?, support_level = ?, stripe_price_monthly = ?, stripe_price_yearly = ?, active = ?, sort = ? WHERE id = ?`,
+    [b.name, b.description ?? null, b.price_monthly, b.price_yearly, (b.currency ?? cur.currency).toUpperCase(), b.trial_days, b.max_seats, b.max_branches, b.max_bookings_month, b.features.join(','), b.allowed_modules ? b.allowed_modules.join(',') : null, b.support_level, b.stripe_price_monthly ?? null, b.stripe_price_yearly ?? null, b.active ? 1 : 0, b.sort, id]);
+  const diff = Object.entries({ currency: (b.currency ?? cur.currency).toUpperCase(), price_monthly: b.price_monthly, price_yearly: b.price_yearly, max_seats: b.max_seats, max_branches: b.max_branches, max_bookings_month: b.max_bookings_month, features: b.features.join(','), allowed_modules: (b.allowed_modules ?? []).join(','), active: b.active ? 1 : 0 }).filter(([k, v]) => String((cur as any)[k] ?? '') !== String(v)).map(([k, v]) => `${k}: ${(cur as any)[k]} → ${v}`).join('; ');
   const [[next]]: any = await pool.query('SELECT * FROM plans WHERE id = ?', [id]);
   await audit(req, 'plan_update', null, `${cur.code}: ${diff || 'no material change'}`, reason, { before: planState(cur), after: planState(next) });
   const [[n]]: any = await pool.query('SELECT COUNT(*) n FROM subscriptions WHERE plan_id = ?', [id]); return { agencies_affected: n.n };

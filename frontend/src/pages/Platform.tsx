@@ -548,35 +548,98 @@ function ActionModal({ act, onClose, onDone }: { act: Act; onClose(): void; onDo
     <div className="flex justify-end"><button className={['suspend', 'delete-agency'].includes(act.kind) ? 'btn bg-danger text-white' : 'btn'} disabled={!isEditValid} onClick={submit}>Confirm</button></div></Modal>;
 }
 
+/** Plan features as a tree: built-in switches (they turn real functionality on) plus any feature you type, each with optional sub-features. Stored flat: "Feature" and "Feature > Sub". */
+function FeatureEditor({ value, onChange }: { value: string[]; onChange(v: string[]): void }) {
+  const [name, setName] = useState(''); const [sub, setSub] = useState<Record<string, string>>({}); const [msg, setMsg] = useState('');
+  const SEP = ' > ', parents = value.filter((f) => !f.includes(SEP)), subsOf = (f: string) => value.filter((x) => x.startsWith(f + SEP)).map((x) => x.slice(f.length + SEP.length));
+  const clean = (t: string) => t.trim().replace(/\s+/g, ' ');
+  const valid = (t: string) => t.length > 0 && t.length <= 40 && !/[,<>;|]/.test(t);
+  const addParent = () => { const t = clean(name); if (!valid(t)) return setMsg('Use 1–40 characters, without commas or < >.'); if (value.includes(t)) return setMsg('That feature is already listed.'); setMsg(''); onChange([...value, t]); setName(''); };
+  const addSub = (f: string) => { const t = clean(sub[f] ?? ''), full = f + SEP + t; if (!valid(t)) return setMsg('Use 1–40 characters, without commas or < >.'); if (value.includes(full)) return setMsg('That sub-feature is already listed.'); setMsg(''); onChange([...value, full]); setSub({ ...sub, [f]: '' }); };
+  const toggleBuiltin = (f: string, on: boolean) => onChange(on ? [...value, f] : value.filter((x) => x !== f && !x.startsWith(f + SEP)));
+  const custom = parents.filter((f) => !(FEATURES as readonly string[]).includes(f));
+  const row = (f: string, builtin: boolean) => (
+    <div key={f} className="rounded-lg border border-line p-2.5">
+      <div className="flex items-center justify-between gap-2"><span className="text-sm font-medium">{f.replace(/_/g, ' ')}{builtin && <span className="ml-2 text-[11px] font-normal text-muted">switches this on for agencies</span>}</span>
+        <button type="button" className="text-xs text-danger hover:underline" onClick={() => toggleBuiltin(f, false)} aria-label={`Remove ${f}`}>Remove</button></div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {subsOf(f).map((x) => <span key={x} className="chip !m-0 inline-flex items-center gap-1">{x}<button type="button" className="text-muted hover:text-danger" aria-label={`Remove ${x}`} onClick={() => onChange(value.filter((y) => y !== f + SEP + x))}>×</button></span>)}
+        <input className="input !h-7 !w-44 text-xs" placeholder="Add sub-feature…" value={sub[f] ?? ''} onChange={(e) => setSub({ ...sub, [f]: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSub(f); } }} />
+        <button type="button" className="btn-ghost !h-7 !px-2 text-xs" disabled={!clean(sub[f] ?? '')} onClick={() => addSub(f)}>Add</button></div>
+    </div>);
+  return (<div>
+    <div className="mb-2 flex flex-wrap gap-x-4 gap-y-2">{FEATURES.map((f) => <label key={f} className="flex gap-1.5 items-center text-sm"><input type="checkbox" checked={value.includes(f)} onChange={(e) => toggleBuiltin(f, e.target.checked)} />{f.replace(/_/g, ' ')}</label>)}</div>
+    <div className="grid gap-2 sm:grid-cols-2">{[...parents.filter((f) => (FEATURES as readonly string[]).includes(f)).map((f) => row(f, true)), ...custom.map((f) => row(f, false))]}</div>
+    <div className="mt-3 flex flex-wrap items-center gap-2"><input className="input !w-64" placeholder="Add a feature, e.g. Priority onboarding" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addParent(); } }} /><button type="button" className="btn-ghost" disabled={!clean(name)} onClick={addParent}>Add feature</button>{msg && <span className="text-xs text-warn">{msg}</span>}</div>
+  </div>);
+}
+
 function Plans() {
   const { me, guarded } = useOp(); const canEdit = me.caps.includes('billing');
-  const [plans, setPlans] = useState<any[]>([]); const [edit, setEdit] = useState<any>(null); const [err, setErr] = useState('');
+  const [plans, setPlans] = useState<any[]>([]); const [edit, setEdit] = useState<any>(null); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
   const load = () => api('/platform/plans').then(setPlans); useEffect(() => { load(); }, []);
+  const n = (v: any) => (v === '' || v === null || v === undefined ? null : Number(v));
+  const problem = (e: any) => !/^[A-Za-z]{3}$/.test(e.currency ?? '') ? 'Currency must be a 3-letter code.' : !e.name?.trim() ? 'Give the plan a name.' : e.isNew && !/^[a-z0-9_-]{2,30}$/.test(e.code) ? 'Code: 2–30 lowercase letters, numbers, - or _ (it cannot be changed later).'
+    : [e.price_monthly, e.price_yearly, e.trial_days].some((v) => v === '' || Number(v) < 0 || Number.isNaN(Number(v))) ? 'Prices and trial days must be zero or more.'
+    : [e.max_seats, e.max_branches, e.max_bookings_month].some((v) => v !== '' && v !== null && (Number(v) < 1 || Number.isNaN(Number(v)))) ? 'Limits must be 1 or more, or unlimited.' : '';
   const save = async () => {
-    const n = (v: any) => (v === '' || v === null || v === undefined ? null : Number(v)); const { agencies, id, code, ...rest } = edit;
+    const { agencies, id, code, isNew, ...rest } = edit;
     const allowedMods = Array.isArray(rest.allowed_modules) && rest.allowed_modules.length > 0 ? rest.allowed_modules : null;
-    const body = { ...rest, price_monthly: Number(rest.price_monthly), price_yearly: Number(rest.price_yearly), trial_days: Number(rest.trial_days), sort: Number(rest.sort), max_seats: n(rest.max_seats), max_branches: n(rest.max_branches), max_bookings_month: n(rest.max_bookings_month), active: !!rest.active, features: rest.features, allowed_modules: allowedMods };
-    try { if (edit.isNew) await guarded(() => api('/platform/plans', 'POST', { ...body, code: edit.code })); else await guarded(() => api(`/platform/plans/${id}`, 'PUT', { ...body, reason: edit.reason })); setEdit(null); setErr(''); load(); } catch (e: any) { setErr(e.message); }
+    const body = { ...rest, currency: String(rest.currency).toUpperCase(), price_monthly: Number(rest.price_monthly), price_yearly: Number(rest.price_yearly), trial_days: Number(rest.trial_days), sort: Number(rest.sort), max_seats: n(rest.max_seats), max_branches: n(rest.max_branches), max_bookings_month: n(rest.max_bookings_month), active: !!rest.active, features: rest.features, allowed_modules: allowedMods };
+    setBusy(true);
+    try { if (isNew) await guarded(() => api('/platform/plans', 'POST', { ...body, code })); else await guarded(() => api(`/platform/plans/${id}`, 'PUT', body)); setEdit(null); setErr(''); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
-  const blank = { isNew: true, code: '', name: '', description: '', price_monthly: 0, price_yearly: 0, trial_days: 14, max_seats: '', max_branches: '', max_bookings_month: '', features: ['portal'], allowed_modules: [] as string[], support_level: 'email', stripe_price_monthly: '', stripe_price_yearly: '', active: true, sort: 10, reason: '' };
+  const blank = { isNew: true, code: '', name: '', description: '', currency: 'USD', price_monthly: 0, price_yearly: 0, trial_days: 14, max_seats: '', max_branches: '', max_bookings_month: '', features: ['portal'], allowed_modules: [] as string[], support_level: 'email', stripe_price_monthly: '', stripe_price_yearly: '', active: true, sort: 10, reason: '' };
+  const open = (p: any) => { setErr(''); setEdit({ ...p, reason: '' }); };
+  const up = (k: string) => (e: any) => setEdit({ ...edit, [k]: e.target.value });
+  const lim = (k: string, label: string, unit: string) => (
+    <Field label={label}><div className="flex items-center gap-2"><input className="input num" type="number" min={1} disabled={edit[k] === '' || edit[k] === null} value={edit[k] ?? ''} placeholder="Unlimited" onChange={up(k)} />
+      <label className="flex items-center gap-1.5 text-xs text-muted whitespace-nowrap"><input type="checkbox" checked={edit[k] === '' || edit[k] === null} onChange={(e) => setEdit({ ...edit, [k]: e.target.checked ? '' : 10 })} />Unlimited</label></div><span className="block text-[11px] text-muted mt-1">{unit}</span></Field>);
+  const save_pct = edit && Number(edit.price_monthly) > 0 && Number(edit.price_yearly) > 0 ? Math.round((1 - Number(edit.price_yearly) / (Number(edit.price_monthly) * 12)) * 100) : null;
+  const bad = edit ? problem(edit) : '';
   return <>
-    <div className="flex justify-between items-center mb-3"><p className="text-sm text-muted">Plan changes apply to every agency on the plan immediately. Leave a limit empty for unlimited.</p>{canEdit && <button className="btn" onClick={() => setEdit(blank)}>New plan</button>}</div>
-    <Table rows={plans} onRow={canEdit ? (p) => setEdit({ ...p, reason: '' }) : undefined} cols={[{ h: 'Plan', render: (p: any) => <><div className="font-medium">{p.name} <span className="text-xs text-muted num">{p.code}</span></div><div className="text-xs text-muted">{p.features.join(', ')}</div></> },
-      { h: 'Price', render: (p: any) => `${money(p.price_monthly, p.currency)} / ${money(p.price_yearly, p.currency)}` }, { h: 'Limits', render: (p: any) => `${p.max_seats ?? '∞'} seats · ${p.max_branches ?? '∞'} branches · ${p.max_bookings_month ?? '∞'} bookings` },
-      { h: 'Stripe', render: (p: any) => (p.stripe_price_monthly ? '✓' : <span className="text-warn text-xs">not set</span>) }, { h: 'Agencies', right: true, render: (p: any) => p.agencies }, { h: 'Active', render: (p: any) => (p.active ? '✓' : '—') }]} />
+    <div className="flex flex-wrap justify-between items-center gap-2 mb-4"><p className="text-sm text-muted max-w-2xl">Click a plan to edit it. Changes apply to every agency on the plan immediately; the reason you give is kept in the audit log.</p>{canEdit && <button className="btn" onClick={() => { setErr(''); setEdit(blank); }}>New plan</button>}</div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {plans.map((p: any) => (
+        <div key={p.id} className={`card flex flex-col gap-3 ${p.active ? '' : 'opacity-70'}`}>
+          <div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="font-semibold text-lg">{p.name} <span className="text-xs font-normal text-muted num">{p.code}</span></div><div className="text-xs text-muted">{p.description || '—'}</div></div>
+            <span className={`pill ${p.active ? 'bg-success/15 text-success' : 'bg-muted/15 text-muted'}`}>{p.active ? 'Available' : 'Hidden'}</span></div>
+          <div><span className="text-2xl font-semibold num">{money(p.price_monthly, p.currency)}</span><span className="text-sm text-muted"> / month</span><div className="text-xs text-muted num">{money(p.price_yearly, p.currency)} / year · {p.trial_days}-day trial</div></div>
+          <div className="text-sm grid grid-cols-3 gap-2 text-center">{[[p.max_seats, 'seats'], [p.max_branches, 'branches'], [p.max_bookings_month, 'bookings/mo']].map(([v, l]: any) => <div key={l} className="rounded-lg bg-surface2 py-1.5"><div className="font-semibold num">{v ?? '∞'}</div><div className="text-[11px] text-muted">{l}</div></div>)}</div>
+          <div className="flex flex-wrap gap-1">{p.features.filter((f: string) => !f.includes(' > ')).map((f: string) => { const n = p.features.filter((x: string) => x.startsWith(f + ' > ')).length; return <span key={f} className="chip" title={n ? p.features.filter((x: string) => x.startsWith(f + ' > ')).map((x: string) => x.slice(f.length + 3)).join(', ') : undefined}>{f.replace(/_/g, ' ')}{n ? ` +${n}` : ''}</span>; })}</div>
+          <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted"><span>{p.agencies} agenc{p.agencies === 1 ? 'y' : 'ies'} · Stripe {p.stripe_price_monthly ? '✓' : <span className="text-warn">not set</span>}</span>{canEdit && <button className="btn-ghost" onClick={() => open(p)}>Edit</button>}</div>
+        </div>))}
+    </div>
     {edit && <Modal title={edit.isNew ? 'New plan' : `Edit ${edit.name}`} wide onClose={() => setEdit(null)}><Err e={err} />
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4">
-        {edit.isNew && <Field label="Code"><input className="input num" value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>}
-        <Field label="Name"><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field><Field label="Monthly price"><input className="input num" type="number" value={edit.price_monthly} onChange={(e) => setEdit({ ...edit, price_monthly: e.target.value })} /></Field>
-        <Field label="Yearly price"><input className="input num" type="number" value={edit.price_yearly} onChange={(e) => setEdit({ ...edit, price_yearly: e.target.value })} /></Field><Field label="Trial days"><input className="input num" type="number" value={edit.trial_days} onChange={(e) => setEdit({ ...edit, trial_days: e.target.value })} /></Field>
-        <Field label="Max seats"><input className="input num" type="number" value={edit.max_seats ?? ''} onChange={(e) => setEdit({ ...edit, max_seats: e.target.value })} /></Field><Field label="Max branches"><input className="input num" type="number" value={edit.max_branches ?? ''} onChange={(e) => setEdit({ ...edit, max_branches: e.target.value })} /></Field>
-        <Field label="Bookings / month"><input className="input num" type="number" value={edit.max_bookings_month ?? ''} onChange={(e) => setEdit({ ...edit, max_bookings_month: e.target.value })} /></Field><Field label="Support level"><input className="input" value={edit.support_level} onChange={(e) => setEdit({ ...edit, support_level: e.target.value })} /></Field>
-        <Field label="Stripe price (monthly)"><input className="input num text-xs" value={edit.stripe_price_monthly ?? ''} onChange={(e) => setEdit({ ...edit, stripe_price_monthly: e.target.value })} /></Field><Field label="Stripe price (yearly)"><input className="input num text-xs" value={edit.stripe_price_yearly ?? ''} onChange={(e) => setEdit({ ...edit, stripe_price_yearly: e.target.value })} /></Field>
-        <Field label="Sort"><input className="input num" type="number" value={edit.sort} onChange={(e) => setEdit({ ...edit, sort: e.target.value })} /></Field><Field label="Available to new customers"><label className="flex gap-2 items-center text-sm h-10"><input type="checkbox" checked={!!edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label></Field></div>
-      <Field label="Features"><div className="flex flex-wrap gap-3">{FEATURES.map((f) => <label key={f} className="flex gap-1.5 items-center text-sm"><input type="checkbox" checked={edit.features.includes(f)} onChange={(e) => setEdit({ ...edit, features: e.target.checked ? [...edit.features, f] : edit.features.filter((x: string) => x !== f) })} />{f.replace(/_/g, ' ')}</label>)}</div></Field>
-      <Field label="Allowed modules"><p className="text-xs text-muted mb-2">Leave all unchecked to allow every module (full access). Check specific modules to restrict this plan.</p><div className="flex flex-col gap-2">{MODULE_CODES.map((m) => { const checked = Array.isArray(edit.allowed_modules) && edit.allowed_modules.includes(m.code); return (<label key={m.code} className="flex gap-2 items-center text-sm"><input type="checkbox" checked={checked} onChange={(e) => { const cur: string[] = Array.isArray(edit.allowed_modules) ? edit.allowed_modules : []; setEdit({ ...edit, allowed_modules: e.target.checked ? [...cur, m.code] : cur.filter((x: string) => x !== m.code) }); }} />{m.label}</label>); })}</div></Field>
-      {!edit.isNew && <div className="text-sm text-warn mb-2">{edit.agencies} agenc{edit.agencies === 1 ? 'y is' : 'ies are'} on this plan; changes apply to them immediately.</div>}
-      <div className="flex justify-end"><button className="btn" disabled={!edit.name} onClick={save}>{edit.isNew ? 'Create plan' : 'Save changes'}</button></div></Modal>}
+      <h4 className="text-sm font-semibold mb-2">Basics</h4>
+      <div className="grid sm:grid-cols-2 gap-x-4">
+        <Field label="Name"><input className="input" value={edit.name} onChange={up('name')} /></Field>
+        {edit.isNew ? <Field label="Code" hint="Lowercase, permanent. e.g. pro"><input className="input num" value={edit.code} onChange={up('code')} /></Field> : <Field label="Code"><input className="input num" value={edit.code} disabled /></Field>}
+        <div className="sm:col-span-2"><Field label="Description" hint="Shown to agencies choosing a plan."><input className="input" maxLength={200} value={edit.description ?? ''} onChange={up('description')} /></Field></div>
+        <Field label="Available to new customers"><label className="flex gap-2 items-center text-sm h-9"><input type="checkbox" checked={!!edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Shown on the Billing page</label></Field>
+        <Field label="Order" hint="Lower numbers appear first."><input className="input num" type="number" value={edit.sort} onChange={up('sort')} /></Field>
+      </div>
+      <h4 className="text-sm font-semibold mt-3 mb-2">Pricing</h4>
+      <div className="grid sm:grid-cols-4 gap-x-4">
+        <Field label="Currency" hint="3-letter code, e.g. USD, EUR, PKR"><input className="input num uppercase" maxLength={3} value={edit.currency ?? 'USD'} onChange={(e) => setEdit({ ...edit, currency: e.target.value.toUpperCase() })} /></Field>
+        <Field label="Monthly price"><input className="input num" type="number" min={0} value={edit.price_monthly} onChange={up('price_monthly')} /></Field>
+        <Field label="Yearly price" hint={save_pct === null ? undefined : save_pct > 0 ? `Customers save ${save_pct}% by paying yearly` : save_pct === 0 ? 'Same as paying monthly' : 'Dearer than paying monthly — check this'}><input className="input num" type="number" min={0} value={edit.price_yearly} onChange={up('price_yearly')} /></Field>
+        <Field label="Free trial (days)"><input className="input num" type="number" min={0} value={edit.trial_days} onChange={up('trial_days')} /></Field>
+      </div>
+      <h4 className="text-sm font-semibold mt-3 mb-2">Limits</h4>
+      <div className="grid sm:grid-cols-3 gap-x-4">{lim('max_seats', 'Team seats', 'Users who can sign in')}{lim('max_branches', 'Branches', 'Offices')}{lim('max_bookings_month', 'Bookings per month', 'New bookings')}</div>
+      <h4 className="text-sm font-semibold mt-3 mb-2">What’s included</h4>
+      <Field label="Features" hint="Tick the built-in ones, or add your own. Sub-features sit under a feature and show on the plan card."><FeatureEditor value={edit.features} onChange={(v) => setEdit({ ...edit, features: v })} /></Field>
+      <Field label="Allowed modules" hint="Leave all unchecked for full access. Tick specific modules to restrict this plan."><div className="grid sm:grid-cols-2 gap-2">{MODULE_CODES.map((m) => { const checked = Array.isArray(edit.allowed_modules) && edit.allowed_modules.includes(m.code); return (<label key={m.code} className="flex gap-2 items-center text-sm"><input type="checkbox" checked={checked} onChange={(e) => { const cur: string[] = Array.isArray(edit.allowed_modules) ? edit.allowed_modules : []; setEdit({ ...edit, allowed_modules: e.target.checked ? [...cur, m.code] : cur.filter((x: string) => x !== m.code) }); }} />{m.label}</label>); })}</div></Field>
+      <h4 className="text-sm font-semibold mt-3 mb-2">Support & payments</h4>
+      <div className="grid sm:grid-cols-3 gap-x-4">
+        <Field label="Support level"><input className="input" value={edit.support_level} onChange={up('support_level')} /></Field>
+        <Field label="Stripe price ID (monthly)"><input className="input num text-xs" value={edit.stripe_price_monthly ?? ''} onChange={up('stripe_price_monthly')} placeholder="price_…" /></Field>
+        <Field label="Stripe price ID (yearly)"><input className="input num text-xs" value={edit.stripe_price_yearly ?? ''} onChange={up('stripe_price_yearly')} placeholder="price_…" /></Field>
+      </div>
+      {!edit.isNew && <>{edit.agencies > 0 && <div className="text-sm text-warn mb-3">{edit.agencies} agenc{edit.agencies === 1 ? 'y is' : 'ies are'} on this plan; changes apply to them immediately.</div>}
+        <Field label="Reason for the change" hint="Kept in the audit log."><input className="input" value={edit.reason ?? ''} onChange={up('reason')} /></Field></>}
+      <div className="flex items-center justify-end gap-3 mt-2">{bad && <span className="text-xs text-warn mr-auto">{bad}</span>}<button className="btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn" disabled={!!bad || busy} onClick={save}>{busy ? 'Saving…' : edit.isNew ? 'Create plan' : 'Save changes'}</button></div></Modal>}
   </>;
 }
 

@@ -48,7 +48,7 @@ export default function Billing() {
         </div>
         <div className="card lg:col-span-2"><div className="font-medium mb-3">Usage</div><div className="grid gap-4 sm:grid-cols-3">
           <Meter label="Team members" used={d.usage.seats} limit={d.limits.seats} /><Meter label="Branches" used={d.usage.branches} limit={d.limits.branches} /><Meter label="Bookings this month" used={d.usage.bookings} limit={d.limits.bookings} /></div>
-          <div className="mt-4 flex flex-wrap gap-1.5">{Object.keys(FEATURE_LABEL).map((f) => <span key={f} className={`text-xs px-2 py-0.5 rounded-full border ${d.features.includes(f) ? 'border-accent/40 bg-accent/10 text-accent' : 'border-line text-muted line-through'}`}>{FEATURE_LABEL[f]}</span>)}</div></div>
+          <div className="mt-4 flex flex-wrap gap-1.5">{[...Object.keys(FEATURE_LABEL), ...d.features.filter((f: string) => !(f in FEATURE_LABEL) && !f.includes(' > '))].map((f) => <span key={f} className={`text-xs px-2 py-0.5 rounded-full border ${d.features.includes(f) ? 'border-accent/40 bg-accent/10 text-accent' : 'border-line text-muted line-through'}`}>{FEATURE_LABEL[f] ?? f}</span>)}</div></div>
       </div>
 
       <div className="flex items-center justify-between mb-3"><h2 className="font-semibold">Plans</h2>
@@ -60,7 +60,7 @@ export default function Billing() {
           <ul className="text-sm mt-4 space-y-1.5 flex-1">
             <li className="flex gap-2"><Check size={15} className="text-accent mt-0.5 shrink-0" />{p.max_seats ?? 'Unlimited'} team members</li><li className="flex gap-2"><Check size={15} className="text-accent mt-0.5 shrink-0" />{p.max_branches ?? 'Unlimited'} branches</li>
             <li className="flex gap-2"><Check size={15} className="text-accent mt-0.5 shrink-0" />{p.max_bookings_month ? `${p.max_bookings_month} bookings / month` : 'Unlimited bookings'}</li>
-            {p.features.map((f: string) => <li key={f} className="flex gap-2"><Check size={15} className="text-accent mt-0.5 shrink-0" />{FEATURE_LABEL[f]}</li>)}<li className="flex gap-2"><Check size={15} className="text-accent mt-0.5 shrink-0" /><span className="capitalize">{p.support_level}</span> support</li></ul>
+            {p.features.filter((f: string) => !f.includes(' > ')).map((f: string) => <li key={f}><div className="flex gap-2"><Check size={15} className="text-accent mt-0.5 shrink-0" />{FEATURE_LABEL[f] ?? f}</div>{p.features.filter((x: string) => x.startsWith(f + ' > ')).map((x: string) => <div key={x} className="ml-6 text-xs text-muted">• {x.slice(f.length + 3)}</div>)}</li>)}<li className="flex gap-2"><Check size={15} className="text-accent mt-0.5 shrink-0" /><span className="capitalize">{p.support_level}</span> support</li></ul>
           {admin && <button className={`${current && interval === s.interval ? 'btn-ghost' : 'btn'} mt-5`} disabled={!!busy || (current && interval === s.interval && s.status === 'active')}
             onClick={() => subscribed || s.status === 'trialing' && !d.online_billing ? go('chg', async () => { const r = await api('/billing/change-plan', 'POST', { plan: p.code, interval }); setMsg(r.applied === 'now' ? `You're now on ${p.name}.` : `${p.name} starts on ${day(r.at)}.`); }) : go('sub', () => redirect('/billing/subscribe', { plan: p.code, interval }))}>
             {current && interval === s.interval && s.status === 'active' ? 'Your plan' : subscribed ? cta : s.status === 'trialing' && !d.online_billing ? `Switch to ${p.name}` : `Choose ${p.name}`}</button>}
