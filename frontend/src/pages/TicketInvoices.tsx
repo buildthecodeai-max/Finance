@@ -1,9 +1,9 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Check, ChevronDown, Copy, Mail, MoreHorizontal, Plus, Printer, RefreshCw, Save, Trash2, Undo2 } from 'lucide-react';
-import { api, money } from '../api';
+import { api, money, n2 } from '../api';
 import { useAuth } from '../auth';
-import { Banner, Err, Field, MenuBtn, Modal, Num, Page, Pill, Popover, Skeleton, Table } from '../components/ui';
+import { AmountRow, AmountTotal, Banner, Err, Field, Locked, MenuBtn, Modal, More, Num, Page, Pill, Popover, Skeleton, Table } from '../components/ui';
 import { viewPdf } from '../components/PdfViewer';
 import { today, useAccounts, useList, useOpenOnNew } from '../lookup';
 
@@ -52,27 +52,12 @@ function unstick(l: any, airlines: any[]) {
 /** An invoice as the server returns it, keeping the screen's own line keys so open cards stay open after a save. */
 const adopt = (inv: any, prev: any[] | undefined, airlines: any[]) => ({ ...inv, lines: inv.lines.map((l: any, i: number) => unstick(tidy({ ...l, _k: prev?.[i]?._k }), airlines)) });
 
-const n2 = (v: any) => (v === '' || v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const day = (d?: string) => (d ? new Date(`${String(d).slice(0, 10)}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '');
 const trip = (l: any) => [l.route, l.dep_date && `${day(l.dep_date)}${l.return_date ? ` → ${day(l.return_date)}` : ''}`].filter(Boolean).join(' · ');
 const filled = (l: any, keys: string[]) => keys.filter((k) => l[k] != null && l[k] !== '' && l[k] !== 0).length;
 
 /* ---------- small building blocks ---------- */
-/** Switches off every box inside it (a fieldset does that natively), without the app's default bordered-box look for fieldsets. */
-const Locked = ({ on, className = '', children }: { on: boolean; className?: string; children: ReactNode }) => <fieldset disabled={on} className={`${className} !m-0 !rounded-none !border-0 !p-0`}>{children}</fieldset>;
-/** A collapsible group of optional fields. Shows how many are filled in, so nothing hides unnoticed. */
-function More({ title, hint, count = 0, open, setOpen, children }: { title: string; hint?: string; count?: number; open: boolean; setOpen(v: boolean): void; children: ReactNode }) {
-  return (
-    <div>
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 py-1 text-left text-sm font-medium text-accent hover:underline">
-        <ChevronDown size={15} className={`shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} /><span className="shrink-0 whitespace-nowrap">{title}</span>
-        {!open && count > 0 && <span className="shrink-0 whitespace-nowrap rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium">{count} filled in</span>}
-        {!open && hint && <span className="hidden min-w-0 truncate text-xs font-normal text-muted sm:inline">{hint}</span>}
-      </button>
-      {open && <div className="mt-2">{children}</div>}
-    </div>
-  );
-}
+/* ---------- small building blocks ---------- */
 const Group = ({ title, note, children }: { title: string; note?: string; children: ReactNode }) => (
   <div className="rounded-xl border border-line p-3">
     <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{title}</div>
@@ -80,16 +65,6 @@ const Group = ({ title, note, children }: { title: string; note?: string; childr
     {children}
   </div>
 );
-const PriceRow = ({ label, hint, children }: { label: ReactNode; hint?: string; children: ReactNode }) => (
-  <div className="mb-2 grid grid-cols-[minmax(0,1fr)_minmax(0,8.5rem)] items-center gap-3">
-    <div className="min-w-0 text-sm">{label}{hint && <div className="text-[11px] leading-tight text-muted">{hint}</div>}</div>
-    <div>{children}</div>
-  </div>
-);
-const PriceTotal = ({ label, value }: { label: string; value: any }) => (
-  <div className="mt-1 flex items-baseline justify-between border-t border-line pt-2"><span className="text-sm font-medium">{label}</span><span className="num text-base font-semibold">{n2(value)}</span></div>
-);
-
 /* ---------- one passenger ticket ---------- */
 function TicketCard({ l, i, count, open, toggle, set, calc, airlines, vendors, agents, base, readOnly, flagged, onCopy, onRemove, onRefund }: any) {
   const [pricing, setPricing] = useState(false), [details, setDetails] = useState(false);
@@ -162,21 +137,21 @@ function TicketCard({ l, i, count, open, toggle, set, calc, airlines, vendors, a
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-xl border border-line p-3">
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">You pay the airline</div>
-                  <PriceRow label="Fare">{num('fare', '0.00', 'Airline fare')}</PriceRow>
-                  <PriceRow label={<>Taxes {!pricing && <button type="button" className="ml-1 text-xs text-accent hover:underline" onClick={() => setPricing(true)}>{itemised ? 'See tax codes' : 'Itemise'}</button>}</>} hint={itemised ? 'Added up from the tax codes' : undefined}>
-                    {itemised ? <div className="num pr-3 text-right text-sm font-medium">{n2(c.total_taxes)}</div> : num('other_tax', '0.00', 'Airline taxes')}</PriceRow>
-                  <PriceRow label="Commission you earn" hint="% of the fare">
+                  <AmountRow label="Fare">{num('fare', '0.00', 'Airline fare')}</AmountRow>
+                  <AmountRow label={<>Taxes {!pricing && <button type="button" className="ml-1 text-xs text-accent hover:underline" onClick={() => setPricing(true)}>{itemised ? 'See tax codes' : 'Itemise'}</button>}</>} hint={itemised ? 'Added up from the tax codes' : undefined}>
+                    {itemised ? <div className="num pr-3 text-right text-sm font-medium">{n2(c.total_taxes)}</div> : num('other_tax', '0.00', 'Airline taxes')}</AmountRow>
+                  <AmountRow label="Commission you earn" hint="% of the fare">
                     <div className="flex items-center gap-1.5"><Num v={l.com_rec_pct} set={(v) => set({ ...l, com_rec_pct: v })} placeholder="0" aria-label="Commission percent" /><span className="text-sm text-muted">%</span></div>
                     <div className="num mt-0.5 text-right text-[11px] text-muted">− {n2(c.com_rec)}</div>
-                  </PriceRow>
-                  <PriceTotal label="You pay" value={pay} />
+                  </AmountRow>
+                  <AmountTotal label="You pay" value={pay} />
                 </div>
                 <div className="rounded-xl border border-line p-3">
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Client pays</div>
-                  <PriceRow label="Fare" hint="Empty = same as the airline fare">{num('fare_inc', n2(c.fare_inc), 'Fare charged to the client')}</PriceRow>
-                  <PriceRow label="Taxes" hint="Empty = same as the airline taxes">{num('taxes_inc', n2(c.taxes_inc), 'Taxes charged to the client')}</PriceRow>
-                  <PriceRow label="Service fee" hint="Your fee for this ticket (PSF)">{num('psf', '0.00', 'Service fee')}</PriceRow>
-                  <PriceTotal label="Client pays" value={recv} />
+                  <AmountRow label="Fare" hint="Empty = same as the airline fare">{num('fare_inc', n2(c.fare_inc), 'Fare charged to the client')}</AmountRow>
+                  <AmountRow label="Taxes" hint="Empty = same as the airline taxes">{num('taxes_inc', n2(c.taxes_inc), 'Taxes charged to the client')}</AmountRow>
+                  <AmountRow label="Service fee" hint="Your fee for this ticket (PSF)">{num('psf', '0.00', 'Service fee')}</AmountRow>
+                  <AmountTotal label="Client pays" value={recv} />
                 </div>
               </div>
               <div className={`mt-3 flex items-baseline justify-between rounded-lg px-3 py-2 ${typeof profit !== 'number' ? 'bg-surface2 text-muted' : profit < 0 ? 'bg-danger/15 text-danger' : 'bg-success/15 text-success'}`}>

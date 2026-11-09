@@ -45,3 +45,5 @@ export async function api<T = any>(path: string, method = 'GET', body?: unknown,
 }
 
 export const money = (n: number, cur = 'USD') => new Intl.NumberFormat('en', { style: 'currency', currency: cur }).format(n ?? 0);
+/** A plain amount with thousands separators and two decimals; "—" when there is nothing to show. */
+export const n2 = (v: any) => (v === '' || v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));

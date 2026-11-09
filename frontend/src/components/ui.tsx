@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useId, useRef, useState } from 'react';
-import { AlertCircle, Inbox, Plus, Save, Trash2, X } from 'lucide-react';
+import { AlertCircle, ChevronDown, Inbox, Plus, Save, Trash2, X } from 'lucide-react';
+import { n2 } from '../api';
 
 /* ---------- Status pill: one tone per meaning, real status text ---------- */
 type Tone = 'success' | 'warn' | 'danger' | 'info' | 'neutral';
@@ -77,6 +78,36 @@ export const Banner = ({ ok = true, children, onClose, action }: { ok?: boolean;
 
 export const Num = ({ v, set, ...p }: { v: any; set(n: any): void } & React.InputHTMLAttributes<HTMLInputElement>) => (
   <input {...p} type="number" step="any" className="input num text-right" value={v ?? ''} onChange={(e) => set(e.target.value === '' ? '' : Number(e.target.value))} />
+);
+
+/** Switches off every box inside it (a fieldset does that natively), without the app's default bordered-box look for fieldsets. */
+export const Locked = ({ on, className = '', children }: { on: boolean; className?: string; children: ReactNode }) => (
+  <fieldset disabled={on} className={`${className} !m-0 !rounded-none !border-0 !p-0`}>{children}</fieldset>
+);
+
+/** A collapsible group of optional fields. Shows how many are filled in, so nothing hides unnoticed. */
+export function More({ title, hint, count = 0, open, setOpen, children }: { title: string; hint?: string; count?: number; open: boolean; setOpen(v: boolean): void; children: ReactNode }) {
+  return (
+    <div>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 py-1 text-left text-sm font-medium text-accent hover:underline">
+        <ChevronDown size={15} className={`shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} /><span className="shrink-0 whitespace-nowrap">{title}</span>
+        {!open && count > 0 && <span className="shrink-0 whitespace-nowrap rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium">{count} filled in</span>}
+        {!open && hint && <span className="hidden min-w-0 truncate text-xs font-normal text-muted sm:inline">{hint}</span>}
+      </button>
+      {open && <div className="mt-2">{children}</div>}
+    </div>
+  );
+}
+
+/** One line of a money form: what it is on the left, the box on the right. */
+export const AmountRow = ({ label, hint, children }: { label: ReactNode; hint?: string; children: ReactNode }) => (
+  <div className="mb-2 grid grid-cols-[minmax(0,1fr)_minmax(0,8.5rem)] items-center gap-3">
+    <div className="min-w-0 text-sm">{label}{hint && <div className="text-[11px] leading-tight text-muted">{hint}</div>}</div>
+    <div>{children}</div>
+  </div>
+);
+export const AmountTotal = ({ label, value }: { label: string; value: any }) => (
+  <div className="mt-1 flex items-baseline justify-between border-t border-line pt-2"><span className="text-sm font-medium">{label}</span><span className="num text-base font-semibold">{n2(value)}</span></div>
 );
 
 export const Toolbar = ({ onNew, onSave, onDelete, canWrite = true }: { onNew(): void; onSave(): void; onDelete?(): void; canWrite?: boolean }) => (
