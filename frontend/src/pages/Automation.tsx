@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
@@ -7,16 +8,25 @@ import { viewPdf } from '../components/PdfViewer';
 
 const TRIGGERS: Record<string, string> = { invoice_overdue: 'Invoice overdue by ≥ N days', quote_expiring: 'Quote expires within N days', departure_upcoming: 'Departure within N days', bill_due: 'Supplier bill due within N days' };
 const CLIENT = ['invoice_overdue', 'quote_expiring', 'departure_upcoming'];
-const REPORTS: Record<string, string> = { 'ar-aging-summary': 'AR aging summary', 'ap-aging': 'Payables aging', 'gl-pnl': 'Profit & Loss (ledger)', departures: 'Departures', 'invoice-register': 'Invoice register', 'commission-summary': 'Commission summary' };
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function Automation() {
-  const { can, user } = useAuth(); const w = can('admin', 'finance_manager');
+  const { can, user } = useAuth(); const w = can('admin', 'finance_manager'); const [sp, setSp] = useSearchParams();
+  // the reports that can be scheduled come from the same catalog as the Reports page, so the two never drift apart
+  const [catalog, setCatalog] = useState<any[]>([]);
+  useEffect(() => { api('/reports/catalog').then(setCatalog).catch(() => {}); }, []);
+  const every: any[] = catalog.flatMap((c) => c.reports), REPORTS: Record<string, string> = Object.fromEntries(every.map((r) => [r.key, r.label]));
+  const schedulable = every.filter((r) => !r.account && r.client !== 'required' && !r.forecast);
   const [tab, setTab] = useState<'exceptions' | 'rules' | 'schedules' | 'activity'>('exceptions');
   const [ex, setEx] = useState<any[]>([]); const [rules, setRules] = useState<any[]>([]); const [sch, setSch] = useState<any[]>([]); const [act, setAct] = useState<any[]>([]);
   const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [form, setForm] = useState<any>(null); const [runs, setRuns] = useState<any>(null);
   const load = () => { api('/automation/exceptions').then(setEx); api('/automation/rules').then(setRules); api('/automation/schedules').then(setSch); api('/automation/activity').then(setAct); };
   useEffect(() => { load(); }, []);
+  useEffect(() => {   // "Schedule this report" on the Reports page lands here with ?schedule=<report>
+    const want = sp.get('schedule'); if (!want || !w || !every.length) return;
+    const r = every.find((x) => x.key === want); sp.delete('schedule'); setSp(sp, { replace: true });
+    if (r && schedulable.some((x) => x.key === want)) { setTab('schedules'); setForm({ kind: 'sched', name: r.label, report: want, range_kind: 'last_month', frequency: 'monthly', weekday: 1, day_of_month: 1, format: 'xlsx', recipients: user?.email ?? '' }); }
+  }, [catalog]);
   const go = async (fn: () => Promise<any>, ok?: string) => { try { const r = await fn(); setErr(''); setMsg(ok ?? ''); load(); return r; } catch (e: any) { setErr(e.message); } };
   const rescan = () => go(async () => { const r = await api('/automation/exceptions/scan', 'POST'); setMsg(`${r.open} open · ${r.new} new · ${r.resolved} cleared`); });
   const runAll = () => go(async () => { const r = await api('/automation/run', 'POST'); setMsg(`Automations: ${r.automations.done} done, ${r.automations.failed} failed, ${r.automations.skipped} skipped · schedules run: ${r.schedules.ran}`); });
@@ -62,7 +72,7 @@ export default function Automation() {
         <div className="flex justify-end"><button className="btn" disabled={form.name.trim().length < 2} onClick={saveRule}>Create rule</button></div></Modal>}
       {form?.kind === 'sched' && <Modal title="New scheduled report" onClose={() => setForm(null)}><Err e={err} />
         <Field label="Name"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-        <div className="grid grid-cols-2 gap-x-4"><Field label="Report"><select className="input" value={form.report} onChange={(e) => setForm({ ...form, report: e.target.value })}>{Object.entries(REPORTS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+        <div className="grid grid-cols-2 gap-x-4"><Field label="Report"><select className="input" value={form.report} onChange={(e) => setForm({ ...form, report: e.target.value })}>{schedulable.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
           <Field label="Covers"><select className="input" value={form.range_kind} onChange={(e) => setForm({ ...form, range_kind: e.target.value })}><option value="last_month">Last month</option><option value="mtd">Month to date</option><option value="ytd">Year to date</option><option value="last_30d">Last 30 days</option></select></Field>
           <Field label="Frequency"><select className="input" value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></Field>
           {form.frequency === 'weekly' && <Field label="On"><select className="input" value={form.weekday} onChange={(e) => setForm({ ...form, weekday: e.target.value })}>{DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</select></Field>}

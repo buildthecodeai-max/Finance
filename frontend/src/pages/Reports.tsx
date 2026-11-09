@@ -1,234 +1,302 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { Download, FileSpreadsheet, FileText, Search } from 'lucide-react';
-import { api } from '../api';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, ChevronRight, Download, FileSpreadsheet, FileText, Home, RefreshCw, Search, Table2 } from 'lucide-react';
+import { api, money, n2 } from '../api';
 import { useAuth } from '../auth';
-import { Page } from '../components/ui';
-import { today, useAccounts, useList } from '../lookup';
+import { MenuBtn, Page, Popover, Skeleton } from '../components/ui';
+import { isoDate, today, useAccounts } from '../lookup';
 import { viewPdf } from '../components/PdfViewer';
 
-/** [key, label, what it tells you]. `ledger` reports are for finance roles; `asAt` reports are a position on one date. */
-interface Def { key: string; label: string; about: string; ledger?: boolean; asAt?: boolean; account?: boolean; client?: 'required' | 'optional' }
-const CATEGORIES: { label: string; reports: Def[] }[] = [
-  { label: 'Financial statements', reports: [
-    { key: 'gl-pnl', label: 'Profit & Loss', ledger: true, about: 'Income less costs and expenses, from posted ledger entries.' },
-    { key: 'balance-sheet', label: 'Balance Sheet', ledger: true, asAt: true, about: 'What the business owns, owes and is worth on one date. Assets must equal liabilities plus equity.' },
-    { key: 'trial-balance', label: 'Trial Balance', ledger: true, asAt: true, about: 'Every account’s balance on one date. Total debits must equal total credits.' },
-    { key: 'cash-flow', label: 'Cash Flow', about: 'Money in and out by month, from recorded payments (voided payments excluded).' },
-    { key: 'pnl', label: 'Sales-basis P&L', about: 'Profit from issued invoices and recorded expenses — a management view that can differ from the ledger P&L until everything is posted.' },
-  ] },
-  { label: 'Clients', reports: [
-    { key: 'sales-by-client', label: 'Sales by Client', ledger: true, about: 'Every client side by side: sales, profit, what they paid and what they still owe. Click a client to open their statement.' },
-    { key: 'client-statement', label: 'Client Statement', ledger: true, client: 'required', about: 'One client’s account: every invoice, receipt and credit note with a running balance.' },
-  ] },
-  { label: 'Ledgers & books', reports: [
-    { key: 'general-ledger', label: 'General Ledger', ledger: true, account: true, about: 'Every posting to one account with a running balance. Click a voucher to open it.' },
-    { key: 'day-book', label: 'Day Book', ledger: true, about: 'Every ledger posting in the period, in date order.' },
-    { key: 'cash-book', label: 'Cash & Bank Book', ledger: true, about: 'Opening, receipts, payments and closing balance for each cash and bank account.' },
-  ] },
-  { label: 'Receivables', reports: [
-    { key: 'ar-aging-summary', client: 'optional', label: 'AR Aging Summary', asAt: true, about: 'What each client owes, by how overdue it is. Reconciled to the ledger.' },
-    { key: 'ar-aging-detail', client: 'optional', label: 'AR Aging Detail', asAt: true, about: 'Open invoices one by one.' },
-    { key: 'invoice-register', client: 'optional', label: 'Invoice Register', about: 'All invoices issued in the period.' },
-  ] },
-  { label: 'Payables & payments', reports: [
-    { key: 'ap-aging', label: 'Payables Aging', asAt: true, about: 'What is owed to suppliers, by how overdue it is. Reconciled to the ledger.' },
-    { key: 'supplier-payments', label: 'Supplier Payments', about: 'Total paid to each supplier in the period.' },
-    { key: 'payment-register', client: 'optional', label: 'Payment Register', ledger: true, about: 'Every payment received and made in the period, with totals.' },
-  ] },
-  { label: 'Operations', reports: [
-    { key: 'commission-summary', label: 'Commission Summary', about: 'Agent commission earned and payable.' },
-    { key: 'revenue-by-destination', client: 'optional', label: 'Revenue by Destination', about: 'Booking revenue grouped by destination.' },
-    { key: 'departures', client: 'optional', label: 'Departures', about: 'Upcoming departures with the balance still due.' },
-  ] },
-];
+/*
+ * Reports: a home page with the numbers worth a glance, then each report with its filters, a summary, a chart where
+ * it helps, and a table you can sort, search and download. What the filters are set to lives in the address, so a
+ * link, a reload or the back button lands on the same report.
+ */
 
-const isoMonth = (d: Date, m: number) => new Date(Date.UTC(d.getFullYear(), d.getMonth() + m, 1));
-const fmt = (d: Date) => d.toISOString().slice(0, 10);
+interface Def { key: string; label: string; about: string; asAt?: boolean; account?: boolean; client?: 'required' | 'optional'; compare?: boolean; forecast?: boolean }
+interface Cat { label: string; reports: Def[] }
+interface Rep {
+  title: string; columns: string[]; rows: any[][]; types?: string[]; kinds?: string[]; links?: (string | null)[]; note?: string; hints?: string[];
+  reconcile?: { label: string; report: number; source: number; difference: number; ok: boolean }[];
+  summary?: { label: string; value: string; unit?: '%'; tone?: 'good' | 'bad' | 'warn' | 'info' }[];
+  chart?: { kind: 'bars'; labels: string[]; series: { name: string; values: number[]; tone?: string }[] };
+}
+
+let CATALOG: Cat[] | null = null;
+function useCatalog() {
+  const [cat, setCat] = useState<Cat[] | null>(CATALOG);
+  useEffect(() => { if (!CATALOG) api('/reports/catalog').then((c) => { CATALOG = c; setCat(c); }).catch(() => setCat([])); }, []);
+  return cat;
+}
+const RECENT = 'reports.recent';
+const recents = (): string[] => { try { return JSON.parse(localStorage.getItem(RECENT) ?? '[]'); } catch { return []; } };
+const remember = (key: string) => { try { localStorage.setItem(RECENT, JSON.stringify([key, ...recents().filter((k) => k !== key)].slice(0, 5))); } catch { /* private mode: nothing to remember */ } };
+
+/* ---------- dates ---------- */
+const D = (y: number, m: number, d: number) => isoDate(new Date(y, m, d));
 const PRESETS: [string, () => [string, string]][] = [
-  ['This month', () => { const n = new Date(); return [fmt(isoMonth(n, 0)), today()]; }],
-  ['Last month', () => { const n = new Date(); return [fmt(isoMonth(n, -1)), fmt(new Date(isoMonth(n, 0).getTime() - 864e5))]; }],
-  ['This quarter', () => { const n = new Date(), q = Math.floor(n.getMonth() / 3) * 3; return [fmt(new Date(Date.UTC(n.getFullYear(), q, 1))), today()]; }],
-  ['This year', () => [`${new Date().getFullYear()}-01-01`, today()]],
-  ['Last year', () => { const y = new Date().getFullYear() - 1; return [`${y}-01-01`, `${y}-12-31`]; }],
+  ['This month', () => { const n = new Date(); return [D(n.getFullYear(), n.getMonth(), 1), today()]; }],
+  ['Last month', () => { const n = new Date(); return [D(n.getFullYear(), n.getMonth() - 1, 1), D(n.getFullYear(), n.getMonth(), 0)]; }],
+  ['This quarter', () => { const n = new Date(); return [D(n.getFullYear(), Math.floor(n.getMonth() / 3) * 3, 1), today()]; }],
+  ['Last quarter', () => { const n = new Date(), q = Math.floor(n.getMonth() / 3) * 3; return [D(n.getFullYear(), q - 3, 1), D(n.getFullYear(), q, 0)]; }],
+  ['This year', () => [D(new Date().getFullYear(), 0, 1), today()]],
+  ['Last year', () => { const y = new Date().getFullYear() - 1; return [D(y, 0, 1), D(y, 11, 31)]; }],
+  ['Last 12 months', () => { const n = new Date(); return [D(n.getFullYear() - 1, n.getMonth(), n.getDate() + 1), today()]; }],
 ];
-const NUM = /^-?\d+(\.\d{1,2})?$/;
+const AS_AT: [string, () => string][] = [['Today', today], ['End of last month', () => { const n = new Date(); return D(n.getFullYear(), n.getMonth(), 0); }], ['End of last quarter', () => { const n = new Date(); return D(n.getFullYear(), Math.floor(n.getMonth() / 3) * 3, 0); }], ['End of last year', () => D(new Date().getFullYear() - 1, 11, 31)]];
+const AHEAD: [string, number][] = [['Next 4 weeks', 27], ['Next 8 weeks', 55], ['Next 12 weeks', 83]];
+const plusDays = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n); return isoDate(d); };
 
+/* ---------- small pieces ---------- */
+const TONE: Record<string, string> = { good: 'text-success', bad: 'text-danger', warn: 'text-warn', info: 'text-info' };
+const MONEY = /^-?\d+\.\d{2}$/;
+const show = (v: any, type?: string) => (type === 'money' && MONEY.test(String(v)) ? Number(v).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : v);
+const short = (n: number) => (Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n)));
+const BAR: Record<string, string> = { good: 'rgb(var(--success))', bad: 'rgb(var(--danger))', warn: 'rgb(var(--warn))', accent: 'rgb(var(--accent))' };
+
+/** A small bar chart, drawn here so it follows the light and dark theme exactly. */
+function Bars({ chart }: { chart: NonNullable<Rep['chart']> }) {
+  const W = 720, H = 190, top = 14, bottom = 34, n = chart.labels.length, all = chart.series.flatMap((s) => s.values), max = Math.max(1, ...all), min = Math.min(0, ...all);
+  const span = max - min, y = (v: number) => top + ((max - v) / span) * (H - top - bottom), zero = y(0), gw = (W - 16) / Math.max(1, n), bw = Math.min(46, (gw * 0.7) / chart.series.length);
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap gap-4 text-xs text-muted">{chart.series.length > 1 || chart.series[0].name ? chart.series.map((s) => <span key={s.name} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: BAR[s.tone ?? 'accent'] }} />{s.name}</span>) : null}</div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-48 w-full" role="img" aria-label={`Bar chart: ${chart.series.map((s) => s.name).join(', ')} by ${chart.labels.join(', ')}`}>
+        <line x1="8" x2={W - 8} y1={zero} y2={zero} style={{ stroke: 'rgb(var(--line))' }} />
+        {chart.labels.map((lab, i) => {
+          const cx = 8 + gw * i + gw / 2, x0 = cx - (bw * chart.series.length) / 2;
+          return (
+            <g key={`${lab}${i}`}>
+              {chart.series.map((s, k) => { const v = s.values[i] ?? 0, yy = y(v), h = Math.max(1, Math.abs(zero - yy));
+                return (<g key={s.name}><rect x={x0 + k * bw + 1} y={v >= 0 ? yy : zero} width={Math.max(2, bw - 2)} height={h} rx="2" style={{ fill: BAR[s.tone ?? 'accent'] }}><title>{`${lab} — ${s.name}: ${n2(v)}`}</title></rect>
+                  {n <= 7 && v !== 0 && <text x={x0 + k * bw + bw / 2} y={v >= 0 ? yy - 3 : yy + h + 10} textAnchor="middle" fontSize="9" style={{ fill: 'rgb(var(--muted))' }}>{short(v)}</text>}</g>); })}
+              <text x={cx} y={H - 14} textAnchor="middle" fontSize="10" style={{ fill: 'rgb(var(--muted))' }}>{lab.length > 16 ? `${lab.slice(0, 15)}…` : lab}</text>
+            </g>);
+        })}
+      </svg>
+    </div>
+  );
+}
+
+/** As many cards per row as fit, so a figure like $75,251.28 is never cut off. */
+const KPI_GRID = 'grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr))]';
+const Kpi = ({ label, value, sub, delta, to, tone }: { label: string; value: string; sub?: ReactNode; delta?: number | null; to: string; tone?: string }) => (
+  <Link to={to} className="card block transition hover:border-accent/50 focus-visible:border-accent">
+    <div className="text-xs text-muted">{label}</div>
+    <div className={`num mt-0.5 text-xl font-semibold ${tone ?? ''}`}>{value}</div>
+    <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">{delta != null && <span className={`inline-flex items-center ${delta >= 0 ? 'text-success' : 'text-danger'}`}>{delta >= 0 ? <ArrowUp size={12} /> : <ArrowDown size={12} />}{Math.abs(delta).toFixed(0)}%</span>}{sub}</div>
+  </Link>
+);
+
+/* ---------- the home page ---------- */
+function Overview({ cat, open }: { cat: Cat[]; open: (k: string, extra?: Record<string, string>) => void }) {
+  const [ov, setOv] = useState<any>(null);
+  useEffect(() => { api('/reports/overview').then(setOv).catch(() => setOv(false)); }, []);
+  const cur = ov?.currency ?? 'USD', m = ov?.month, p = ov?.previous, all = cat.flatMap((c) => c.reports), mine = recents().map((k) => all.find((r) => r.key === k)).filter(Boolean) as Def[];
+  const chg = (a?: number, b?: number) => (b ? ((a! - b) / Math.abs(b)) * 100 : null);
+  return (
+    <div className="space-y-6">
+      {ov === null ? <div className={KPI_GRID}>{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div> : ov && (
+        <section aria-label="Key numbers">
+          <div className={KPI_GRID}>
+            <Kpi label="Sales this month" value={money(m.revenue, cur)} delta={chg(m.revenue, p.revenue)} sub="vs same days last month" to={`/reports?report=pnl&from=${m.from}&to=${m.to}`} />
+            <Kpi label="Profit this month" value={money(m.profit, cur)} delta={chg(m.profit, p.profit)} sub="gross, sales basis" tone={m.profit < 0 ? 'text-danger' : ''} to={`/reports?report=pnl&from=${m.from}&to=${m.to}`} />
+            <Kpi label="Money in / out" value={money(m.cashIn, cur)} sub={<>out {money(m.cashOut, cur)}</>} to={`/reports?report=cash-flow&from=${m.from}&to=${m.to}`} />
+            <Kpi label="Owed to you" value={money(ov.receivables.total, cur)} sub={ov.receivables.overdue ? <span className="text-warn">{money(ov.receivables.overdue, cur)} overdue</span> : 'nothing overdue'} to="/reports?report=ar-aging-summary" />
+            <Kpi label="You owe" value={money(ov.payables.total, cur)} sub={ov.payables.overdue ? <span className="text-warn">{money(ov.payables.overdue, cur)} overdue</span> : 'nothing overdue'} to="/reports?report=ap-aging" />
+            <Kpi label="Cash & bank" value={money(ov.cash, cur)} sub="in the ledger now" to="/reports?report=cash-book" />
+          </div>
+        </section>)}
+      {mine.length > 0 && <section><h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted/80">Recently opened</h2>
+        <div className="flex flex-wrap gap-2">{mine.map((r) => <button key={r.key} className="btn-ghost" onClick={() => open(r.key)}>{r.label}</button>)}</div></section>}
+      {cat.map((c) => (
+        <section key={c.label}><h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted/80">{c.label}</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {c.reports.map((r) => (
+              <button key={r.key} className="card group flex items-start justify-between gap-3 text-left transition hover:border-accent/50" onClick={() => open(r.key)}>
+                <span className="min-w-0"><span className="block font-medium">{r.label}</span><span className="mt-0.5 line-clamp-3 block text-xs text-muted">{r.about}</span></span>
+                <ChevronRight size={16} className="mt-1 shrink-0 text-muted transition group-hover:translate-x-0.5 group-hover:text-accent" />
+              </button>))}
+          </div></section>))}
+    </div>
+  );
+}
+
+/* ---------- the page ---------- */
 export default function Reports() {
-  const { can } = useAuth();
-  const [sp, setSp] = useSearchParams();
-  const accounts = useAccounts([]);
-  const finance = can('admin', 'finance_manager', 'viewer');
-  const cats = useMemo(() => CATEGORIES.map((c) => ({ ...c, reports: c.reports.filter((r) => finance || !r.ledger) })).filter((c) => c.reports.length), [finance]);
-  const all = cats.flatMap((c) => c.reports);
-  const first = all[0]?.key ?? 'cash-flow';
-  const wanted = sp.get('report');
-  const [name, setName] = useState(all.some((r) => r.key === wanted) ? wanted! : first);
-  const y = new Date().getFullYear();
-  const [from, setFrom] = useState(`${y}-01-01`);
-  const [to, setTo] = useState(today());
-  const [account, setAccount] = useState(sp.get('account') ?? '');
-  const clients = useList('/clients');
-  const [clientId, setClientId] = useState(sp.get('client') ?? '');
-  const [clientText, setClientText] = useState('');
-  const [find, setFind] = useState('');
-  const [rep, setRep] = useState<any>(null);
-  const [err, setErr] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [bump, setBump] = useState(0);
+  const { can } = useAuth(); const nav = useNavigate(); const [sp, setSp] = useSearchParams();
+  const finance = can('admin', 'finance_manager', 'viewer'), canSchedule = can('admin', 'finance_manager');
+  const cat = useCatalog(), accounts = useAccounts([]);
+  const all = useMemo(() => (cat ?? []).flatMap((c) => c.reports), [cat]);
+  const key = sp.get('report') ?? '', def = all.find((r) => r.key === key);
+  const forecast = !!def?.forecast;
+  const from = sp.get('from') || (forecast ? today() : D(new Date().getFullYear(), 0, 1)), to = sp.get('to') || (forecast ? plusDays(55) : today());
+  const account = sp.get('account') ?? '', clientId = sp.get('client') ?? '', compare = sp.get('compare') ?? '';
+  const go = (patch: Record<string, string | null | undefined>) => { const next = new URLSearchParams(sp); for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); } setSp(next, { replace: true }); };
+
+  const [clients, setClients] = useState<any[]>([]), [clientText, setClientText] = useState('');
+  const [find, setFind] = useState(''), [rep, setRep] = useState<Rep | null>(null), [err, setErr] = useState(''), [loading, setLoading] = useState(false), [bump, setBump] = useState(0);
+  const [ran, setRan] = useState<{ key: string; qs: string } | null>(null), [exporting, setExporting] = useState(''), [sort, setSort] = useState<{ c: number; dir: 1 | -1 } | null>(null), [filter, setFilter] = useState('');
   const seq = useRef(0);
 
-  const shownCats = cats.map((c) => ({ ...c, reports: c.reports.filter((r) => !find.trim() || `${r.label} ${r.about}`.toLowerCase().includes(find.trim().toLowerCase())) })).filter((c) => c.reports.length);
-  const def = all.find((r) => r.key === name) ?? all[0];
-  const q = (fmtName: string) => `/reports/${name}?from=${from}&to=${to}&format=${fmtName}${def?.account ? `&account_id=${account}` : ''}${def?.client && clientId ? `&client_id=${clientId}` : ''}`;
-  const ready = (!def?.account || !!account) && (def?.client !== 'required' || !!clientId);
+  const ready = !!def && (!def.account || !!account) && (def.client !== 'required' || !!clientId) && (def.asAt || forecast || from <= to);
+  const qs = () => new URLSearchParams({ ...(def?.asAt ? {} : { from }), to, ...(def?.account && account ? { account_id: account } : {}), ...(def?.client && clientId ? { client_id: clientId } : {}), ...(def?.compare && compare ? { compare } : {}), ...(forecast ? { from } : {}) }).toString();
 
-  // clients with the same name get their number so each can be picked unambiguously
-  const label = (c: any) => (clients.filter((x) => x.name.toLowerCase() === c.name.toLowerCase()).length > 1 ? `${c.name} (#${c.id})` : c.name);
-  const chooseClient = (text: string) => {
-    setClientText(text);
-    const c = clients.find((x) => label(x).toLowerCase() === text.trim().toLowerCase());
-    const id = c ? String(c.id) : '';
-    setClientId(id); if (id) sp.set('client', id); else sp.delete('client'); setSp(sp, { replace: true });
-  };
-
-  const run = async () => {
-    if (!ready) { setRep(null); setErr(''); return; }
-    const mine = ++seq.current;                                             // ignore a slow answer for a report the user has already left
-    try { setErr(''); setLoading(true); const r = await api(q('json')); if (mine === seq.current) setRep(r); }
-    catch (e: any) { if (mine === seq.current) { setErr(e.message); setRep(null); } }
-    finally { if (mine === seq.current) setLoading(false); }
-  };
-  const exp = async (f: 'pdf' | 'xlsx') => { if (f === 'pdf') return viewPdf(async () => (await api(q(f))).url, rep?.title ?? 'Report'); try { window.open((await api(q(f))).url); } catch (e: any) { setErr(e.message); } };
-  const pick = (k: string) => { setName(k); setRep(null); setErr(''); sp.set('report', k); sp.delete('account'); setSp(sp, { replace: true }); };
-
-  // run as soon as a report (or its account) is chosen, so a deep link from the ledger lands on real numbers
-  useEffect(() => { run(); }, [name, account, clientId, bump]);
-
-  // follow the address bar, so a link such as a client row in "Sales by Client" lands straight on that client's statement
+  // run as soon as the choices are complete, and again whenever one changes
   useEffect(() => {
-    const r = sp.get('report'); if (r && r !== name && all.some((x) => x.key === r)) { setName(r); setRep(null); setErr(''); }
-    const c = sp.get('client') ?? ''; if (c && c !== clientId) setClientId(c);
-  }, [sp]);
-  useEffect(() => { const c = clients.find((x) => String(x.id) === clientId); if (c && label(c) !== clientText) setClientText(label(c)); }, [clientId, clients]);
+    if (!def) return;
+    if (!ready) { setRep(null); setErr(''); return; }
+    const mine = ++seq.current, q = qs(); setLoading(true); setErr('');
+    const t = setTimeout(() => {
+      api(`/reports/${def.key}?${q}`).then((r) => { if (mine === seq.current) { setRep(r); setRan({ key: def.key, qs: q }); } })
+        .catch((e) => { if (mine === seq.current) { setErr(e.message); setRep(null); } }).finally(() => { if (mine === seq.current) setLoading(false); });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [key, def?.key, from, to, account, clientId, compare, bump]);
+  useEffect(() => { setRep(null); setSort(null); setFilter(''); setErr(''); if (key) remember(key); }, [key]);
+  useEffect(() => { setSort(null); setFilter(''); }, [rep]);
+  useEffect(() => { if (def?.client && !clients.length) api('/clients').then(setClients).catch(() => {}); }, [def?.key]);
 
-  const numeric: boolean[] = useMemo(() => !rep ? [] : rep.columns.map((c: string, i: number) => {
-    const cells = rep.rows.map((r: any[]) => r[i]).filter((x: any) => x !== '' && x != null);
-    return c !== 'Code' && cells.length > 0 && cells.filter((x: any) => NUM.test(String(x))).length >= cells.length / 2;
-  }), [rep]);
-  const linkCol = rep ? (rep.columns.includes('Voucher') ? rep.columns.indexOf('Voucher') : rep.columns[0] === 'Code' ? 1 : 0) : 0;
-  const styleOf = (i: number, row: any[]) => {
-    const k = rep.kinds?.[i];
-    if (k) return k;
-    const f = typeof row[0] === 'string' ? row[0].toLowerCase() : '';
-    return f.startsWith('total') || f.startsWith('net') || f.startsWith('gross') ? 'total' : '';
+  const dupe = useMemo(() => { const seen = new Map<string, number>(); for (const c of clients) seen.set(c.name.toLowerCase(), (seen.get(c.name.toLowerCase()) ?? 0) + 1); return seen; }, [clients]);
+  const label = (c: any) => (dupe.get(c.name.toLowerCase())! > 1 ? `${c.name} (#${c.id})` : c.name);   // clients with the same name show their number
+  useEffect(() => { const c = clients.find((x) => String(x.id) === clientId); setClientText(c ? label(c) : ''); }, [clientId, clients]);
+  const chooseClient = (text: string) => { setClientText(text); const c = clients.find((x) => label(x).toLowerCase() === text.trim().toLowerCase()); if (c) go({ client: String(c.id) }); else if (!text.trim()) go({ client: '' }); };
+  const open = (k: string, extra: Record<string, string> = {}) => { const d = all.find((r) => r.key === k); const next: Record<string, string> = { report: k, account: '', compare: '', from: '', to: '', ...extra };
+    if (d && !!d.forecast !== forecast) { next.from = ''; next.to = ''; } else { next.from = sp.get('from') ?? ''; next.to = sp.get('to') ?? ''; } go({ ...next, ...extra }); };
+
+  const exp = async (kind: 'pdf' | 'xlsx' | 'csv') => {
+    if (!ran) return; setExporting(kind); setErr('');
+    try {
+      const url = `/reports/${ran.key}?${ran.qs}&format=${kind}`;
+      if (kind === 'pdf') await viewPdf(async () => (await api(url)).url, rep?.title ?? 'Report'); else window.open((await api(url)).url);   // what you download is what is on screen
+    } catch (e: any) { setErr(e.message); } finally { setExporting(''); }
   };
 
+  /* ----- the table: sort, filter, and where each row leads ----- */
+  const types = useMemo(() => rep?.types ?? (rep ? rep.columns.map(() => 'text') : []), [rep]);
+  const plain = !!rep && !rep.kinds?.some((k) => k === 'section' || k === 'muted');
+  const order = useMemo(() => {
+    if (!rep) return [] as number[];
+    const idx = rep.rows.map((_, i) => i), foot = idx.filter((i) => rep.kinds?.[i] === 'total');
+    let body = idx.filter((i) => rep.kinds?.[i] !== 'total');
+    if (!plain) return idx;
+    const f = filter.trim().toLowerCase(); if (f) body = body.filter((i) => rep.rows[i].some((c) => String(c ?? '').toLowerCase().includes(f)));
+    if (sort) { const t = types[sort.c]; body = [...body].sort((a, b) => { const x = rep.rows[a][sort.c], y = rep.rows[b][sort.c]; return sort.dir * (t === 'money' || t === 'int' ? (Number(x) || 0) - (Number(y) || 0) : String(x ?? '').localeCompare(String(y ?? ''))); }); }
+    return [...body, ...foot];
+  }, [rep, sort, filter, types, plain]);
+  const linkCol = rep ? (rep.columns.includes('Voucher') ? rep.columns.indexOf('Voucher') : rep.columns[0] === 'Code' ? 1 : 0) : 0;
+  const bodyCount = rep ? rep.rows.filter((_, i) => rep.kinds?.[i] !== 'total').length : 0, shown = rep ? order.filter((i) => rep.kinds?.[i] !== 'total').length : 0;
+  const sortBy = (c: number) => setSort((s) => (s?.c === c ? (s.dir === 1 ? { c, dir: -1 } : null) : { c, dir: 1 }));
+
+  if (!finance) return <Page title="Reports"><div className="card text-sm text-muted">Reports show the agency’s finances, so they are for admins, finance managers and viewers.</div></Page>;
+
+  const menu = (cat ?? []).map((c) => ({ ...c, reports: c.reports.filter((r) => !find.trim() || `${r.label} ${r.about}`.toLowerCase().includes(find.trim().toLowerCase())) })).filter((c) => c.reports.length);
+  const inputCls = 'input num';
   return (
-    <Page title="Reports" description="Every ledger-based report ties back to the accounts and shows a reconciliation check.">
-      <div className="grid grid-cols-1 md:grid-cols-[230px_minmax(0,1fr)] gap-4">
+    <Page title="Reports" description="The numbers behind the business. Ledger reports tie back to your accounts and show a reconciliation check.">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[230px_minmax(0,1fr)]">
         {/* report list: sidebar on desktop, dropdown on phones */}
-        <div className="card p-0 overflow-hidden h-fit hidden md:block">
-          <div className="p-2 border-b border-line relative">
-            <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+        <nav aria-label="Reports" className="card hidden h-fit overflow-hidden p-0 md:sticky md:top-4 md:block md:max-h-[calc(100vh-2rem)] md:overflow-y-auto">
+          <div className="relative border-b border-line p-2">
+            <Search size={14} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted" />
             <input className="input pl-8 text-sm" placeholder="Find a report…" aria-label="Find a report" value={find} onChange={(e) => setFind(e.target.value)} />
           </div>
-          {shownCats.map((cat) => (
-            <div key={cat.label}>
-              <div className="px-3 py-2 text-xs text-muted uppercase border-b border-line">{cat.label}</div>
-              {cat.reports.map((r) => (
-                <button key={r.key} onClick={() => pick(r.key)} aria-current={name === r.key}
-                  className={`block w-full text-left px-3 py-1.5 text-sm ${name === r.key ? 'bg-accent/15 text-accent font-medium' : 'hover:bg-surface2'}`}>{r.label}</button>
-              ))}
-            </div>
-          ))}
-          {shownCats.length === 0 && <div className="px-3 py-4 text-sm text-muted">No report matches “{find}”.</div>}
-        </div>
+          <button onClick={() => go({ report: '' })} aria-current={!key} className={`flex w-full items-center gap-2 border-b border-line px-3 py-2 text-left text-sm ${!key ? 'bg-accent/15 font-medium text-accent' : 'hover:bg-surface2'}`}><Home size={14} />Overview</button>
+          {menu.map((c) => (
+            <div key={c.label}>
+              <div className="border-b border-line px-3 py-2 text-xs uppercase text-muted">{c.label}</div>
+              {c.reports.map((r) => <button key={r.key} onClick={() => open(r.key)} aria-current={key === r.key} className={`block w-full px-3 py-1.5 text-left text-sm ${key === r.key ? 'bg-accent/15 font-medium text-accent' : 'hover:bg-surface2'}`}>{r.label}</button>)}
+            </div>))}
+          {cat && menu.length === 0 && <div className="px-3 py-4 text-sm text-muted">No report matches “{find}”.</div>}
+        </nav>
 
         <div className="min-w-0">
-          <select className="input md:hidden mb-3" aria-label="Report" value={name} onChange={(e) => pick(e.target.value)}>
-            {cats.map((c) => <optgroup key={c.label} label={c.label}>{c.reports.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</optgroup>)}
+          <select className="input mb-3 md:hidden" aria-label="Report" value={key} onChange={(e) => (e.target.value ? open(e.target.value) : go({ report: '' }))}>
+            <option value="">Overview</option>{(cat ?? []).map((c) => <optgroup key={c.label} label={c.label}>{c.reports.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</optgroup>)}
           </select>
 
-          <div className="card mb-4">
-            <div className="font-semibold text-base">{def?.label}</div>
-            <p className="text-xs text-muted mb-3">{def?.about}</p>
-            <div className="flex flex-wrap gap-3 items-end">
-              {def?.account && (
-                <div className="min-w-[14rem] flex-1"><div className="text-xs text-muted mb-1">Account</div>
-                  <select className="input" value={account} onChange={(e) => { setAccount(e.target.value); }}>
-                    <option value="">Choose an account…</option>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-                  </select></div>
-              )}
-              {def?.client && (
-                <div className="min-w-[14rem] flex-1"><div className="text-xs text-muted mb-1">Client{def.client === 'optional' && ' (optional)'}</div>
-                  <input className="input" list="report-clients" placeholder={def.client === 'required' ? 'Start typing a client name…' : 'All clients — type to pick one'} value={clientText} onChange={(e) => chooseClient(e.target.value)} />
-                  <datalist id="report-clients">{clients.map((c) => <option key={c.id} value={label(c)} />)}</datalist></div>
-              )}
-              {!def?.asAt && <div><div className="text-xs text-muted mb-1">From</div><input className="input num" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>}
-              <div><div className="text-xs text-muted mb-1">{def?.asAt ? 'As at' : 'To'}</div><input className="input num" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
-              <button className="btn" onClick={run} disabled={loading || !ready}>{loading ? 'Running…' : 'Run'}</button>
-              {rep && <>
-                <button className="btn-ghost flex items-center gap-1.5" onClick={() => exp('pdf')}><FileText size={15} />PDF</button>
-                <button className="btn-ghost flex items-center gap-1.5" onClick={() => exp('xlsx')}><FileSpreadsheet size={15} />Excel</button>
-              </>}
-            </div>
-            {!def?.asAt && <div className="flex flex-wrap gap-1.5 mt-3">
-              {PRESETS.map(([l, f]) => <button key={l} className="text-xs px-2 py-1 rounded-md border border-line hover:bg-surface2" onClick={() => { const [a, b] = f(); setFrom(a); setTo(b); setBump((n) => n + 1); }}>{l}</button>)}
-            </div>}
-          </div>
-
-          {err && <div className="text-danger text-sm mb-3" role="alert">{err}</div>}
-
-          {rep?.reconcile && (
-            <div className="space-y-2 mb-4">
-              {rep.reconcile.map((c: any) => (
-                <div key={c.label} className={`rounded-lg border text-sm p-3 flex flex-wrap justify-between gap-2 ${c.ok ? 'border-success/30 bg-success/10 text-success' : 'border-danger/30 bg-danger/10 text-danger'}`}>
-                  <span>{c.ok ? '✓ Reconciled' : '⚠ Does not reconcile'} — {c.label}</span>
-                  <span className="num">report {c.report.toFixed(2)} · source {c.source.toFixed(2)}{!c.ok && ` · diff ${c.difference.toFixed(2)}`}</span>
+          {cat === null ? <Skeleton className="h-64" /> : !def ? <Overview cat={cat} open={open} /> : (<>
+            <div className="card mb-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0"><h2 className="text-base font-semibold">{def.label}</h2><p className="mt-0.5 max-w-2xl text-xs text-muted">{def.about}</p></div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {canSchedule && !def.account && def.client !== 'required' && !forecast && <Link to={`/automation?schedule=${def.key}`} className="btn-ghost"><CalendarClock size={15} />Schedule</Link>}
+                  <button className="btn-icon border border-line" aria-label="Run again" title="Run again" onClick={() => setBump((n) => n + 1)} disabled={!ready || loading}><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>
+                  <Popover trigger={(_o, t) => <button className="btn" onClick={t} disabled={!rep || !!exporting}><Download size={15} />{exporting ? 'Preparing…' : 'Download'}</button>}>
+                    {(close) => <>
+                      <MenuBtn onClick={() => { close(); exp('pdf'); }}><FileText size={15} /> PDF (view or print)</MenuBtn>
+                      <MenuBtn onClick={() => { close(); exp('xlsx'); }}><FileSpreadsheet size={15} /> Excel</MenuBtn>
+                      <MenuBtn onClick={() => { close(); exp('csv'); }}><Table2 size={15} /> CSV</MenuBtn>
+                    </>}
+                  </Popover>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {rep && (
-            <>
-              <h3 className="font-bold mb-1">{rep.title}</h3>
-              {rep.note && <p className="text-xs text-muted mb-3">{rep.note}</p>}
-              <div className="card p-0 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-line">
-                    {rep.columns.map((c: string, i: number) => <th key={i} className={`px-3 py-2 font-medium text-muted text-xs ${numeric[i] ? 'text-right' : 'text-left'}`}>{c}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {rep.rows.map((row: any[], i: number) => {
-                      const kind = styleOf(i, row), link = rep.links?.[i];
-                      return (
-                        <tr key={i} className={`border-b border-line/40 ${kind === 'total' ? 'font-semibold bg-surface2' : kind === 'section' ? 'font-semibold text-accent bg-accent/5 tracking-wide' : kind === 'muted' ? 'italic text-muted' : 'hover:bg-surface2'}`}>
-                          {row.map((cell, j) => {
-                            const num = numeric[j] && kind !== 'section';
-                            return (
-                              <td key={j} className={`px-3 py-1.5 ${num ? 'text-right num whitespace-nowrap' : ''}`}>
-                                {link && j === linkCol && cell !== '' ? <Link className="text-accent hover:underline" to={link}>{cell}</Link> : num && /^-?\d+\.\d{2}$/.test(String(cell)) ? Number(cell).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : cell}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                    {rep.rows.length === 0 && <tr><td colSpan={rep.columns.length} className="px-3 py-8 text-center text-muted text-sm">Nothing to report for this period.</td></tr>}
-                  </tbody>
-                </table>
               </div>
-            </>
-          )}
 
-          {!rep && !err && !loading && (
-            <div className="card flex flex-col items-center justify-center py-16 text-center">
-              <Download size={32} className="text-muted mb-3" />
-              <p className="text-muted text-sm">{ready ? <>Click <b>Run</b> to generate this report.</> : def?.client === 'required' && !clientId ? 'Choose a client to see their statement.' : 'Choose an account to see its ledger.'}</p>
+              <div className="mt-3 flex flex-wrap items-end gap-3">
+                {def.account && <div className="min-w-[14rem] flex-1"><div className="mb-1 text-xs text-muted">Account</div>
+                  <select className="input" value={account} onChange={(e) => go({ account: e.target.value })}><option value="">Choose an account…</option>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}</select></div>}
+                {def.client && <div className="min-w-[14rem] flex-1"><div className="mb-1 text-xs text-muted">Client{def.client === 'optional' && ' (optional)'}</div>
+                  <input className="input" list="report-clients" placeholder={def.client === 'required' ? 'Start typing a client name…' : 'All clients — type to pick one'} value={clientText} onChange={(e) => chooseClient(e.target.value)} />
+                  <datalist id="report-clients">{clients.map((c) => <option key={c.id} value={label(c)} />)}</datalist></div>}
+                {!def.asAt && <div><div className="mb-1 text-xs text-muted">{forecast ? 'Starting' : 'From'}</div><input className={inputCls} type="date" value={from} max={forecast ? undefined : to} onChange={(e) => e.target.value && go({ from: e.target.value })} /></div>}
+                <div><div className="mb-1 text-xs text-muted">{def.asAt ? 'As at' : forecast ? 'Until' : 'To'}</div><input className={inputCls} type="date" value={to} min={def.asAt || forecast ? undefined : from} onChange={(e) => e.target.value && go({ to: e.target.value })} /></div>
+                {def.compare && <div><div className="mb-1 text-xs text-muted">Compare with</div>
+                  <select className="input" value={compare} onChange={(e) => go({ compare: e.target.value })}><option value="">Nothing</option><option value="prev">The period before</option><option value="year">Same period last year</option></select></div>}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Quick dates">
+                {def.asAt ? AS_AT.map(([l, f]) => <button key={l} className="rounded-md border border-line px-2 py-1 text-xs hover:bg-surface2" onClick={() => go({ to: f() })}>{l}</button>)
+                  : forecast ? AHEAD.map(([l, n]) => <button key={l} className="rounded-md border border-line px-2 py-1 text-xs hover:bg-surface2" onClick={() => go({ from: today(), to: plusDays(n) })}>{l}</button>)
+                    : PRESETS.map(([l, f]) => <button key={l} className="rounded-md border border-line px-2 py-1 text-xs hover:bg-surface2" onClick={() => { const [a, b] = f(); go({ from: a, to: b }); }}>{l}</button>)}
+              </div>
             </div>
-          )}
+
+            {err && <div className="mb-3 text-sm text-danger" role="alert">{err}</div>}
+            {!ready && !err && <div className="card py-12 text-center text-sm text-muted">{def.client === 'required' && !clientId ? 'Choose a client to see their statement.' : def.account && !account ? 'Choose an account to see its ledger.' : 'The start date is after the end date.'}</div>}
+            {ready && !rep && !err && <div className="space-y-3"><Skeleton className="h-20" /><Skeleton className="h-56" /></div>}
+
+            {rep && (
+              <div className={loading ? 'opacity-60 transition' : 'transition'}>
+                {rep.summary && rep.summary.length > 0 && (
+                  <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    {rep.summary.map((s) => <div key={s.label} className="card !py-3"><div className="text-xs text-muted">{s.label}</div><div className={`num mt-0.5 text-lg font-semibold ${s.tone ? TONE[s.tone] : ''}`}>{s.unit === '%' ? `${show(s.value, 'money')}%` : show(s.value, MONEY.test(s.value) ? 'money' : undefined)}</div></div>)}
+                  </div>)}
+                {rep.reconcile && <div className="mb-4 space-y-2">{rep.reconcile.map((c) => (
+                  <div key={c.label} className={`flex flex-wrap justify-between gap-2 rounded-lg border p-3 text-sm ${c.ok ? 'border-success/30 bg-success/10 text-success' : 'border-danger/30 bg-danger/10 text-danger'}`}>
+                    <span>{c.ok ? '✓ Reconciled' : '⚠ Does not reconcile'} — {c.label}</span>
+                    <span className="num">report {show(c.report.toFixed(2), 'money')} · source {show(c.source.toFixed(2), 'money')}{!c.ok && ` · diff ${show(c.difference.toFixed(2), 'money')}`}</span></div>))}</div>}
+                {rep.hints?.map((h) => <div key={h} className="mb-3 flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 p-3 text-sm text-warn" role="note"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>{h}</span></div>)}
+                {rep.chart && rep.chart.labels.length > 0 && <div className="card mb-4"><Bars chart={rep.chart} /></div>}
+
+                <h3 className="mb-1 font-bold">{rep.title}</h3>
+                {rep.note && <p className="mb-3 text-xs text-muted">{rep.note}</p>}
+                {plain && bodyCount > 12 && (
+                  <div className="relative mb-2 max-w-xs"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                    <input className="input pl-8 text-sm" placeholder="Filter these rows…" aria-label="Filter rows" value={filter} onChange={(e) => setFilter(e.target.value)} /></div>)}
+                <div className="card max-h-[75vh] overflow-auto p-0">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 z-10 bg-surface"><tr className="border-b border-line">
+                      {rep.columns.map((c, i) => {
+                        const right = types[i] === 'money' || types[i] === 'int', on = sort?.c === i;
+                        return <th key={i} aria-sort={on ? (sort!.dir === 1 ? 'ascending' : 'descending') : undefined} className={`px-3 py-2 text-xs font-medium text-muted ${right ? 'text-right' : 'text-left'}`}>
+                          {plain && rep.rows.length > 2 ? <button className={`inline-flex items-center gap-1 hover:text-fg ${right ? 'flex-row-reverse' : ''}`} onClick={() => sortBy(i)}>{c}{on ? (sort!.dir === 1 ? <ArrowUp size={11} /> : <ArrowDown size={11} />) : <ArrowUpDown size={11} className="opacity-40" />}</button> : c}</th>; })}
+                    </tr></thead>
+                    <tbody>
+                      {rep.rows.length > 0 && !!filter.trim() && shown === 0 && <tr><td colSpan={rep.columns.length} className="px-3 py-8 text-center text-sm text-muted">No rows match “{filter}”.</td></tr>}
+                      {order.map((i) => {
+                        const row = rep.rows[i], kind = rep.kinds?.[i] ?? '', link = rep.links?.[i];
+                        return (
+                          <tr key={i} onClick={link ? () => nav(link) : undefined} className={`border-b border-line/40 ${link ? 'cursor-pointer' : ''} ${kind === 'total' ? 'bg-surface2 font-semibold' : kind === 'section' ? 'bg-accent/5 font-semibold tracking-wide text-accent' : kind === 'muted' ? 'italic text-muted' : 'hover:bg-surface2'}`}>
+                            {row.map((cell, j) => {
+                              const right = (types[j] === 'money' || types[j] === 'int') && kind !== 'section', neg = types[j] === 'money' && Number(cell) < 0 && kind !== 'total';
+                              return <td key={j} className={`px-3 py-1.5 ${right ? 'num whitespace-nowrap text-right' : ''} ${neg ? 'text-danger' : ''}`}>{link && j === linkCol && cell !== '' ? <Link className="text-accent hover:underline" to={link} onClick={(e) => e.stopPropagation()}>{cell}</Link> : show(cell, types[j])}</td>; })}
+                          </tr>); })}
+                      {rep.rows.length === 0 && <tr><td colSpan={rep.columns.length} className="px-3 py-10 text-center text-sm text-muted">Nothing to report for this period. Try a wider date range.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+                {plain && bodyCount > 12 && <p className="mt-1.5 text-xs text-muted">{filter.trim() ? `Showing ${shown} of ${bodyCount} rows` : `${bodyCount} rows`}</p>}
+              </div>)}
+          </>)}
         </div>
       </div>
     </Page>

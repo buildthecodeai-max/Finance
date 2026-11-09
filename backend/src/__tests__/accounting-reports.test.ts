@@ -173,10 +173,11 @@ describe('client-wise reports', () => {
   });
 
   it('existing reports can be narrowed to one client', async () => {
-    const all = (await rep('invoice-register')).body.rows, one = (await rep('invoice-register', `&client_id=${beta}`)).body;
-    expect(all.length).toBeGreaterThan(one.rows.length); expect(one.rows).toHaveLength(1); expect(one.rows[0][1]).toBe('Beta Voyages'); expect(one.title).toMatch(/Beta Voyages/);
+    const lines = (r: any) => r.rows.filter((_: any, i: number) => r.kinds?.[i] !== 'total');   // the register ends with a totals row
+    const all = lines((await rep('invoice-register')).body), one = (await rep('invoice-register', `&client_id=${beta}`)).body;
+    expect(all.length).toBeGreaterThan(lines(one).length); expect(lines(one)).toHaveLength(1); expect(lines(one)[0][1]).toBe('Beta Voyages'); expect(one.title).toMatch(/Beta Voyages/);
     const aging = (await rep('ar-aging-summary', `&client_id=${alpha}`)).body;
-    expect(aging.rows.map((x: any[]) => x[0])).toEqual(['Alpha Tours']); expect(aging.reconcile).toBeUndefined();   // a one-client slice cannot tie to the whole ledger
+    expect(lines(aging).map((x: any[]) => x[0])).toEqual(['Alpha Tours']); expect(aging.reconcile).toBeUndefined();   // a one-client slice cannot tie to the whole ledger
     const pay = (await rep('payment-register', `&client_id=${alpha}`)).body;
     expect(pay.rows.filter((x: any[]) => x[1] === 'inbound')).toHaveLength(1);
     expect((await rep('payment-register', `&client_id=${beta}`)).body.rows.filter((x: any[]) => x[1] === 'inbound')).toHaveLength(0);

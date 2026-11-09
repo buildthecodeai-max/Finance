@@ -9,12 +9,12 @@ async function getBrowser() {
 }
 
 /** footer: shows "label — Page x of y" in the page margin (used for invoices). */
-export async function htmlToPdf(html: string, opts: { footer?: string } = {}): Promise<Buffer> {
+export async function htmlToPdf(html: string, opts: { footer?: string; landscape?: boolean } = {}): Promise<Buffer> {
   const page = await (await getBrowser()).newPage();
   try {
     await page.setContent(html, { waitUntil: 'networkidle0' });
     return Buffer.from(await page.pdf({
-      format: 'A4', printBackground: true, margin: { top: '14mm', bottom: opts.footer ? '20mm' : '16mm', left: '14mm', right: '14mm' },
+      format: 'A4', landscape: !!opts.landscape, printBackground: true, margin: { top: '14mm', bottom: opts.footer ? '20mm' : '16mm', left: '14mm', right: '14mm' },
       displayHeaderFooter: !!opts.footer, headerTemplate: '<span></span>',
       footerTemplate: opts.footer ? `<div style="width:100%;font-family:Helvetica,Arial,sans-serif;font-size:8px;color:#8a94a3;padding:0 14mm;display:flex;justify-content:space-between"><span>${esc(opts.footer)}</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>` : '',
     }));
