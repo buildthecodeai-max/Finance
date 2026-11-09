@@ -118,7 +118,6 @@ function AgencyPicker({ currentId, inAgency, busy, err, list, onPick, onHome }: 
     <div className={busy ? 'opacity-60 pointer-events-none' : ''}>
       <input autoFocus className="input h-8 py-1 text-sm mb-1.5" placeholder="Search agencies…" aria-label="Search agencies" value={q} onChange={(x) => setQ(x.target.value)} />
       <div className="max-h-72 overflow-y-auto" role="listbox" aria-label="Agencies">
-        {inAgency && <MenuBtn onClick={onHome}><Undo2 size={14} className="text-muted" /><span className="flex-1">Back to my own workspace</span></MenuBtn>}
         {rows?.map((a) => <MenuBtn key={a.id} active={a.id === currentId} onClick={() => onPick(a.id)}><span className="flex-1 truncate">{a.name}</span>{a.status && <span className="text-[11px] text-muted capitalize">{String(a.status).replace('_', ' ')}</span>}</MenuBtn>)}
         {rows && !rows.length && <div className="px-2.5 py-2 text-xs text-muted">No agencies found.</div>}
         {!rows && !e && <div className="px-2.5 py-2 text-xs text-muted">Loading…</div>}
