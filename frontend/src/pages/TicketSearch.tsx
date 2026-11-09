@@ -19,7 +19,7 @@ export default function TicketSearch() {
           : <Field label="Confirmation No"><input className="input w-64" value={conf} onChange={(e) => setConf(e.target.value)} autoFocus /></Field>}
         <button className="btn mb-3" onClick={find}><Search size={15} /> Find</button></div>
       {done && <Table rows={rows} cols={[
-        { h: 'T-ID', render: (r) => <span className="num">{r.id}</span> }, { h: 'Invoice', render: (r) => <a className="text-accent cursor-pointer" onClick={() => nav('/ticket-invoices')}>{r.invoice_no}</a> }, { h: 'Ticket', render: (r) => r.ticket_no },
+        { h: 'T-ID', render: (r) => <span className="num">{r.id}</span> }, { h: 'Invoice', render: (r) => <a className="text-accent cursor-pointer" onClick={() => nav(`/ticket-invoices?open=${r.invoice_id}`)}>{r.invoice_no}</a> }, { h: 'Ticket', render: (r) => r.ticket_no },
         { h: 'Passenger', render: (r) => r.passenger_name }, { h: 'Sector', render: (r) => r.sector ?? r.route }, { h: 'Amount', right: true, render: (r) => money(r.receivable) },
         { h: 'Refund', render: (r) => (r.refunded ? <span className="text-muted">Refunded</span> : <a className="text-accent underline cursor-pointer" onClick={() => nav(`/refunds?line=${r.id}`)}>Refund</a>) }]} />}
     </Page>
