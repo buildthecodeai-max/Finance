@@ -8,6 +8,7 @@ import { deliver } from './portal.js';
 import { sendMail } from './email.js';
 import { authenticator } from 'otplib';
 import { decrypt } from '../crypto.js';
+import { changeMember, memberWorkload, removeMember } from './records.js';
 
 export type OperatorRole = 'readonly' | 'support' | 'billing' | 'admin';
 export type Cap = 'read' | 'support' | 'billing' | 'suspend';
@@ -102,7 +103,7 @@ export async function deleteAgency(id: number): Promise<{ name: string; tables: 
   } catch (e) { await conn.rollback(); throw e; }
   finally { conn.release(); }
 }
-export async function listOperators() { const [r]: any = await pool.query('SELECT email, name, platform_role role, totp_enabled FROM users WHERE is_platform_admin = 1 ORDER BY platform_role, email'); return r; }
+export async function listOperators() { const [r]: any = await pool.query('SELECT id, email, name, platform_role role, totp_enabled FROM users WHERE is_platform_admin = 1 ORDER BY platform_role, email'); return r; }
 
 /** The subscription fields worth showing in an audit before/after diff. */
 const subState = (s: any) => s && ({ status: s.status, plan_id: s.plan_id, billing_interval: s.billing_interval, trial_ends_at: s.trial_ends_at, platform_hold: !!s.platform_hold, is_manual: !!s.is_manual });
@@ -331,4 +332,62 @@ export async function setPlatformAdmin(email: string, role: OperatorRole | null)
   if (role !== null && !(role in ROLE_CAPS)) throw new Error(`Unknown role ${role}. Use: ${Object.keys(ROLE_CAPS).join(', ')}`);
   const [r]: any = await pool.query('UPDATE users SET is_platform_admin = ?, platform_role = ?, platform_stepup_at = NULL WHERE email = ?', [role ? 1 : 0, role, email]); if (!r.affectedRows) throw new Error(`No user with email ${email}`);
   await pool.query('INSERT INTO platform_audit_log (admin_user_id, action, detail, ip) SELECT id, ?, ?, ? FROM users WHERE email = ?', [role ? 'operator_role_set_cli' : 'operator_revoked_cli', role ? `role ${role}` : 'revoked', 'cli', email]);
+}
+
+
+/* ---------------------------------------------------------------- operators and agency users, managed from the console */
+const ROLES = ['admin', 'finance_manager', 'agent', 'viewer'] as const;
+
+/** Make an existing user an operator, change an operator's role, or (role = null) end their operator access. The user account stays. */
+export async function setOperatorRole(req: Request, userId: number, role: OperatorRole | null, reason?: string) {
+  if (role !== null && !(role in ROLE_CAPS)) throw new HttpError(400, `Role must be one of ${Object.keys(ROLE_CAPS).join(', ')}`);
+  const [[u]]: any = await pool.query('SELECT id, email, name, is_platform_admin, platform_role FROM users WHERE id = ?', [userId]); if (!u) throw new HttpError(404, 'User not found');
+  if (u.id === req.platform!.userId) throw new HttpError(409, 'You cannot change your own operator access. Ask another admin operator.');
+  if (role === null && !u.is_platform_admin) throw new HttpError(409, 'This user is not an operator');
+  if (u.is_platform_admin && u.platform_role === 'admin' && role !== 'admin') {
+    const [[n]]: any = await pool.query("SELECT COUNT(*) n FROM users WHERE is_platform_admin = 1 AND platform_role = 'admin' AND id <> ?", [u.id]);
+    if (!n.n) throw new HttpError(409, 'This is the last admin operator. Make someone else an admin first.');
+  }
+  await pool.query('UPDATE users SET is_platform_admin = ?, platform_role = ?, platform_stepup_at = NULL WHERE id = ?', [role ? 1 : 0, role, u.id]);
+  await audit(req, role ? (u.is_platform_admin ? 'operator_role_changed' : 'operator_added') : 'operator_revoked', null, `${u.email}: ${u.platform_role ?? 'none'} → ${role ?? 'none'}`, reason, { before: { role: u.platform_role ?? null }, after: { role } });
+  return { email: u.email, role };
+}
+export async function addOperator(req: Request, email: string, role: OperatorRole, reason?: string) {
+  const [[u]]: any = await pool.query('SELECT id FROM users WHERE email = ?', [email]); if (!u) throw new HttpError(404, 'No user with that email. They must have an account first.');
+  return setOperatorRole(req, u.id, role, reason);
+}
+
+async function memberOrThrow(agencyId: number, userId: number) {
+  const [[m]]: any = await pool.query('SELECT m.id, m.user_id, m.role, u.name, u.email, u.is_platform_admin FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.agency_id = ? AND m.user_id = ?', [agencyId, userId]);
+  if (!m) throw new HttpError(404, 'That user is not in this agency'); return m;
+}
+const actingTenant = (req: Request, agencyId: number) => new Tenant(agencyId, { userId: req.platform!.userId, ip: req.ip, role: 'support' });
+
+/** Edit a person inside one agency: their name and sign-in email (on the account), and their role in this agency. */
+export async function editAgencyUser(req: Request, agencyId: number, userId: number, patch: { name?: string; email?: string; role?: (typeof ROLES)[number] }, reason?: string) {
+  await agencyOrThrow(agencyId); const m = await memberOrThrow(agencyId, userId);
+  if (patch.email && patch.email !== m.email) {
+    const [[dup]]: any = await pool.query('SELECT id FROM users WHERE email = ? AND id <> ?', [patch.email, userId]); if (dup) throw new HttpError(409, 'Another account already uses that email');
+  }
+  if (patch.role && patch.role !== m.role) await changeMember(actingTenant(req, agencyId), m.id, { role: patch.role }, req.platform!.userId);
+  const acct: Record<string, string> = {}; if (patch.name && patch.name !== m.name) acct.name = patch.name; if (patch.email && patch.email !== m.email) acct.email = patch.email;
+  if (Object.keys(acct).length) await pool.query(`UPDATE users SET ${Object.keys(acct).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...Object.values(acct), userId]);
+  await audit(req, 'agency_user_edit', agencyId, `${m.email}: ${[patch.role && patch.role !== m.role ? `role ${m.role} → ${patch.role}` : '', acct.name ? `name → ${acct.name}` : '', acct.email ? `email → ${acct.email}` : ''].filter(Boolean).join('; ') || 'no change'}`, reason,
+    { before: { role: m.role, name: m.name, email: m.email }, after: { role: patch.role ?? m.role, name: acct.name ?? m.name, email: acct.email ?? m.email } });
+}
+export async function agencyUserWorkload(agencyId: number, userId: number) { await memberOrThrow(agencyId, userId); return memberWorkload(new Tenant(agencyId, { userId: 0 }), userId); }
+
+/** Remove a person from an agency (access ends at once; work can be handed to someone else). With deleteAccount, also delete their account when nothing else depends on it. */
+export async function removeAgencyUser(req: Request, agencyId: number, userId: number, o: { reassignTo?: number | null; deleteAccount?: boolean; reason?: string }) {
+  await agencyOrThrow(agencyId); const m = await memberOrThrow(agencyId, userId);
+  const out: any = await removeMember(actingTenant(req, agencyId), m.id, req.platform!.userId, o.reassignTo);
+  let account = 'kept';
+  if (o.deleteAccount) {
+    const [[other]]: any = await pool.query('SELECT COUNT(*) n FROM memberships WHERE user_id = ?', [userId]);
+    if (m.is_platform_admin) account = 'kept: operator account';
+    else if (other.n) account = 'kept: belongs to other agencies';
+    else try { await pool.query('DELETE FROM users WHERE id = ?', [userId]); account = 'deleted'; } catch (e: any) { if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) account = 'kept: has history in the books'; else throw e; }
+  }
+  await audit(req, 'agency_user_remove', agencyId, `${m.email} (${m.role}) removed; account ${account}`, o.reason, { before: { role: m.role, email: m.email }, after: { removed: true, account } });
+  return { ...out, account };
 }

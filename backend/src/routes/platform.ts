@@ -16,6 +16,13 @@ const Interval = z.enum(['monthly', 'yearly']), Reason = z.object({ reason: z.st
 
 platformRouter.get('/me', (req, res) => res.json({ ok: true, email: req.platform!.email, role: req.platform!.role, caps: req.platform!.caps }));
 platformRouter.get('/operators', P.needs('suspend'), async (_req, res) => res.json(await P.listOperators()));
+platformRouter.post('/operators', P.needs('suspend'), async (req, res) => { const b = parse(Reason.extend({ email: z.string().email(), role: z.enum(['readonly', 'support', 'billing', 'admin']) }), req.body); res.status(201).json(await P.addOperator(req, b.email, b.role, b.reason)); });
+platformRouter.put('/operators/:id', P.needs('suspend'), async (req, res) => { const b = parse(Reason.extend({ role: z.enum(['readonly', 'support', 'billing', 'admin']) }), req.body); res.json(await P.setOperatorRole(req, idParam(req), b.role, b.reason)); });
+platformRouter.delete('/operators/:id', P.needs('suspend'), async (req, res) => { const b = parse(Reason, req.body ?? {}); res.json(await P.setOperatorRole(req, idParam(req), null, b.reason)); });
+const UserId = (req: any) => { const n = Number(req.params.userId); if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Bad user id'); return n; };
+platformRouter.put('/agencies/:id/users/:userId', P.needs('suspend'), async (req, res) => { const b = parse(Reason.extend({ name: z.string().trim().min(1).max(100).optional(), email: z.string().email().optional(), role: z.enum(['admin', 'finance_manager', 'agent', 'viewer']).optional() }), req.body); const { reason, ...patch } = b; await P.editAgencyUser(req, idParam(req), UserId(req), patch, reason); res.json({ ok: true }); });
+platformRouter.get('/agencies/:id/users/:userId/workload', P.needs('suspend'), async (req, res) => res.json(await P.agencyUserWorkload(idParam(req), UserId(req))));
+platformRouter.delete('/agencies/:id/users/:userId', P.needs('suspend'), async (req, res) => { const b = parse(Reason.extend({ reassign_to: z.number().int().nullish(), delete_account: z.boolean().optional() }), req.body ?? {}); res.json({ ok: true, ...(await P.removeAgencyUser(req, idParam(req), UserId(req), { reassignTo: b.reassign_to, deleteAccount: b.delete_account, reason: b.reason })) }); });
 platformRouter.get('/overview', async (_req, res) => res.json(await P.overview()));
 platformRouter.get('/system', async (_req, res) => { const [hb]: any = await pool.query("SELECT k, v, updated_at FROM system_state WHERE k LIKE 'hb:%'"); res.json({ health: await health(), heartbeats: hb }); });
 

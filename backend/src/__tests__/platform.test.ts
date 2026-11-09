@@ -231,3 +231,45 @@ describe('two-person approval for suspensions', () => {
     await sql('UPDATE plans SET active = 0 WHERE id = ?', [id]);
   });
 });
+
+describe('managing operators and agency users from the console', () => {
+  it('admin operators add, change and revoke operators; not themselves, not the last admin, not with a lesser role', async () => {
+    const target = await operator({ role: 'readonly' });                                                         // an existing user who is a read-only operator
+    const peer = await call(null, 'POST', '/auth/register', { agencyName: `Peer ${rnd()}`, name: 'Peer', email: `peer-${rnd()}@t.dev`, password: PASSWORD });
+    expect((await P('POST', '/operators', { email: 'nobody@nowhere.dev', role: 'support' })).status).toBe(404);
+    expect((await P('POST', '/operators', { email: 'x@t.dev', role: 'god' })).status).toBe(400);
+    expect((await P('POST', '/operators', { email: peer.body.user.email, role: 'support', reason: 'new support lead' })).status).toBe(201);
+    expect((await P('GET', '/operators')).body.find((o: any) => o.email === peer.body.user.email)).toMatchObject({ role: 'support' });
+    expect((await P('PUT', `/operators/${target.id}`, { role: 'billing' })).status).toBe(200);
+    expect((await P('GET', '/operators')).body.find((o: any) => o.id === target.id).role).toBe('billing');
+    expect((await P('PUT', `/operators/${op.id}`, { role: 'support' })).status).toBe(409);                      // not your own access
+    expect((await P('DELETE', `/operators/${op.id}`)).status).toBe(409);
+    expect((await call(target.token, 'PUT', `/platform/operators/${peer.body.user.id}`, { role: 'admin' })).status).toBe(403);   // billing role cannot manage operators
+    expect((await P('DELETE', `/operators/${target.id}`, { reason: 'left the company' })).status).toBe(200);
+    expect((await call(target.token, 'GET', '/platform/overview')).status).toBe(404);                           // revoked at once
+    expect((await P('GET', '/audit')).body.find((a: any) => a.action === 'operator_revoked' && a.detail.includes(target.email))).toBeTruthy();
+  });
+
+  it('edits, re-roles and removes people inside an agency, keeping at least one admin', async () => {
+    const X = await newAgency('PlatUsers'); const fin = await addMember(X, 'finance_manager'); const agent = await addMember(X, 'agent'); const members = () => P('GET', `/agencies/${X.agencyId}`).then((r) => r.body.members as any[]);
+    const m = (await members()).find((x) => x.user_id === agent.userId);
+    const lone = (await members()).find((x) => x.user_id === X.userId);
+    expect((await P('PUT', `/agencies/${X.agencyId}/users/${agent.userId}`, { role: 'viewer', name: 'Renamed Agent', reason: 'moved to read-only' })).status).toBe(200);
+    expect((await members()).find((x) => x.user_id === agent.userId)).toMatchObject({ role: 'viewer', name: 'Renamed Agent' });
+    expect((await P('PUT', `/agencies/${X.agencyId}/users/${agent.userId}`, { email: m.email === fin.userId ? 'x@t.dev' : (await members()).find((x) => x.user_id === fin.userId).email })).status).toBe(409);   // email taken
+    expect((await P('PUT', `/agencies/${X.agencyId}/users/${X.userId}`, { role: 'viewer' })).status).toBe(409);   // the only admin
+    expect((await P('DELETE', `/agencies/${X.agencyId}/users/${X.userId}`)).status).toBe(409);
+    expect((await P('PUT', `/agencies/${B.agencyId}/users/${agent.userId}`, { role: 'admin' })).status).toBe(404);   // not their agency
+    expect((await P('GET', `/agencies/${X.agencyId}/users/${agent.userId}/workload`)).body).toMatchObject({ leads: 0 });
+    expect((await P('DELETE', `/agencies/${X.agencyId}/users/${agent.userId}`, { delete_account: true })).body.account).toBe('kept: has history in the books');   // a user who appears in the books keeps their account
+    expect((await members()).some((x) => x.user_id === agent.userId)).toBe(false);                              // but access ended
+    const fresh = (await sql("INSERT INTO users (email, name, password_hash) VALUES (?, 'Fresh', 'x')", [`fresh-${rnd()}@t.dev`]) as any).insertId; await sql("INSERT INTO memberships (agency_id, user_id, role) VALUES (?, ?, 'viewer')", [X.agencyId, fresh]);
+    const gone = await P('DELETE', `/agencies/${X.agencyId}/users/${fresh}`, { delete_account: true, reason: 'left' }); expect(gone.status).toBe(200); expect(gone.body.account).toBe('deleted');
+    expect((await sql('SELECT id FROM users WHERE id = ?', [fresh]))).toHaveLength(0);
+    const kept = await P('DELETE', `/agencies/${X.agencyId}/users/${fin.userId}`); expect(kept.status).toBe(200); expect(kept.body.account).toBe('kept');
+    expect((await sql('SELECT id FROM users WHERE id = ?', [fin.userId]))).toHaveLength(1);
+    expect(lone).toBeTruthy();
+    expect((await P('GET', '/audit')).body.find((a: any) => a.action === 'agency_user_remove')).toBeTruthy();
+    expect((await call(A.token, 'PUT', `/platform/agencies/${X.agencyId}/users/${X.userId}`, { role: 'agent' })).status).toBe(404);   // agency admins cannot use the console
+  });
+});

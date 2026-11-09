@@ -213,6 +213,37 @@ function Agencies() {
   </>;
 }
 
+const AGENCY_ROLES: [string, string][] = [['admin', 'Owner / Admin'], ['finance_manager', 'Finance manager'], ['agent', 'Agent'], ['viewer', 'Viewer']];
+const roleName = (r: string) => AGENCY_ROLES.find(([k]) => k === r)?.[1] ?? r;
+
+/** The people in one agency. Operators with admin rights can rename them, change their role, remove them, or delete the account. */
+function MembersPanel({ detail, canManage, onRefresh }: { detail: any; canManage: boolean; onRefresh(): void }) {
+  const ag = detail.agency.id; const [edit, setEdit] = useState<any>(null); const [del, setDel] = useState<any>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<any>, ok: (r: any) => string) => { setBusy(true); try { const r = await fn(); setEdit(null); setDel(null); setErr(''); setMsg(ok(r)); onRefresh(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const openDel = async (m: any) => { setErr(''); setDel({ m, reassign: '', deleteAccount: false, reason: '', work: null }); try { const w = await api(`/platform/agencies/${ag}/users/${m.user_id}/workload`); setDel((d: any) => d && { ...d, work: w }); } catch { /* optional */ } };
+  const others = (uid: number) => detail.members.filter((x: any) => x.user_id !== uid);
+  const busyWork = (w: any) => w && w.leads + w.bookings + w.quotes + w.tasks > 0;
+  return <div><div className="font-medium text-sm mb-1">Members</div>{msg && <div role="status" className="text-sm text-accent mb-2">{msg}</div>}
+    <Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => roleName(m.role) }, { h: '2FA', render: (m: any) => (m.totp_enabled ? '✓' : '—') },
+      ...(canManage ? [{ h: '', render: (m: any) => <div className="flex justify-end gap-1"><button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => { setErr(''); setEdit({ m, name: m.name, email: m.email, role: m.role, reason: '' }); }}>Edit</button><button className="btn-ghost !py-0.5 !px-2 text-xs text-danger" onClick={() => openDel(m)}>Remove</button></div> }] : [])]} />
+    {edit && <Modal title={`Edit ${edit.m.name}`} onClose={() => setEdit(null)}><Err e={err} />
+      <Field label="Name"><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
+      <Field label="Sign-in email" hint="Changes the person's login everywhere they have access."><input className="input" type="email" value={edit.email} onChange={(e) => setEdit({ ...edit, email: e.target.value })} /></Field>
+      <Field label="Role in this agency" hint="The agency always keeps at least one admin."><select className="input" value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })}>{AGENCY_ROLES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+      <Field label="Reason" hint="Kept in the operator audit log."><input className="input" value={edit.reason} onChange={(e) => setEdit({ ...edit, reason: e.target.value })} /></Field>
+      <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setEdit(null)}>Cancel</button>
+        <button className="btn" disabled={busy || !edit.name.trim() || !edit.email.trim()} onClick={() => run(() => api(`/platform/agencies/${ag}/users/${edit.m.user_id}`, 'PUT', { name: edit.name.trim(), email: edit.email.trim(), role: edit.role, reason: edit.reason }), () => `${edit.name} updated.`)}>{busy ? 'Saving…' : 'Save changes'}</button></div></Modal>}
+    {del && <Modal title={`Remove ${del.m.name}`} onClose={() => setDel(null)}><Err e={err} />
+      <p className="text-sm mb-3">{del.m.name} ({roleName(del.m.role)}) will lose access to <b>{detail.agency.name}</b> immediately.</p>
+      {busyWork(del.work) && <><div className="text-sm text-warn mb-2">Open work: {del.work.leads} leads, {del.work.bookings} bookings, {del.work.quotes} quotes, {del.work.tasks} tasks.</div>
+        <Field label="Hand their open work to"><select className="input" value={del.reassign} onChange={(e) => setDel({ ...del, reassign: e.target.value })}><option value="">Leave as is</option>{others(del.m.user_id).map((x: any) => <option key={x.user_id} value={x.user_id}>{x.name}</option>)}</select></Field></>}
+      <label className="flex items-start gap-2 text-sm mb-3"><input type="checkbox" className="mt-0.5" checked={del.deleteAccount} onChange={(e) => setDel({ ...del, deleteAccount: e.target.checked })} /><span>Also delete their account<span className="block text-xs text-muted">Only happens if they belong to no other agency and appear nowhere in the books; otherwise the account is kept.</span></span></label>
+      <Field label="Reason" hint="Kept in the operator audit log."><input className="input" value={del.reason} onChange={(e) => setDel({ ...del, reason: e.target.value })} /></Field>
+      <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setDel(null)}>Cancel</button>
+        <button className="btn !bg-danger" disabled={busy} onClick={() => run(() => api(`/platform/agencies/${ag}/users/${del.m.user_id}`, 'DELETE', { reason: del.reason, delete_account: del.deleteAccount, reassign_to: del.reassign ? Number(del.reassign) : null }), (r) => `${del.m.name} removed${del.deleteAccount ? ` (account ${r.account})` : ''}.`)}>{busy ? 'Removing…' : 'Remove'}</button></div></Modal>}
+  </div>;
+}
+
 function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: any; me: Me; onClose(): void; onAct(a: Act): void; onRefresh(): void }) {
   const ag = detail.agency;
   return <Modal title={ag.name} wide onClose={onClose}>
@@ -225,8 +256,8 @@ function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: 
           <div className="card"><div className="text-xs text-muted">Usage</div><div className="text-sm mt-1">{detail.usage.seats} members · {detail.usage.branches} branches · {detail.usage.bookings} bookings this month</div><div className="text-xs text-muted mt-2">Last active {day(detail.last_active)} · {detail.requests_30d} req / 30 d</div></div>
           <div className="card"><div className="text-xs text-muted">Health</div><div className="text-sm mt-1">{detail.open_critical_exceptions} critical exceptions · {detail.failed_emails_7d} failed emails (7 d)</div></div>
         </div>
+        <MembersPanel detail={detail} canManage={me.caps.includes('suspend')} onRefresh={onRefresh} />
         <div className="grid gap-4 md:grid-cols-2">
-          <div><div className="font-medium text-sm mb-1">Members</div><Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => m.role }, { h: '2FA', render: (m: any) => (m.totp_enabled ? '✓' : '—') }]} /></div>
           <div><div className="font-medium text-sm mb-1">Billing events</div><Table rows={detail.billing_events.map((m: any, i: number) => ({ ...m, id: i }))} empty="None" cols={[{ h: 'When', render: (e: any) => <span className="text-xs num">{day(e.created_at)}</span> }, { h: 'Event', render: (e: any) => <>{e.kind}<div className="text-xs text-muted">{e.detail}</div></> }]} /></div>
         </div>
         <div><div className="font-medium text-sm mb-1">Support access history</div>
@@ -659,9 +690,28 @@ function Approvals({ onChange }: { onChange(): void }) {
         <div className="flex gap-1 justify-end"><button className="btn" onClick={() => confirm(`Approve suspending ${r.agency_name}? Their workspace becomes read-only immediately.`) && run(() => api(`/platform/approvals/${r.id}/approve`, 'POST', {}))}>Approve</button><button className="btn-ghost" onClick={() => run(() => api(`/platform/approvals/${r.id}/reject`, 'POST', {}))}>Reject</button></div> }]} /></>;
 }
 
-function Operators() { const [rows, setRows] = useState<any[]>([]); useEffect(() => { api('/platform/operators').then(setRows); }, []);
-  return <><p className="text-sm text-muted mb-3">Operators and their roles are managed from the server only: <span className="num">npm run platform:admin -- grant &lt;email&gt; &lt;role&gt;</span>. Roles: readonly · support · billing · admin.</p>
-    <Table rows={rows.map((r, i) => ({ ...r, id: i }))} cols={[{ h: 'Operator', render: (r: any) => <>{r.name}<div className="text-xs text-muted">{r.email}</div></> }, { h: 'Role', render: (r: any) => <span className="capitalize">{r.role}</span> }, { h: '2FA', render: (r: any) => (r.totp_enabled ? '✓' : <span className="text-danger">off</span>) }]} /></>; }
+const OP_ROLES: [string, string][] = [['readonly', 'Read-only: look at everything'], ['support', 'Support: read-only customer sessions'], ['billing', 'Billing: trials, plans, invoiced access'], ['admin', 'Admin: everything, incl. users and suspensions']];
+function Operators() {
+  const { me } = useOp(); const [rows, setRows] = useState<any[]>([]); const [dlg, setDlg] = useState<any>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false);
+  const load = () => api('/platform/operators').then(setRows); useEffect(() => { load(); }, []);
+  const run = async (fn: () => Promise<any>, ok: string) => { setBusy(true); try { await fn(); setDlg(null); setErr(''); setMsg(ok); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  return <>
+    <div className="flex flex-wrap items-center justify-between gap-2 mb-4"><p className="text-sm text-muted max-w-2xl">Operators can use this console. An admin operator can add one (the person needs an account first), change a role, or end their operator access. Their account and agency access stay as they are.</p>
+      <button className="btn" onClick={() => { setErr(''); setDlg({ kind: 'add', email: '', role: 'support', reason: '' }); }}>Add operator</button></div>
+    {msg && <div role="status" className="text-sm text-accent mb-3">{msg}</div>}
+    <Table rows={rows} cols={[{ h: 'Operator', render: (r: any) => <>{r.name}{r.email === me.email && <span className="ml-1.5 text-xs text-muted">(you)</span>}<div className="text-xs text-muted">{r.email}</div></> }, { h: 'Role', render: (r: any) => <span className="capitalize">{r.role}</span> }, { h: '2FA', render: (r: any) => (r.totp_enabled ? '✓' : <span className="text-danger">off</span>) },
+      { h: '', render: (r: any) => r.email === me.email ? '' : <div className="flex justify-end gap-1"><button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => { setErr(''); setDlg({ kind: 'edit', r, role: r.role, reason: '' }); }}>Change role</button><button className="btn-ghost !py-0.5 !px-2 text-xs text-danger" onClick={() => { setErr(''); setDlg({ kind: 'revoke', r, reason: '' }); }}>Revoke</button></div> }]} />
+    {dlg && <Modal title={dlg.kind === 'add' ? 'Add operator' : dlg.kind === 'edit' ? `Change role: ${dlg.r.name}` : `Revoke ${dlg.r.name}`} onClose={() => setDlg(null)}><Err e={err} />
+      {dlg.kind === 'add' && <Field label="Email of an existing account" hint="They must also turn on 2FA before the console opens for them."><input className="input" type="email" value={dlg.email} onChange={(e) => setDlg({ ...dlg, email: e.target.value })} /></Field>}
+      {dlg.kind === 'revoke' ? <p className="text-sm mb-3">{dlg.r.email} will no longer be able to open the platform console. Their account is not deleted.</p>
+        : <Field label="Operator role"><div className="space-y-1.5">{OP_ROLES.map(([k, l]) => <label key={k} className="flex items-center gap-2 text-sm"><input type="radio" name="oprole" checked={dlg.role === k} onChange={() => setDlg({ ...dlg, role: k })} />{l}</label>)}</div></Field>}
+      <Field label="Reason" hint="Kept in the operator audit log."><input className="input" value={dlg.reason} onChange={(e) => setDlg({ ...dlg, reason: e.target.value })} /></Field>
+      <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setDlg(null)}>Cancel</button>
+        {dlg.kind === 'add' && <button className="btn" disabled={busy || !dlg.email.includes('@')} onClick={() => run(() => api('/platform/operators', 'POST', { email: dlg.email.trim(), role: dlg.role, reason: dlg.reason }), `${dlg.email} is now an operator.`)}>Add operator</button>}
+        {dlg.kind === 'edit' && <button className="btn" disabled={busy || dlg.role === dlg.r.role} onClick={() => run(() => api(`/platform/operators/${dlg.r.id}`, 'PUT', { role: dlg.role, reason: dlg.reason }), `${dlg.r.name} is now ${dlg.role}.`)}>Save role</button>}
+        {dlg.kind === 'revoke' && <button className="btn !bg-danger" disabled={busy} onClick={() => run(() => api(`/platform/operators/${dlg.r.id}`, 'DELETE', { reason: dlg.reason }), `${dlg.r.name} is no longer an operator.`)}>Revoke access</button>}</div></Modal>}
+  </>;
+}
 
 function Audit() { const [rows, setRows] = useState<any[]>([]); useEffect(() => { api('/platform/audit').then(setRows); }, []);
   return <Table rows={rows} empty="No operator actions yet" cols={[{ h: 'When', render: (a: any) => <span className="text-xs num">{day(a.created_at)}</span> }, { h: 'Operator', render: (a: any) => <>{a.admin_email}{a.actor_role && <div className="text-xs text-muted capitalize">{a.actor_role}</div>}</> }, { h: 'Action', render: (a: any) => a.action.replace(/_/g, ' ') }, { h: 'Agency', render: (a: any) => a.agency_name ?? '—' }, { h: 'Detail / reason', render: (a: any) => <>{a.detail}{a.reason && <div className="text-xs text-muted">“{a.reason}”</div>}{(a.before_json || a.after_json) && <details className="text-xs text-muted mt-1"><summary className="cursor-pointer">Before / after</summary><pre className="num whitespace-pre-wrap break-all mt-1">{JSON.stringify({ before: a.before_json, after: a.after_json }, null, 1)}</pre></details>}</> }]} />; }
