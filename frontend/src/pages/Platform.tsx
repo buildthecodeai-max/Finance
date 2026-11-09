@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Building2, CheckSquare, Clock, DollarSign, Layers, LayoutDashboard, Plane, Search, Settings, ShieldAlert, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Building2, ScrollText, Server, CheckSquare, Clock, DollarSign, Layers, LayoutDashboard, Plane, Search, Settings, ShieldAlert, Users } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Pill, Table } from '../components/ui';
@@ -20,6 +20,14 @@ interface Me { email: string; role: string; caps: Cap[] }
 const OpCtx = createContext<{ me: Me; guarded<T>(fn: () => Promise<T>): Promise<T> }>(null as any);
 const useOp = () => useContext(OpCtx);
 type Tab = 'dashboard' | 'overview' | 'agencies' | 'plans' | 'audit' | 'security' | 'system' | 'operators' | 'approvals';
+
+const TAB_ICON: Record<string, any> = { dashboard: LayoutDashboard, overview: Activity, agencies: Building2, plans: Layers, audit: ScrollText, approvals: CheckSquare, operators: Users, security: ShieldAlert, system: Server };
+const TAB_HEAD: Record<string, [string, string]> = {
+  dashboard: ['Dashboard', 'The whole platform at a glance: revenue, trials, agencies and what needs attention.'], overview: ['Overview', 'Fleet-wide usage and health.'],
+  agencies: ['Agencies', 'Every customer agency, its plan and status.'], plans: ['Plans', 'Prices, limits and features customers can choose from.'],
+  audit: ['Operator audit', 'Every operator action, kept as an append-only record.'], approvals: ['Approvals', 'Suspensions that need a second operator.'],
+  operators: ['Operators', 'Who can use this console, and what they can do.'], security: ['Security events', 'Sign-in and access events across all agencies.'], system: ['System', 'Service health and background jobs.'],
+};
 
 /** Operator-only console: fleet overview, agencies, plans, audit. Every change asks for a reason and is written to an append-only log. */
 export default function Platform() {
@@ -63,7 +71,7 @@ export default function Platform() {
       <div className="flex flex-1 min-h-0">
         {/* Sidebar (desktop) */}
         {me && !need2fa && (
-          <nav className="w-52 shrink-0 bg-surface border-r border-line py-4 px-2 hidden md:flex flex-col overflow-y-auto">
+          <nav className="w-60 shrink-0 bg-surface border-r border-line py-5 px-3 hidden md:flex flex-col overflow-y-auto">
             {navGroups.map((group) => (
               <div key={group.label} className="mb-4">
                 <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{group.label}</div>
@@ -71,7 +79,7 @@ export default function Platform() {
                   <button key={k} role="tab" aria-selected={tab === k}
                     className={`w-full text-left flex items-center justify-between rounded-lg px-3 py-2 text-sm mb-0.5 transition-colors ${tab === k ? 'bg-accent/10 text-accent font-medium' : 'text-muted hover:bg-surface2 hover:text-fg'}`}
                     onClick={() => setTab(k)}>
-                    <span>{l}</span>
+                    <span className="flex items-center gap-2.5">{(() => { const I = TAB_ICON[k]; return <I size={16} className="shrink-0" />; })()}{l}</span>
                     {k === 'approvals' && pending > 0 && (
                       <span className="min-w-[1.1rem] h-4 px-1 text-[10px] font-bold rounded-full bg-danger text-white flex items-center justify-center leading-none">{pending}</span>
                     )}
@@ -84,12 +92,13 @@ export default function Platform() {
 
         {/* Content */}
         <main className="flex-1 min-w-0 overflow-auto">
-          <div className="max-w-[1200px] mx-auto px-4 md:px-6 pt-6 pb-20 md:pb-6">
+          <div className="w-full px-4 md:px-8 pt-6 pb-20 md:pb-8">
             {need2fa ? <TwoFactorGate onDone={() => { setNeed2fa(false); api('/platform/me').then(setMe); }} />
               : !me ? <div className="skeleton h-40" />
               : <OpCtx.Provider value={{ me, guarded }}>
                 {/* Mobile tab strip */}
-                <div className="hidden md:flex flex-wrap gap-2 mb-5" role="tablist">
+                <div className="hidden md:block mb-6"><h1 className="text-2xl font-semibold">{TAB_HEAD[tab][0]}</h1><p className="text-sm text-muted mt-0.5">{TAB_HEAD[tab][1]}</p></div>
+                <div className="flex md:hidden gap-2 mb-5 overflow-x-auto pb-1" role="tablist">
                   {allTabs.map(([k, l]) => (
                     <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'btn' : 'btn-ghost'} onClick={() => setTab(k)}>
                       {l}{k === 'approvals' && pending > 0 && <span className="ml-1 min-w-[1rem] h-4 px-0.5 text-[9px] font-bold rounded-full bg-danger text-white inline-flex items-center justify-center">{pending}</span>}
@@ -303,11 +312,6 @@ function KpiCard({ label, icon: Icon, rawValue, formattedValue, sub, alert = fal
       }`}
       style={{ animationDelay: `${index * 55}ms` }}
     >
-      {glow && (
-        <div className={`absolute -top-10 -right-4 w-32 h-32 rounded-full pointer-events-none opacity-70 ${
-          glow === 'accent' ? 'bg-accent/15' : 'bg-success/15'
-        }`} style={{ filter: 'blur(20px)' }} />
-      )}
       <div className={`flex items-center gap-1.5 text-xs font-medium mb-1.5 relative z-10 ${alert ? 'text-warn' : 'text-muted'}`}>
         <Icon size={12} />{label}
       </div>
@@ -403,7 +407,7 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
         <div className="rounded-lg border border-warn/30 bg-warn/5 px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-1.5">
           <AlertTriangle size={15} className="text-warn shrink-0" />
           {alerts.map((a) => <span key={a} className="text-sm text-warn">{a}</span>)}
-          {(o?.pending_approvals || o?.platform_holds) && (
+          {!!(o?.pending_approvals || o?.platform_holds) && (
             <button className="ml-auto text-xs font-medium text-warn underline underline-offset-2 shrink-0" onClick={() => onNavigate('approvals')}>Review →</button>
           )}
         </div>
