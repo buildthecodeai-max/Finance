@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { Activity, LayoutGrid, List, MoreHorizontal, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { Activity, Check, Copy, Infinity as InfinityIcon, LayoutGrid, List, MoreHorizontal, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Avatar, Err, Field, Modal, Pager, Pill, Skeleton, Table } from '../components/ui';
@@ -734,7 +734,7 @@ function FeatureEditor({ value, onChange }: { value: string[]; onChange(v: strin
   const custom = parents.filter((f) => !(FEATURES as readonly string[]).includes(f));
   const row = (f: string, builtin: boolean) => (
     <div key={f} className="rounded-lg border border-line p-2.5">
-      <div className="flex items-center justify-between gap-2"><span className="text-sm font-medium">{f.replace(/_/g, ' ')}{builtin && <span className="ml-2 text-[11px] font-normal text-muted">switches this on for agencies</span>}</span>
+      <div className="flex items-center justify-between gap-2"><span className="text-sm font-medium">{featName(f)}{builtin && <span className="ml-2 text-[11px] font-normal text-muted">switches this on for agencies</span>}</span>
         <button type="button" className="text-xs text-danger hover:underline" onClick={() => toggleBuiltin(f, false)} aria-label={`Remove ${f}`}>Remove</button></div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {subsOf(f).map((x) => <span key={x} className="chip !m-0 inline-flex items-center gap-1">{x}<button type="button" className="text-muted hover:text-danger" aria-label={`Remove ${x}`} onClick={() => onChange(value.filter((y) => y !== f + SEP + x))}>×</button></span>)}
@@ -742,10 +742,41 @@ function FeatureEditor({ value, onChange }: { value: string[]; onChange(v: strin
         <button type="button" className="btn-ghost !h-7 !px-2 text-xs" disabled={!clean(sub[f] ?? '')} onClick={() => addSub(f)}>Add</button></div>
     </div>);
   return (<div>
-    <div className="mb-2 flex flex-wrap gap-x-4 gap-y-2">{FEATURES.map((f) => <label key={f} className="flex gap-1.5 items-center text-sm"><input type="checkbox" checked={value.includes(f)} onChange={(e) => toggleBuiltin(f, e.target.checked)} />{f.replace(/_/g, ' ')}</label>)}</div>
+    <div className="mb-2 flex flex-wrap gap-x-4 gap-y-2">{FEATURES.map((f) => <label key={f} className="flex gap-1.5 items-center text-sm"><input type="checkbox" checked={value.includes(f)} onChange={(e) => toggleBuiltin(f, e.target.checked)} />{featName(f)}</label>)}</div>
     <div className="grid gap-2 sm:grid-cols-2">{[...parents.filter((f) => (FEATURES as readonly string[]).includes(f)).map((f) => row(f, true)), ...custom.map((f) => row(f, false))]}</div>
     <div className="mt-3 flex flex-wrap items-center gap-2"><input className="input !w-64" placeholder="Add a feature, e.g. Priority onboarding" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addParent(); } }} /><button type="button" className="btn-ghost" disabled={!clean(name)} onClick={addParent}>Add feature</button>{msg && <span className="text-xs text-warn">{msg}</span>}</div>
   </div>);
+}
+
+const FEATURE_NAME: Record<string, string> = { portal: 'Client portal & payment links', accounting_export: 'Accounting export', automation: 'Automation rules', scheduled_reports: 'Scheduled reports', integrations: 'Webhooks & integrations', api: 'Public API', ai_assistant: 'AI assistant' };
+const featName = (f: string) => FEATURE_NAME[f] ?? f.replace(/_/g, ' ');
+const TIER_HUE = ['info', 'accent', 'success', 'warn'];
+const yearlySaving = (p: any) => (Number(p.price_monthly) > 0 && Number(p.price_yearly) > 0 ? Math.round((1 - Number(p.price_yearly) / (Number(p.price_monthly) * 12)) * 100) : null);
+
+/** One plan as an agency would see it: price, limits and what is included. Used for the list and for the live preview while editing. */
+function PlanCard({ p, tier = 0, popular = false, share, canEdit, onEdit, onCopy, preview = false }: { p: any; tier?: number; popular?: boolean; share?: number; canEdit?: boolean; onEdit?(): void; onCopy?(): void; preview?: boolean }) {
+  const hue = TIER_HUE[tier % TIER_HUE.length]; const save = yearlySaving(p); const features: string[] = p.features ?? [];
+  const parents = features.filter((f) => !f.includes(' > ')); const subs = (f: string) => features.filter((x) => x.startsWith(f + ' > ')).map((x) => x.slice(f.length + 3));
+  const limits: [any, string][] = [[p.max_seats === '' ? null : p.max_seats, 'Seats'], [p.max_branches === '' ? null : p.max_branches, 'Branches'], [p.max_bookings_month === '' ? null : p.max_bookings_month, 'Bookings / mo']];
+  return (
+    <article className={`card glow-card flex flex-col overflow-hidden !p-0 ${p.active ? '' : 'opacity-75'} ${popular ? 'ring-2 ring-accent' : ''}`} style={{ ['--hue' as any]: `var(--${hue})` }}>
+      <div className="relative px-5 pb-4 pt-5" style={{ background: `linear-gradient(135deg, rgb(var(--${hue}) / .18), transparent 70%)` }}>
+        <div className="flex items-start justify-between gap-2"><div className="min-w-0"><h3 className="truncate text-lg font-bold tracking-tight">{p.name || 'Untitled plan'}</h3><div className="text-xs text-muted num">{p.code || 'code'}</div></div>
+          <div className="flex shrink-0 flex-col items-end gap-1">{popular && <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent-ink">Most used</span>}
+            <span className={`pill ${p.active ? 'bg-success/15 text-success' : 'bg-muted/15 text-muted'}`}>{p.active ? 'Available' : 'Hidden'}</span></div></div>
+        <p className="mt-2 min-h-[2.25rem] text-xs leading-relaxed text-muted">{p.description || 'No description yet.'}</p>
+        <div className="mt-3 flex items-baseline gap-1"><span className="text-3xl font-extrabold num tracking-tight">{money(Number(p.price_monthly) || 0, p.currency || 'USD')}</span><span className="text-sm text-muted">/ month</span></div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted num"><span>{money(Number(p.price_yearly) || 0, p.currency || 'USD')} / year</span>{save !== null && save > 0 && <span className="rounded-full bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold text-success">Save {save}%</span>}<span>· {p.trial_days}-day trial</span></div>
+      </div>
+      <div className="grid grid-cols-3 border-y border-line/70 text-center">{limits.map(([v, l], i) => <div key={l} className={`px-2 py-2.5 ${i ? 'border-l border-line/70' : ''}`}><div className="flex h-6 items-center justify-center text-lg font-bold num">{v === null || v === undefined ? <InfinityIcon size={18} aria-label="Unlimited" /> : v}</div><div className="text-[10px] uppercase tracking-wide text-muted">{l}</div></div>)}</div>
+      <ul className="flex-1 space-y-1.5 px-5 py-4 text-sm">{parents.map((f) => <li key={f}><div className="flex items-start gap-2"><Check size={15} className="mt-0.5 shrink-0" style={{ color: `rgb(var(--${hue}))` }} /><span>{featName(f)}</span></div>
+        {subs(f).length > 0 && <ul className="ml-6 mt-1 space-y-0.5 text-xs text-muted">{subs(f).map((x) => <li key={x}>· {x}</li>)}</ul>}</li>)}
+        {!parents.length && <li className="text-xs text-muted">No features listed.</li>}</ul>
+      {!preview && <div className="border-t border-line/70 px-5 py-3">
+        <div className="mb-1.5 flex items-center justify-between text-xs"><span className="text-muted"><b className="text-fg num">{p.agencies}</b> agenc{p.agencies === 1 ? 'y' : 'ies'}</span><span className={p.stripe_price_monthly ? 'text-success' : 'text-warn'}>{p.stripe_price_monthly ? 'Stripe connected' : 'Stripe not set'}</span></div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-surface2" title={`${Math.round((share ?? 0) * 100)}% of agencies`}><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.max(share ? 4 : 0, Math.round((share ?? 0) * 100))}%`, background: `rgb(var(--${hue}))` }} /></div>
+        {canEdit && <div className="mt-3 flex gap-2"><button className="btn flex-1" onClick={onEdit}>Edit plan</button><button className="btn-ghost" onClick={onCopy} aria-label={`Duplicate ${p.name}`} title="Duplicate as a new plan"><Copy size={15} /></button></div>}</div>}
+    </article>);
 }
 
 function Plans() {
@@ -772,19 +803,27 @@ function Plans() {
   const save_pct = edit && Number(edit.price_monthly) > 0 && Number(edit.price_yearly) > 0 ? Math.round((1 - Number(edit.price_yearly) / (Number(edit.price_monthly) * 12)) * 100) : null;
   const bad = edit ? problem(edit) : '';
   return <>
-    <div className="flex flex-wrap justify-between items-center gap-2 mb-4"><p className="text-sm text-muted max-w-2xl">Click a plan to edit it. Changes apply to every agency on the plan immediately; the reason you give is kept in the audit log.</p>{canEdit && <button className="btn" onClick={() => { setErr(''); setEdit(blank); }}>New plan</button>}</div>
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {plans.map((p: any) => (
-        <div key={p.id} className={`card flex flex-col gap-3 ${p.active ? '' : 'opacity-70'}`}>
-          <div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="font-semibold text-lg">{p.name} <span className="text-xs font-normal text-muted num">{p.code}</span></div><div className="text-xs text-muted">{p.description || '—'}</div></div>
-            <span className={`pill ${p.active ? 'bg-success/15 text-success' : 'bg-muted/15 text-muted'}`}>{p.active ? 'Available' : 'Hidden'}</span></div>
-          <div><span className="text-2xl font-semibold num">{money(p.price_monthly, p.currency)}</span><span className="text-sm text-muted"> / month</span><div className="text-xs text-muted num">{money(p.price_yearly, p.currency)} / year · {p.trial_days}-day trial</div></div>
-          <div className="text-sm grid grid-cols-3 gap-2 text-center">{[[p.max_seats, 'seats'], [p.max_branches, 'branches'], [p.max_bookings_month, 'bookings/mo']].map(([v, l]: any) => <div key={l} className="rounded-lg bg-surface2 py-1.5"><div className="font-semibold num">{v ?? '∞'}</div><div className="text-[11px] text-muted">{l}</div></div>)}</div>
-          <div className="flex flex-wrap gap-1">{p.features.filter((f: string) => !f.includes(' > ')).map((f: string) => { const n = p.features.filter((x: string) => x.startsWith(f + ' > ')).length; return <span key={f} className="chip" title={n ? p.features.filter((x: string) => x.startsWith(f + ' > ')).map((x: string) => x.slice(f.length + 3)).join(', ') : undefined}>{f.replace(/_/g, ' ')}{n ? ` +${n}` : ''}</span>; })}</div>
-          <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted"><span>{p.agencies} agenc{p.agencies === 1 ? 'y' : 'ies'} · Stripe {p.stripe_price_monthly ? '✓' : <span className="text-warn">not set</span>}</span>{canEdit && <button className="btn-ghost" onClick={() => open(p)}>Edit</button>}</div>
-        </div>))}
-    </div>
+    {(() => {
+      const sorted = [...plans].sort((x, y) => Number(x.sort) - Number(y.sort) || Number(x.price_monthly) - Number(y.price_monthly)); const totalAg = plans.reduce((t, p) => t + Number(p.agencies), 0); const top = [...plans].sort((x, y) => y.agencies - x.agencies)[0];
+      const allFeat = [...new Set(sorted.flatMap((p) => p.features.filter((f: string) => !f.includes(' > '))))] as string[];
+      const stat = (label: string, value: any, hint: string, Icon: any, hue = 'accent') => <div className="card glow-card" style={{ ['--hue' as any]: `var(--${hue})` }}><div className="flex items-start justify-between"><span className="text-xs font-medium text-muted">{label}</span><span className="grid h-8 w-8 place-items-center rounded-xl" style={{ background: `rgb(var(--${hue}) / .14)`, color: `rgb(var(--${hue}))` }}><Icon size={16} /></span></div><div className="mt-2 truncate text-2xl font-bold num">{value}</div><div className="mt-0.5 truncate text-[11px] text-muted">{hint}</div></div>;
+      return <div className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3"><p className="max-w-2xl text-sm text-muted">Edits apply to every agency on the plan straight away. Each change asks for a reason and is kept in the audit log.</p>{canEdit && <button className="btn" onClick={() => { setErr(''); setEdit(blank); }}><Plus size={16} />New plan</button>}</div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {stat('Plans', plans.length, `${plans.filter((p) => p.active).length} available to customers`, Layers)}{stat('Agencies on a plan', totalAg, 'across all plans', Building2, 'info')}
+          {stat('Most used', top && top.agencies ? top.name : '—', top && top.agencies ? `${top.agencies} agenc${top.agencies === 1 ? 'y' : 'ies'}` : 'Nobody yet', Sparkles, 'success')}{stat('Stripe', `${plans.filter((p) => p.stripe_price_monthly).length}/${plans.length}`, 'plans connected to card billing', DollarSign, plans.every((p) => p.stripe_price_monthly) ? 'success' : 'warn')}</div>
+        {!plans.length ? <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-96" />)}</div>
+          : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{sorted.map((p, i) => <PlanCard key={p.id} p={p} tier={i} popular={top?.id === p.id && p.agencies > 0 && plans.length > 1} share={totalAg ? p.agencies / totalAg : 0} canEdit={canEdit} onEdit={() => open(p)}
+            onCopy={() => { setErr(''); setEdit({ ...p, isNew: true, id: undefined, code: '', name: `${p.name} copy`, agencies: 0, stripe_price_monthly: '', stripe_price_yearly: '', reason: '' }); }} />)}</div>}
+        {plans.length > 1 && <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-3 text-sm font-semibold">Compare plans</div>
+          <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>&nbsp;</th>{sorted.map((p) => <th key={p.id} className="text-center">{p.name}</th>)}</tr></thead><tbody>
+            {([['Monthly price', (p: any) => money(p.price_monthly, p.currency)], ['Yearly price', (p: any) => money(p.price_yearly, p.currency)], ['Free trial', (p: any) => `${p.trial_days} days`], ['Seats', (p: any) => p.max_seats ?? '∞'], ['Branches', (p: any) => p.max_branches ?? '∞'], ['Bookings / month', (p: any) => p.max_bookings_month ?? '∞']] as [string, (p: any) => any][]).map(([l, f]) => <tr key={l}><td className="text-sm text-muted">{l}</td>{sorted.map((p) => <td key={p.id} className="text-center text-sm font-medium num">{f(p)}</td>)}</tr>)}
+            {allFeat.map((f) => <tr key={f}><td className="text-sm">{featName(f)}</td>{sorted.map((p) => <td key={p.id} className="text-center">{p.features.includes(f) ? <Check size={16} className="mx-auto text-success" aria-label="Included" /> : <span className="text-muted" aria-label="Not included">—</span>}</td>)}</tr>)}
+          </tbody></table></div></div>}
+      </div>;
+    })()}
     {edit && <Modal title={edit.isNew ? 'New plan' : `Edit ${edit.name}`} wide onClose={() => setEdit(null)}><Err e={err} />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]"><div className="min-w-0">
       <h4 className="text-sm font-semibold mb-2">Basics</h4>
       <div className="grid sm:grid-cols-2 gap-x-4">
         <Field label="Name"><input className="input" value={edit.name} onChange={up('name')} /></Field>
@@ -813,6 +852,8 @@ function Plans() {
       </div>
       {!edit.isNew && <>{edit.agencies > 0 && <div className="text-sm text-warn mb-3">{edit.agencies} agenc{edit.agencies === 1 ? 'y is' : 'ies are'} on this plan; changes apply to them immediately.</div>}
         <Field label="Reason for the change" hint="Kept in the audit log."><input className="input" value={edit.reason ?? ''} onChange={up('reason')} /></Field></>}
+      </div>
+      <aside className="hidden lg:block"><div className="sticky top-0"><div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted">Live preview · what agencies see</div><PlanCard preview p={{ ...edit, price_monthly: edit.price_monthly === '' ? 0 : edit.price_monthly, features: edit.features ?? [] }} tier={Math.max(0, plans.findIndex((x: any) => x.id === edit.id))} /></div></aside></div>
       <div className="flex items-center justify-end gap-3 mt-2">{bad && <span className="text-xs text-warn mr-auto">{bad}</span>}<button className="btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn" disabled={!!bad || busy} onClick={save}>{busy ? 'Saving…' : edit.isNew ? 'Create plan' : 'Save changes'}</button></div></Modal>}
   </>;
 }
