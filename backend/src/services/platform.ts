@@ -5,7 +5,8 @@ import { HttpError } from '../errors.js';
 import { Tenant, pool } from '../db.js';
 import { FEATURES, getSub, grantManual, usage } from './billing.js';
 import { aiStatus, aiUsedThisMonth, llm } from './ai.js';
-import { dropAiKeyCache, resolveAiKey } from './aiKey.js';
+import { dropAiKeyCache, resolveAi } from './aiKey.js';
+import { DEFAULT_MODELS, PROVIDERS, PROVIDER_LABEL, checkBaseUrl, type AiProvider } from './aiProviders.js';
 import { encrypt } from '../crypto.js';
 import { deliver } from './portal.js';
 import { counters, health } from './observability.js';
@@ -181,7 +182,7 @@ export async function agencyDetail(id: number) {
   const [[act]]: any = await pool.query('SELECT MAX(created_at) at, COUNT(*) n FROM api_log WHERE agency_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)', [id]);
   return { agency: a, subscription: s ? { status: s.status, plan: s.plan_code, plan_name: s.plan_name, interval: s.billing_interval, trial_ends_at: s.trial_ends_at, current_period_end: s.current_period_end, grace_until: s.grace_until, manual: !!s.is_manual,
       cancel_at_period_end: !!s.cancel_at_period_end, platform_hold: !!s.platform_hold, hold_reason: s.hold_reason, stripe_customer_id: s.stripe_customer_id } : null,
-    usage: await usage(id), ai: { ...(await aiStatus(id)), ...(await aiUsedThisMonth(id)), key_configured: !!(await resolveAiKey()).key }, members, billing_events: events, security_events: secEv, support_sessions: sessions, failed_emails_7d: fail.n, open_critical_exceptions: crit.n, last_active: act.at, requests_30d: act.n };
+    usage: await usage(id), ai: { ...(await aiStatus(id)), ...(await aiUsedThisMonth(id)), key_configured: !!(await resolveAi()).key }, members, billing_events: events, security_events: secEv, support_sessions: sessions, failed_emails_7d: fail.n, open_critical_exceptions: crit.n, last_active: act.at, requests_30d: act.n };
 }
 
 /* ------------------------------------------------------------------ actions on an agency (all need a reason, all are audited) */
@@ -601,7 +602,7 @@ export async function systemStatus() {
     queues: { webhook_backlog: backlog, webhook_dead: dead, failed_emails_24h: failedMail, critical_exceptions: critical },
     integrations: {
       email: !!config.sendgridKey, storage: !!(config.r2.bucket && config.r2.accessKeyId), payments: !!config.stripeKey, payments_webhook: !!config.stripeWebhookSecret,
-      ai: !!(await resolveAiKey()).key, exchange_rates: !!config.oxrAppId, cache: !!config.redisUrl,
+      ai: !!(await resolveAi()).key, exchange_rates: !!config.oxrAppId, cache: !!config.redisUrl,
     },
   };
 }
@@ -615,26 +616,37 @@ export async function setUserPasswordByOperator(req: Request, id: number, passwo
 }
 
 
-/* ------------------------------------------------------------------ AI provider key (set from the console, kept encrypted) */
+/* ------------------------------------------------------------------ AI provider (which service, key and model; set from the console, kept encrypted) */
 export async function aiKeyInfo() {
-  const r = await resolveAiKey();
-  return { configured: !!r.key, source: r.source, hint: r.hint, updated_at: r.updated_at, updated_by: r.updated_by, model: config.aiModel, environment_key: !!config.anthropicKey };
+  const r = await resolveAi(); const env = process.env;
+  return { configured: !!r.key, source: r.source, provider: r.provider, model: r.model, base_url: r.baseUrl, hint: r.hint, updated_at: r.updated_at, updated_by: r.updated_by, environment_key: !!(config.anthropicKey || config.openaiKey || env.AI_PROVIDER),
+    providers: PROVIDERS.map((p) => ({ key: p, label: PROVIDER_LABEL[p], default_model: DEFAULT_MODELS[p] })) };
 }
 
-/** Saves a key an operator pasted, but only after one real request proves it works. The key is never returned, logged or audited: only its last four characters. */
-export async function setAiKey(req: Request, key: string, reasonIn: unknown) {
-  const reason = needReason(reasonIn), k = key.trim();
-  if (!/^sk-ant-[A-Za-z0-9_-]{20,300}$/.test(k)) throw new HttpError(400, 'That does not look like an Anthropic key. It starts with sk-ant- and has no spaces.');
-  try { await llm.verify(k); }
-  catch (e: any) { throw new HttpError(400, e?.message === 'rejected' ? 'Anthropic rejected that key. Check that you copied all of it and that it is active.' : 'Could not reach Anthropic to check the key, so it was not saved. Try again in a moment.'); }
-  const hint = k.slice(-4);
-  await pool.query('INSERT INTO platform_settings (k, v_enc, hint, updated_by) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE v_enc = VALUES(v_enc), hint = VALUES(hint), updated_by = VALUES(updated_by)', ['ai_api_key', encrypt(k), hint, req.platform!.userId]);
-  dropAiKeyCache(); await audit(req, 'set_ai_key', null, `AI key saved (ends ${hint})`, reason);
+const KEY_SHAPE: Record<AiProvider, [RegExp, string]> = {
+  anthropic: [/^sk-ant-[A-Za-z0-9_-]{20,300}$/, 'That does not look like an Anthropic key. It starts with sk-ant- and has no spaces.'],
+  openai: [/^sk-(?!ant-)[A-Za-z0-9_-]{20,300}$/, 'That does not look like an OpenAI key. It starts with sk- and has no spaces.'],
+  compatible: [/^\S{8,400}$/, 'The key must be at least 8 characters with no spaces.'],
+};
+/** Saves the provider, model and key an operator entered, but only after one real request proves they work. The key is never returned, logged or audited: only its last four characters. */
+export async function setAiKey(req: Request, b: { provider?: string; api_key: string; model?: string | null; base_url?: string | null }, reasonIn: unknown) {
+  const reason = needReason(reasonIn), k = b.api_key.trim(), provider = (b.provider ?? 'anthropic') as AiProvider;
+  if (!PROVIDERS.includes(provider)) throw new HttpError(400, 'Choose Anthropic, OpenAI or an OpenAI-compatible service.');
+  if (!KEY_SHAPE[provider][0].test(k)) throw new HttpError(400, KEY_SHAPE[provider][1]);
+  const model = (b.model ?? '').trim() || DEFAULT_MODELS[provider]; if (!model) throw new HttpError(400, 'Enter the model name to use, for example gemini-2.0-flash.');
+  if (!/^[A-Za-z0-9._:\/-]{1,100}$/.test(model)) throw new HttpError(400, 'The model name has characters it should not.');
+  let baseUrl: string | null = null;
+  if (provider === 'compatible') { if (!b.base_url?.trim()) throw new HttpError(400, 'Enter the service address, for example https://api.groq.com/openai/v1'); baseUrl = checkBaseUrl(b.base_url); }
+  try { await llm.verify({ provider, key: k, model, baseUrl }); }
+  catch (e: any) { throw new HttpError(400, e?.message === 'rejected' ? 'The service rejected that key. Check that you copied all of it and that it is active.' : e?.message === 'model' ? `The service does not know the model “${model}”. Check the name.` : 'Could not reach the service to check the key, so nothing was saved. Try again in a moment.'); }
+  const hint = k.slice(-4); const put = (name: string, v: string | null, h: string | null = null) => v === null ? pool.query('DELETE FROM platform_settings WHERE k = ?', [name]) : pool.query('INSERT INTO platform_settings (k, v_enc, hint, updated_by) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE v_enc = VALUES(v_enc), hint = VALUES(hint), updated_by = VALUES(updated_by)', [name, encrypt(v), h, req.platform!.userId]);
+  await put('ai_provider', provider); await put('ai_model', model); await put('ai_base_url', baseUrl); await put('ai_api_key', k, hint);
+  dropAiKeyCache(); await audit(req, 'set_ai_key', null, `AI provider set: ${provider}, model ${model}, key ends ${hint}`, reason);
   return aiKeyInfo();
 }
 export async function removeAiKey(req: Request, reasonIn: unknown) {
-  const reason = needReason(reasonIn); const [r]: any = await pool.query("DELETE FROM platform_settings WHERE k = 'ai_api_key'");
-  if (!r.affectedRows) throw new HttpError(409, 'No key was saved in the console.');
-  dropAiKeyCache(); await audit(req, 'remove_ai_key', null, 'AI key removed from the console', reason);
+  const reason = needReason(reasonIn); const [r]: any = await pool.query("DELETE FROM platform_settings WHERE k IN ('ai_api_key', 'ai_provider', 'ai_model', 'ai_base_url')");
+  if (!r.affectedRows) throw new HttpError(409, 'Nothing was saved in the console.');
+  dropAiKeyCache(); await audit(req, 'remove_ai_key', null, 'AI settings removed from the console', reason);
   return aiKeyInfo();
 }

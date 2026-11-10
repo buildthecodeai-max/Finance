@@ -1,26 +1,19 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type { Request } from 'express';
 import { config } from '../config.js';
 import { HttpError } from '../errors.js';
 import { pool, type Tenant } from '../db.js';
 import { entitlements } from './billing.js';
-import { aiKeySync, resolveAiKey } from './aiKey.js';
+import { aiKeySync, resolveAi } from './aiKey.js';
+import { runProvider, verifyProvider, type Req, type Res, type Target } from './aiProviders.js';
 import { addDays, r2, today } from './money.js';
 import { scope } from '../routes/scope.js';
 
 /** The one place that talks to the AI provider. Tests replace `run`. */
 export const llm = {
   enabled: () => !!aiKeySync(),
-  async run(p: { system: string; messages: any[]; tools?: any[]; toolChoice?: any; maxTokens: number }): Promise<{ content: any[]; stop_reason: string | null; usage: { input_tokens: number; output_tokens: number } }> {
-    const client = new Anthropic({ apiKey: (await resolveAiKey()).key, maxRetries: 1, timeout: 60_000 });
-    const r = await client.messages.create({ model: config.aiModel, max_tokens: p.maxTokens, system: p.system, messages: p.messages, ...(p.tools ? { tools: p.tools } : {}), ...(p.toolChoice ? { tool_choice: p.toolChoice } : {}) });
-    return r as any;
-  },
-  /** One tiny request to find out whether a key works, before it is saved. Throws a plain message either way. */
-  async verify(key: string): Promise<void> {
-    try { await new Anthropic({ apiKey: key, maxRetries: 0, timeout: 20_000 }).messages.create({ model: config.aiModel, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }); }
-    catch (e: any) { throw Object.assign(new Error(e?.status === 401 || e?.status === 403 ? 'rejected' : 'unreachable'), { cause: e?.status }); }
-  },
+  async run(p: Req): Promise<Res> { const a = await resolveAi(); return runProvider({ provider: a.provider, key: a.key, model: a.model, baseUrl: a.baseUrl }, p); },
+  /** One tiny request to find out whether a key (and model, and address) work, before they are saved. Throws 'rejected', 'model' or 'unreachable'. */
+  verify: (t: Target) => verifyProvider(t),
 };
 
 export type AiReason = 'not_configured' | 'off' | 'plan' | 'limit';
@@ -39,7 +32,7 @@ export async function aiUsedThisMonth(agencyId: number) {
 
 /** Whether this agency may use the assistant right now, and why not. */
 export async function aiStatus(agencyId: number) {
-  await resolveAiKey();                                   // warms the key cache that llm.enabled() reads
+  await resolveAi();                                      // warms the settings cache that llm.enabled() reads
   const [[ag]]: any = await pool.query('SELECT ai_access, ai_monthly_limit FROM agencies WHERE id = ?', [agencyId]);
   const limit: number = ag?.ai_monthly_limit ?? config.aiDefaultMonthlyLimit, used = (await aiUsedThisMonth(agencyId)).requests;
   const e = await entitlements(agencyId);

@@ -24,33 +24,46 @@ function Tile({ icon: Icon, name, state, headline, detail }: { icon: LucideIcon;
     </div>);
 }
 
-/** Add, replace or remove the AI provider key. The key is checked with one real request before it is saved, and it is never shown again. */
+const KEY_HELP: Record<string, string> = { anthropic: 'Get a key at console.anthropic.com under API keys. It starts with sk-ant-.', openai: 'Get a key at platform.openai.com under API keys. It starts with sk-.', compatible: 'Use the key from that service. For a model running on this same machine (Ollama), any text works.' };
+const MODEL_HINT: Record<string, string> = { anthropic: 'claude-sonnet-5-5', openai: 'gpt-4o-mini', compatible: 'e.g. gemini-2.0-flash, llama-3.3-70b-versatile' };
+const ADDRESS_HINT = 'e.g. https://generativelanguage.googleapis.com/v1beta/openai, https://api.groq.com/openai/v1, https://api.mistral.ai/v1, http://localhost:11434/v1';
+
+/** Choose the AI service, then add, replace or remove its key. The key is checked with one real request before it is saved, and it is never shown again. */
 function AiKey({ info, canEdit, onChanged }: { info: any; canEdit: boolean; onChanged(): void }) {
-  const [dlg, setDlg] = useState<'set' | 'remove' | null>(null); const [key, setKey] = useState(''); const [reason, setReason] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [msg, setMsg] = useState('');
+  const [dlg, setDlg] = useState<'set' | 'remove' | null>(null); const [provider, setProvider] = useState('anthropic'); const [model, setModel] = useState(''); const [baseUrl, setBaseUrl] = useState(''); const [key, setKey] = useState(''); const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [msg, setMsg] = useState('');
   const close = () => { setDlg(null); setKey(''); setReason(''); setErr(''); };
-  const save = async () => { setBusy(true); setErr(''); try { await api('/platform/settings/ai', 'PUT', { api_key: key.trim(), reason }); close(); setMsg('The key works and is saved. The AI assistant is now available to agencies whose plan includes it.'); onChanged(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
-  const remove = async () => { setBusy(true); setErr(''); try { await api('/platform/settings/ai', 'DELETE', { reason }); close(); setMsg('The saved key was removed.'); onChanged(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const openSet = () => { setProvider(info?.configured && info?.source === 'console' ? info.provider : 'anthropic'); setModel(info?.source === 'console' ? info.model : ''); setBaseUrl(info?.base_url ?? ''); setKey(''); setReason(''); setErr(''); setDlg('set'); };
+  const label = (k: string) => info?.providers?.find((p: any) => p.key === k)?.label ?? k;
+  const save = async () => { setBusy(true); setErr(''); try { await api('/platform/settings/ai', 'PUT', { provider, api_key: key.trim(), model: model.trim() || null, base_url: provider === 'compatible' ? baseUrl.trim() : null, reason }); close(); setMsg('The key works and is saved. The AI assistant is now available to agencies whose plan includes it.'); onChanged(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const remove = async () => { setBusy(true); setErr(''); try { await api('/platform/settings/ai', 'DELETE', { reason }); close(); setMsg('The saved settings were removed.'); onChanged(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   const src = info?.source; const on = !!info?.configured;
+  const ready = key.trim().length >= 8 && reason.trim().length >= 3 && (provider !== 'compatible' || (baseUrl.trim() && model.trim()));
   return (
     <section className="card" aria-label="AI assistant key">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: `rgb(var(--${on ? 'success' : 'warn'}) / .14)`, color: `rgb(var(--${on ? 'success' : 'warn'}))` }}><KeyRound size={18} /></span>
-          <div><h3 className="text-sm font-semibold">AI assistant key</h3>
-            <p className="mt-0.5 text-sm text-muted">{!info ? 'Checking…' : on ? <>A key is set{src === 'console' ? <> from this console</> : <> in the server’s environment</>}. It ends in <b className="font-mono text-fg">…{info.hint}</b>{info.updated_by ? <> and was saved by {info.updated_by}</> : null}.</> : 'No key yet, so the AI assistant is off for everyone. Add one to turn it on.'}</p>
-            <p className="mt-1 text-xs text-muted">Get a key from console.anthropic.com under API keys. It is stored encrypted and is never shown again. Model in use: <span className="font-mono">{info?.model ?? '—'}</span>.</p></div></div>
-        {canEdit && info && <div className="flex gap-2"><button className="btn" onClick={() => setDlg('set')}><KeyRound size={15} />{on ? 'Replace key' : 'Add key'}</button>{src === 'console' && <button className="btn-ghost text-danger" onClick={() => setDlg('remove')}><Trash2 size={14} />Remove</button>}</div>}
+          <div><h3 className="text-sm font-semibold">AI assistant service</h3>
+            <p className="mt-0.5 text-sm text-muted">{!info ? 'Checking…' : on ? <>Using <b className="text-fg">{label(info.provider)}</b>, model <span className="font-mono text-fg">{info.model}</span>. The key ends in <b className="font-mono text-fg">…{info.hint}</b>, set {src === 'console' ? 'from this console' : 'in the server’s environment'}{info.updated_by ? <> by {info.updated_by}</> : null}.</> : 'No service is connected, so the AI assistant is off for everyone. Add a key to turn it on.'}</p>
+            <p className="mt-1 text-xs text-muted">Works with Anthropic (Claude), OpenAI (GPT), or any service that uses the OpenAI format such as Gemini, Groq, Mistral or a local model. The key is stored encrypted and is never shown again.</p></div></div>
+        {canEdit && info && <div className="flex gap-2"><button className="btn" onClick={openSet}><KeyRound size={15} />{src === 'console' ? 'Change' : 'Add key'}</button>{src === 'console' && <button className="btn-ghost text-danger" onClick={() => setDlg('remove')}><Trash2 size={14} />Remove</button>}</div>}
         {!canEdit && info && <span className="text-xs text-muted">Only an admin operator can change this.</span>}
       </div>
       {msg && <div role="status" className="mt-3 flex justify-between gap-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success"><span>{msg}</span><button aria-label="Dismiss" onClick={() => setMsg('')}>×</button></div>}
-      {src === 'console' && info?.environment_key && <p className="mt-3 text-xs text-muted">The server also has a key in its environment. The one saved here is used; removing it falls back to that one.</p>}
-      {dlg === 'set' && <Modal title={on ? 'Replace the AI key' : 'Add the AI key'} onClose={close}><Err e={err} />
-        <Field label="Anthropic API key" hint="Starts with sk-ant-. We send one tiny test request to check it works before saving, which costs a fraction of a cent."><input className="input font-mono text-xs" type="password" autoComplete="off" spellCheck={false} autoFocus placeholder="sk-ant-…" value={key} onChange={(e) => setKey(e.target.value)} /></Field>
+      {src === 'console' && info?.environment_key && <p className="mt-3 text-xs text-muted">The server also has settings in its environment. The ones saved here are used; removing them falls back to those.</p>}
+      {dlg === 'set' && <Modal title={src === 'console' ? 'Change the AI service' : 'Connect an AI service'} wide onClose={close}><Err e={err} />
+        <Field label="Which service"><div className="grid gap-2 sm:grid-cols-3">{(info?.providers ?? []).map((p: any) => <label key={p.key} className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm ${provider === p.key ? 'border-accent bg-accent/10' : 'border-line'}`}><input type="radio" className="mt-1" name="aiprov" checked={provider === p.key} onChange={() => { setProvider(p.key); setModel(''); }} /><span><b>{p.label.split(' (')[0]}</b><span className="block text-xs text-muted">{p.key === 'compatible' ? 'Gemini, Groq, Mistral, local' : p.label.match(/\((.*)\)/)?.[1]}</span></span></label>)}</div></Field>
+        {provider === 'compatible' && <Field label="Service address" hint={ADDRESS_HINT}><input className="input font-mono text-xs" placeholder="https://api.example.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></Field>}
+        <div className="grid gap-x-4 sm:grid-cols-2">
+          <Field label="Model" hint={provider === 'compatible' ? 'Required for this kind of service.' : 'Leave empty to use the recommended one.'}><input className="input font-mono text-xs" placeholder={MODEL_HINT[provider]} value={model} onChange={(e) => setModel(e.target.value)} /></Field>
+          <Field label="API key" hint={KEY_HELP[provider]}><input className="input font-mono text-xs" type="password" autoComplete="off" spellCheck={false} autoFocus placeholder={provider === 'anthropic' ? 'sk-ant-…' : provider === 'openai' ? 'sk-…' : 'Key from your service'} value={key} onChange={(e) => setKey(e.target.value)} /></Field></div>
         <Field label="Reason" hint="Kept in the operator audit log. The key itself never is."><input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Switching the AI assistant on" /></Field>
-        <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={close}>Cancel</button><button className="btn" disabled={busy || key.trim().length < 20 || reason.trim().length < 3} onClick={save}>{busy ? 'Checking the key…' : 'Test and save'}</button></div></Modal>}
-      {dlg === 'remove' && <Modal title="Remove the saved AI key?" onClose={close}><Err e={err} />
-        <p className="mb-3 text-sm text-muted">{info?.environment_key ? 'The assistant keeps working with the key in the server’s environment.' : 'With no other key set, the AI assistant switches off for everyone until you add one.'}</p>
+        <p className="mb-3 text-xs text-muted">We send one tiny test request to check the key and model work before saving. It costs a fraction of a cent.</p>
+        <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={close}>Cancel</button><button className="btn" disabled={busy || !ready} onClick={save}>{busy ? 'Checking the key…' : 'Test and save'}</button></div></Modal>}
+      {dlg === 'remove' && <Modal title="Remove the saved AI settings?" onClose={close}><Err e={err} />
+        <p className="mb-3 text-sm text-muted">{info?.environment_key ? 'The assistant keeps working with the settings in the server’s environment.' : 'With nothing else set, the AI assistant switches off for everyone until you add a key.'}</p>
         <Field label="Reason" hint="Kept in the operator audit log."><input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
-        <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={close}>Cancel</button><button className="btn !bg-danger" disabled={busy || reason.trim().length < 3} onClick={remove}>{busy ? 'Removing…' : 'Remove key'}</button></div></Modal>}
+        <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={close}>Cancel</button><button className="btn !bg-danger" disabled={busy || reason.trim().length < 3} onClick={remove}>{busy ? 'Removing…' : 'Remove'}</button></div></Modal>}
     </section>
   );
 }
@@ -73,7 +86,7 @@ export function PlatformSystem({ canEdit = false }: { canEdit?: boolean }) {
     { icon: Mail, name: 'Email', state: !i.email ? (prod ? 'bad' : 'off') : q.failed_emails_24h > 5 ? 'warn' : 'ok', headline: i.email ? `${q.failed_emails_24h} failed today` : 'Not set up', detail: i.email ? 'SendGrid is connected' : 'No emails are sent. Add a SendGrid key to turn them on.' },
     { icon: FileBox, name: 'File storage', state: i.storage ? 'ok' : prod ? 'bad' : 'off', headline: i.storage ? 'Cloud storage' : 'Local disk', detail: i.storage ? 'Invoices and documents are stored off the server' : 'Files stay on this machine. Fine for development, not for production.' },
     { icon: CreditCard, name: 'Card payments', state: !i.payments ? 'off' : i.payments_webhook ? 'ok' : 'warn', headline: i.payments ? 'Stripe connected' : 'Not connected', detail: !i.payments ? 'Customers can’t pay by card yet' : i.payments_webhook ? 'Webhook secret is set' : 'Webhook secret missing: payments won’t be confirmed' },
-    { icon: Brain, name: 'AI assistant', state: i.ai ? 'ok' : 'off', headline: i.ai ? 'Available' : 'Not set up', detail: i.ai ? 'Agencies on a plan with AI can use it' : 'No AI key yet. Add one in the AI assistant key section below.' },
+    { icon: Brain, name: 'AI assistant', state: i.ai ? 'ok' : 'off', headline: i.ai ? 'Available' : 'Not set up', detail: i.ai ? 'Agencies on a plan with AI can use it' : 'No AI service connected yet. Add a key in the section below.' },
     { icon: Gauge, name: 'Exchange rates', state: i.exchange_rates ? 'ok' : 'off', headline: i.exchange_rates ? 'Live rates' : 'Manual rates', detail: i.exchange_rates ? 'Rates update automatically' : 'Agencies enter rates by hand' },
   ];
   const issues = tiles.filter((x) => x.state === 'bad' || x.state === 'warn'); const bad = tiles.some((x) => x.state === 'bad'); const overall: State = bad ? 'bad' : issues.length ? 'warn' : 'ok';

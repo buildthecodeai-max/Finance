@@ -38,7 +38,7 @@ platformRouter.delete('/agencies/:id/users/:userId', P.needs('suspend'), async (
 platformRouter.get('/overview', async (_req, res) => res.json(await P.overview()));
 // ---- the AI provider key. Reading says whether one is set (never the key); changing needs an admin operator and a reason.
 platformRouter.get('/settings/ai', P.needs('read'), async (_req, res) => res.json(await P.aiKeyInfo()));
-platformRouter.put('/settings/ai', P.needs('suspend'), async (req, res) => { const b = parse(Why.extend({ api_key: z.string().trim().min(20).max(400) }), req.body); res.json(await P.setAiKey(req, b.api_key, b.reason)); });
+platformRouter.put('/settings/ai', P.needs('suspend'), async (req, res) => { const b = parse(Why.extend({ provider: z.enum(['anthropic', 'openai', 'compatible']).default('anthropic'), api_key: z.string().trim().min(8).max(400), model: z.string().trim().max(100).nullish(), base_url: z.string().trim().max(300).nullish() }), req.body); res.json(await P.setAiKey(req, b, b.reason)); });
 platformRouter.delete('/settings/ai', P.needs('suspend'), async (req, res) => res.json(await P.removeAiKey(req, parse(Why, req.body ?? {}).reason)));
 platformRouter.get('/system', async (_req, res) => { const [hb]: any = await pool.query("SELECT k, v, updated_at FROM system_state WHERE k LIKE 'hb:%'"); res.json({ ...(await P.systemStatus()), heartbeats: hb }); });
 

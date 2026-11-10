@@ -356,7 +356,7 @@ function AiAccess({ detail, canEdit, onRefresh }: { detail: any; canEdit: boolea
   return <div className="card">
     <div className="flex flex-wrap items-center justify-between gap-2"><div className="font-medium text-sm">AI assistant</div>
       <span className={`text-xs px-2 py-0.5 rounded-full border ${ai.available ? 'border-success/30 bg-success/10 text-success' : 'border-line text-muted'}`}>{ai.available ? 'Available' : `Not available — ${why[ai.reason] ?? ai.reason}`}</span></div>
-    <p className="text-xs text-muted mt-1">{ai.requests} request{ai.requests === 1 ? '' : 's'} this month (limit {ai.limit}) · {ai.tokens.toLocaleString()} tokens.{!ai.key_configured && ' No AI key is set yet, so nobody can use it. An admin operator can add one under System.'}</p>
+    <p className="text-xs text-muted mt-1">{ai.requests} request{ai.requests === 1 ? '' : 's'} this month (limit {ai.limit}) · {ai.tokens.toLocaleString()} tokens.{!ai.key_configured && ' No AI service is connected yet, so nobody can use it. An admin operator can connect one under System.'}</p>
     {canEdit && <div className="grid gap-x-4 sm:grid-cols-3 mt-3">
       <Field label="Access"><select className="input" value={access} onChange={(e) => setAccess(e.target.value)}><option value="plan">Follow their plan</option><option value="on">Always on</option><option value="off">Off</option></select></Field>
       <Field label="Requests per month" hint="Blank = server default"><input className="input num" type="number" min={0} value={cap} onChange={(e) => setCap(e.target.value)} placeholder={String(ai.limit)} /></Field>
