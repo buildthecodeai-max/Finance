@@ -7,6 +7,7 @@ import { HttpError } from '../errors.js';
 import { signAccess } from '../auth.js';
 import { health } from '../services/observability.js';
 import * as P from '../services/platform.js';
+import * as S from '../services/support.js';
 import { idParam, parse } from './util.js';
 
 /** Operator console API. Not tenant-scoped: no X-Agency-Id, separate auth, everything audited. */
@@ -40,6 +41,11 @@ platformRouter.get('/overview', async (_req, res) => res.json(await P.overview()
 platformRouter.get('/settings/ai', P.needs('read'), async (_req, res) => res.json(await P.aiKeyInfo()));
 platformRouter.put('/settings/ai', P.needs('suspend'), async (req, res) => { const b = parse(Why.extend({ provider: z.enum(['anthropic', 'openai', 'compatible']).default('anthropic'), api_key: z.string().trim().min(8).max(400), model: z.string().trim().max(100).nullish(), base_url: z.string().trim().max(300).nullish() }), req.body); res.json(await P.setAiKey(req, b, b.reason)); });
 platformRouter.delete('/settings/ai', P.needs('suspend'), async (req, res) => res.json(await P.removeAiKey(req, parse(Why, req.body ?? {}).reason)));
+// ---- support: the inbox of requests from agencies, and the contact details shown to them
+platformRouter.get('/support-requests', P.needs('support'), async (req, res) => res.json(await S.listAllRequests(parse(z.object({ status: z.string().max(20).optional(), q: z.string().max(100).optional(), page: z.coerce.number().int().min(1).optional(), size: z.coerce.number().int().min(1).max(100).optional() }), req.query))));
+platformRouter.put('/support-requests/:id', P.needs('support'), async (req, res) => { const b = parse(z.object({ status: z.enum(['open', 'in_progress', 'resolved']), reply: z.string().trim().max(4000).optional() }), req.body); const id = idParam(req); const r = await S.answerRequest(req, id, b); await P.audit(req, 'support_reply', null, `request #${id} → ${b.status}${b.reply ? ' (replied)' : ''}`); res.json(r); });
+platformRouter.get('/settings/support', P.needs('read'), async (_req, res) => res.json(await S.supportContact()));
+platformRouter.put('/settings/support', P.needs('suspend'), async (req, res) => { const b = parse(Why.extend({ email: z.string().trim().email().max(255).or(z.literal('')), phone: z.string().trim().max(40).optional(), hours: z.string().trim().max(120).optional(), url: z.string().trim().url().max(300).refine((u) => u.startsWith('https://'), 'The help-centre address must start with https://').or(z.literal('')).optional() }), req.body); const r = await S.saveSupportContact(req.platform!.userId, b); await P.audit(req, 'set_support_contact', null, 'Support contact details updated', b.reason); res.json(r); });
 platformRouter.get('/system', async (_req, res) => { const [hb]: any = await pool.query("SELECT k, v, updated_at FROM system_state WHERE k LIKE 'hb:%'"); res.json({ ...(await P.systemStatus()), heartbeats: hb }); });
 
 platformRouter.get('/agencies', async (req, res) => res.json(await P.listAgencies(parse(z.object({ q: z.string().max(100).optional(), status: z.string().max(20).optional(), plan: z.string().max(30).optional(), page: z.coerce.number().int().min(1).optional() }), req.query))));

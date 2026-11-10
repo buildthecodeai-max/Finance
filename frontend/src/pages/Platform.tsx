@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { Activity, Check, CheckCircle2, Copy, Infinity as InfinityIcon, LayoutGrid, List, MoreHorizontal, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { LifeBuoy, Activity, Check, CheckCircle2, Copy, Infinity as InfinityIcon, LayoutGrid, List, MoreHorizontal, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Avatar, Err, Field, Modal, Pager, Pill, Skeleton, Table } from '../components/ui';
@@ -11,6 +11,7 @@ import { PlatformAudit } from './PlatformAudit';
 import { PlatformSecurity } from './PlatformSecurity';
 import { PlatformSystem } from './PlatformSystem';
 import { PlatformApprovals } from './PlatformApprovals';
+import { PlatformSupport } from './PlatformSupport';
 
 const day = (d: any) => (d ? String(d).replace('T', ' ').slice(0, 16) : '—');
 const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api', 'ai_assistant'];
@@ -25,12 +26,12 @@ type Cap = 'read' | 'support' | 'billing' | 'suspend';
 interface Me { email: string; role: string; caps: Cap[] }
 const OpCtx = createContext<{ me: Me; guarded<T>(fn: () => Promise<T>): Promise<T> }>(null as any);
 const useOp = () => useContext(OpCtx);
-type Tab = 'dashboard' | 'overview' | 'agencies' | 'users' | 'plans' | 'audit' | 'security' | 'system' | 'operators' | 'approvals';
+type Tab = 'dashboard' | 'overview' | 'agencies' | 'users' | 'plans' | 'audit' | 'security' | 'system' | 'operators' | 'approvals' | 'support';
 
-const TAB_ICON: Record<string, any> = { dashboard: LayoutDashboard, overview: Activity, agencies: Building2, users: Users, plans: Layers, audit: ScrollText, approvals: CheckSquare, operators: Users, security: ShieldAlert, system: Server };
+const TAB_ICON: Record<string, any> = { dashboard: LayoutDashboard, overview: Activity, agencies: Building2, users: Users, plans: Layers, audit: ScrollText, approvals: CheckSquare, support: LifeBuoy, operators: Users, security: ShieldAlert, system: Server };
 const TAB_HEAD: Record<string, [string, string]> = {
   dashboard: ['Dashboard', 'The whole platform at a glance: revenue, trials, agencies and what needs attention.'], overview: ['Overview', 'Fleet-wide usage and health.'],
-  agencies: ['Agencies', 'Every customer agency, its plan and status.'], users: ['People', 'Every account on the platform: find anyone, see where they work, and reset, sign out or switch off an account.'], plans: ['Plans', 'Prices, limits and features customers can choose from.'],
+  agencies: ['Agencies', 'Every customer agency, its plan and status.'], support: ['Support', 'Help requests from agencies, and the contact details they see.'], users: ['People', 'Every account on the platform: find anyone, see where they work, and reset, sign out or switch off an account.'], plans: ['Plans', 'Prices, limits and features customers can choose from.'],
   audit: ['Operator audit', 'Every operator action, kept as an append-only record.'], approvals: ['Approvals', 'Suspensions that need a second operator.'],
   operators: ['Operators', 'Who can use this console, and what they can do.'], security: ['Security events', 'Sign-in and access events across all agencies.'], system: ['System', 'Service health and background jobs.'],
 };
@@ -83,10 +84,12 @@ function Palette({ tabs, onTab, onAgency, onClose }: { tabs: [Tab, string][]; on
 export default function Platform() {
   const { user, ready, logout } = useAuth(); const nav = useNavigate();
   const [tab, setTab] = useState<Tab>('dashboard'); const [need2fa, setNeed2fa] = useState(false);
-  const [me, setMe] = useState<Me | null>(null); const [pending, setPending] = useState(0);
+  const [me, setMe] = useState<Me | null>(null); const [pending, setPending] = useState(0); const [openHelp, setOpenHelp] = useState(0);
   const [palette, setPalette] = useState(false); const [focus, setFocus] = useState<number | null>(null); const [focusUser, setFocusUser] = useState<number | null>(null);
   useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
   useEffect(() => { if (tab) refreshPending(); }, [tab, me]);
+  const refreshHelp = () => { if (me?.caps.includes('support')) api('/platform/support-requests?status=open&size=1').then((r) => setOpenHelp(r.total ?? 0)).catch(() => {}); };
+  useEffect(() => { refreshHelp(); }, [tab, me]);
   const refreshPending = () => { if (me?.caps.includes('suspend')) api('/platform/approvals?status=pending').then((r) => setPending(r.length)).catch(() => {}); };
   useEffect(() => { if (user?.is_platform_admin) api('/platform/me').then(setMe).catch((e) => e.data?.code === 'platform_2fa_required' ? setNeed2fa(true) : null); }, [user]);
   const guarded = async <T,>(fn: () => Promise<T>): Promise<T> => fn();
@@ -97,12 +100,12 @@ export default function Platform() {
   // Sidebar nav groups (desktop)
   const navGroups: { label: string; items: [Tab, string][] }[] = me ? [
     { label: 'Main', items: [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies'], ...(me.caps.includes('support') ? [['users', 'People']] as [Tab, string][] : [])] },
-    { label: 'Operations', items: [['plans', 'Plans'], ['audit', 'Operator audit'], ...(me.caps.includes('suspend') ? [['approvals', 'Approvals'], ['operators', 'Operators']] as [Tab, string][] : [])] },
+    { label: 'Operations', items: [['plans', 'Plans'], ...(me.caps.includes('support') ? [['support', 'Support']] as [Tab, string][] : []), ['audit', 'Operator audit'], ...(me.caps.includes('suspend') ? [['approvals', 'Approvals'], ['operators', 'Operators']] as [Tab, string][] : [])] },
     { label: 'System', items: [['security', 'Security events'], ['system', 'System']] },
   ] : [];
 
   // Mobile flat tab list
-  const allTabs: [Tab, string][] = [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies'], ...(me?.caps.includes('support') ? [['users', 'People']] as [Tab, string][] : []), ['plans', 'Plans'], ['audit', 'Operator audit'], ['security', 'Security events'], ['system', 'System'], ...(me?.caps.includes('suspend') ? [['approvals', 'Approvals'], ['operators', 'Operators']] as [Tab, string][] : [])];
+  const allTabs: [Tab, string][] = [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies'], ...(me?.caps.includes('support') ? [['support', 'Support']] as [Tab, string][] : []), ...(me?.caps.includes('support') ? [['users', 'People']] as [Tab, string][] : []), ['plans', 'Plans'], ['audit', 'Operator audit'], ['security', 'Security events'], ['system', 'System'], ...(me?.caps.includes('suspend') ? [['approvals', 'Approvals'], ['operators', 'Operators']] as [Tab, string][] : [])];
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -133,6 +136,9 @@ export default function Platform() {
                     {k === 'approvals' && pending > 0 && (
                       <span className="min-w-[1.1rem] h-4 px-1 text-[10px] font-bold rounded-full bg-danger text-white flex items-center justify-center leading-none">{pending}</span>
                     )}
+                    {k === 'support' && openHelp > 0 && (
+                      <span className="min-w-[1.1rem] h-4 px-1 text-[10px] font-bold rounded-full bg-warn text-black flex items-center justify-center leading-none">{openHelp}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -161,7 +167,7 @@ export default function Platform() {
                     </button>
                   ))}
                 </div>
-                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <PlatformAudit me={me} />}{tab === 'security' && <PlatformSecurity onOpenUser={me.caps.includes('support') ? (id) => { setFocusUser(id); setTab('users'); } : undefined} />}{tab === 'system' && <PlatformSystem canEdit={me.caps.includes('suspend')} />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} focus={focusUser} onFocused={() => setFocusUser(null)} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <PlatformApprovals me={me} onChange={refreshPending} />}
+                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <PlatformAudit me={me} />}{tab === 'security' && <PlatformSecurity onOpenUser={me.caps.includes('support') ? (id) => { setFocusUser(id); setTab('users'); } : undefined} />}{tab === 'system' && <PlatformSystem canEdit={me.caps.includes('suspend')} />}{tab === 'support' && <PlatformSupport canEdit={me.caps.includes('suspend')} onChange={refreshHelp} />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} focus={focusUser} onFocused={() => setFocusUser(null)} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <PlatformApprovals me={me} onChange={refreshPending} />}
               </OpCtx.Provider>}
           </div>
         </main>

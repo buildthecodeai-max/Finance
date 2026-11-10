@@ -3,7 +3,7 @@ import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Banknote, BarChart3, BookOpen, Briefcase, Building2, CalendarClock, ClipboardCheck, Calculator as CalcIcon, Check, ChevronDown, ChevronRight, ChevronsLeft, ChevronsUpDown,
-  Coins, CreditCard, HelpCircle, FileMinus, FileSignature, FileText, HandCoins, LineChart, Truck, LayoutDashboard, Library, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Percent, Plane, Plus, ScrollText, Search, Settings, MoonStar, ShieldCheck, Stamp, Sun, Target, Ticket, TrendingUp, Undo2, Users, Wallet, X,
+  Coins, CreditCard, HelpCircle, LifeBuoy, FileMinus, FileSignature, FileText, HandCoins, LineChart, Truck, LayoutDashboard, Library, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Percent, Plane, Plus, ScrollText, Search, Settings, MoonStar, ShieldCheck, Stamp, Sun, Target, Ticket, TrendingUp, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api } from '../api';
 import { useAuth, AgencyRef } from '../auth';
@@ -63,7 +63,7 @@ const GROUPS: { title: string; module: string | string[] | null; items: Item[] }
       { to: '/sale-reports', label: 'Ticket sale reports', icon: I(TrendingUp), roles: FINANCE, module: 'ticketing' },
       { to: '/bsp-reconciliation', label: 'BSP reconciliation', icon: I(ArrowLeftRight), roles: FINANCE, module: 'ticketing' }] },
     { to: '/automation', label: 'Automation', icon: I(CalendarClock), roles: FINANCE }, { to: '/integrations', label: 'Integrations', icon: I(ArrowLeftRight), roles: FINANCE }] },
-  { title: 'Administration', module: null, items: [{ to: '/settings', label: 'Settings', icon: I(Settings) }, { to: '/help', label: 'User guide', icon: I(HelpCircle) }, { to: '/team', label: 'Team & Branches', icon: I(Users), roles: ['admin', 'finance_manager'] }, { to: '/billing', label: 'Billing', icon: I(CreditCard), roles: ['admin'] }, { to: '/audit', label: 'Audit Log', icon: I(ScrollText), roles: ['admin', 'finance_manager'] }] },
+  { title: 'Administration', module: null, items: [{ to: '/settings', label: 'Settings', icon: I(Settings) }, { to: '/help', label: 'User guide', icon: I(HelpCircle) }, { to: '/support-center', label: 'Support', icon: I(LifeBuoy) }, { to: '/team', label: 'Team & Branches', icon: I(Users), roles: ['admin', 'finance_manager'] }, { to: '/billing', label: 'Billing', icon: I(CreditCard), roles: ['admin'] }, { to: '/audit', label: 'Audit Log', icon: I(ScrollText), roles: ['admin', 'finance_manager'] }] },
 ];
 const FLAT = GROUPS.flatMap((g) => g.items.flatMap((i) => (i.children ? i.children.map((c) => ({ ...c, group: i.label })) : [{ ...i, group: g.title }])));
 const findItem = (p: string) => FLAT.find((i) => i.to === p);
