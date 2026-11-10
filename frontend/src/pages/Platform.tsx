@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { LifeBuoy, Activity, Check, CheckCircle2, Copy, Infinity as InfinityIcon, LayoutGrid, List, MoreHorizontal, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { ChevronDown, KeyRound, LifeBuoy, LockKeyhole, Mail, ShieldOff, Activity, Check, CheckCircle2, Copy, Infinity as InfinityIcon, LayoutGrid, List, MoreHorizontal, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Avatar, Err, Field, Modal, Pager, Pill, Skeleton, Table } from '../components/ui';
 import { ThemeMenuButton } from '../components/ThemeToggle';
-import { PlatformOperators, PlatformUsers, rel } from './PlatformPeople';
+import { ActionDialog, PlatformOperators, PlatformUsers, rel, type Act as UserAct } from './PlatformPeople';
 import { PlatformAudit } from './PlatformAudit';
 import { PlatformSecurity } from './PlatformSecurity';
 import { PlatformSystem } from './PlatformSystem';
@@ -322,14 +322,21 @@ const roleName = (r: string) => AGENCY_ROLES.find(([k]) => k === r)?.[1] ?? r;
 
 /** The people in one agency. Operators with admin rights can rename them, change their role, remove them, or delete the account. */
 function MembersPanel({ detail, canManage, onRefresh }: { detail: any; canManage: boolean; onRefresh(): void }) {
-  const ag = detail.agency.id; const [edit, setEdit] = useState<any>(null); const [del, setDel] = useState<any>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false);
+  const ag = detail.agency.id; const [edit, setEdit] = useState<any>(null); const [del, setDel] = useState<any>(null); const [acct, setAcct] = useState<UserAct | null>(null); const [menu, setMenu] = useState<number | null>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false);
   const run = async (fn: () => Promise<any>, ok: (r: any) => string) => { setBusy(true); try { const r = await fn(); setEdit(null); setDel(null); setErr(''); setMsg(ok(r)); onRefresh(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   const openDel = async (m: any) => { setErr(''); setDel({ m, reassign: '', deleteAccount: false, reason: '', work: null }); try { const w = await api(`/platform/agencies/${ag}/users/${m.user_id}/workload`); setDel((d: any) => d && { ...d, work: w }); } catch { /* optional */ } };
   const others = (uid: number) => detail.members.filter((x: any) => x.user_id !== uid);
   const busyWork = (w: any) => w && w.leads + w.bookings + w.quotes + w.tasks > 0;
   return <div><div className="font-medium text-sm mb-1">Members</div>{msg && <div role="status" className="text-sm text-accent mb-2">{msg}</div>}
-    <Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => roleName(m.role) }, { h: '2FA', render: (m: any) => (m.totp_enabled ? '✓' : '—') },
-      ...(canManage ? [{ h: '', render: (m: any) => <div className="flex justify-end gap-1"><button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => { setErr(''); setEdit({ m, name: m.name, email: m.email, role: m.role, reason: '' }); }}>Edit</button><button className="btn-ghost !py-0.5 !px-2 text-xs text-danger" onClick={() => openDel(m)}>Remove</button></div> }] : [])]} />
+    <Table rows={detail.members.map((m: any, i: number) => ({ ...m, id: i }))} cols={[{ h: 'Name', render: (m: any) => <>{m.name}<div className="text-xs text-muted">{m.email}</div></> }, { h: 'Role', render: (m: any) => roleName(m.role) }, { h: '2FA', render: (m: any) => (m.totp_enabled ? <span className="inline-flex items-center gap-1 text-xs text-success"><ShieldCheck size={13} />On</span> : <span className="inline-flex items-center gap-1 text-xs text-warn"><ShieldOff size={13} />Off</span>) },
+      ...(canManage ? [{ h: '', render: (m: any) => <div className="flex items-center justify-end gap-1"><button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => { setErr(''); setEdit({ m, name: m.name, email: m.email, role: m.role, reason: '' }); }}>Edit</button>
+        <div className="relative"><button className="btn-ghost !py-0.5 !px-2 text-xs" aria-haspopup="menu" aria-expanded={menu === m.user_id} onClick={() => setMenu(menu === m.user_id ? null : m.user_id)}>Account<ChevronDown size={12} /></button>
+          {menu === m.user_id && <><button className="fixed inset-0 z-10 cursor-default" aria-label="Close menu" onClick={() => setMenu(null)} />
+            <div role="menu" className="pop-in absolute right-0 top-full z-20 mt-1 w-52 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+              {([m.totp_enabled ? ['reset2fa', 'Reset 2FA', KeyRound] : null, ['setpw', 'Set a password', LockKeyhole], ['password', 'Send password link', Mail], ['signout', 'Sign out everywhere', LogOut]] as ([UserAct['kind'], string, any] | null)[]).filter(Boolean).map((x) => { const [kind, label, I] = x!; return <button key={kind} role="menuitem" className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-surface2" onClick={() => { setMenu(null); setAcct({ kind, user: { id: m.user_id, name: m.name, email: m.email } }); }}><I size={14} className="shrink-0" />{label}</button>; })}
+              {!m.totp_enabled && <div className="border-t border-line px-3 py-2 text-[11px] leading-snug text-muted">2FA is off. The person turns it on from their own account.</div>}</div></>}</div>
+        <button className="btn-ghost !py-0.5 !px-2 text-xs text-danger" onClick={() => openDel(m)}>Remove</button></div> }] : [])]} />
+    {acct && <ActionDialog act={acct} onClose={() => setAcct(null)} onDone={(m) => { setAcct(null); setMsg(m); onRefresh(); }} />}
     {edit && <Modal title={`Edit ${edit.m.name}`} onClose={() => setEdit(null)}><Err e={err} />
       <Field label="Name"><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
       <Field label="Sign-in email" hint="Changes the person's login everywhere they have access."><input className="input" type="email" value={edit.email} onChange={(e) => setEdit({ ...edit, email: e.target.value })} /></Field>

@@ -47,7 +47,7 @@ const roleTone = (r: string) => OPERATOR_ROLES.find((x) => x.key === r)?.tone ??
 const RolePill = ({ role }: { role: string }) => <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: `rgb(var(--${roleTone(role)}) / .14)`, color: `rgb(var(--${roleTone(role)}))` }}><ShieldCheck size={11} />{OPERATOR_ROLES.find((r) => r.key === role)?.name ?? role}</span>;
 
 /* ---------------------------------------------------------------------------- one account action, with the reason every action must carry */
-type Act = { kind: 'password' | 'setpw' | 'signout' | 'reset2fa' | 'disable' | 'enable'; user: { id: number; name: string; email: string } };
+export type Act = { kind: 'password' | 'setpw' | 'signout' | 'reset2fa' | 'disable' | 'enable'; user: { id: number; name: string; email: string } };
 const ACT: Record<Act['kind'], { title: string; path: string; body: (u: string) => string; button: string; danger?: boolean }> = {
   password: { title: 'Send a password link', path: 'password-reset', body: (u) => `${u} gets a one-time link to choose a new password. It expires in 30 minutes, and any earlier link stops working.`, button: 'Send link' },
   setpw: { title: 'Set a password', path: 'set-password', body: (u) => `You choose a new password for ${u}. They are signed out everywhere and need it to sign in again. Use this when the reset email can't reach them; otherwise “Send password link” is safer because you never see their password.`, button: 'Set password', danger: true },
@@ -56,7 +56,7 @@ const ACT: Record<Act['kind'], { title: string; path: string; body: (u: string) 
   disable: { title: 'Switch the account off', path: 'disable', body: (u) => `${u} can no longer sign in, and anything they have open stops working. Nothing is deleted, and you can switch the account back on at any time.`, button: 'Switch off', danger: true },
   enable: { title: 'Switch the account back on', path: 'enable', body: (u) => `${u} can sign in again.`, button: 'Switch on' },
 };
-function ActionDialog({ act, onClose, onDone }: { act: Act; onClose(): void; onDone(msg: string): void }) {
+export function ActionDialog({ act, onClose, onDone }: { act: Act; onClose(): void; onDone(msg: string): void }) {
   const a = ACT[act.kind]; const [reason, setReason] = useState(''); const [pw, setPw] = useState(''); const needsPw = act.kind === 'setpw'; const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [link, setLink] = useState(''); const [copied, setCopied] = useState(false);
   const go = async () => {
     setBusy(true); setErr('');
