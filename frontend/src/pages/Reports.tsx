@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, ChevronRight, Download, FileSpreadsheet, FileText, Home, RefreshCw, Search, Table2 } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, BarChart3, CalendarClock, CheckCircle2, ChevronRight, Clock, Download, FileSpreadsheet, FileText, Home, Landmark, LineChart, RefreshCw, Search, Table2, Truck, Users, Wallet, XCircle, type LucideIcon } from 'lucide-react';
 import { api, money, n2 } from '../api';
 import { useAuth } from '../auth';
 import { MenuBtn, Page, Popover, Skeleton } from '../components/ui';
@@ -79,12 +79,15 @@ function Bars({ chart }: { chart: NonNullable<Rep['chart']> }) {
 }
 
 /** As many cards per row as fit, so a figure like $75,251.28 is never cut off. */
-const KPI_GRID = 'grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr))]';
-const Kpi = ({ label, value, sub, delta, to, tone }: { label: string; value: string; sub?: ReactNode; delta?: number | null; to: string; tone?: string }) => (
-  <Link to={to} className="card block transition hover:border-accent/50 focus-visible:border-accent">
-    <div className="text-xs text-muted">{label}</div>
-    <div className={`num mt-0.5 text-xl font-semibold ${tone ?? ''}`}>{value}</div>
-    <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">{delta != null && <span className={`inline-flex items-center ${delta >= 0 ? 'text-success' : 'text-danger'}`}>{delta >= 0 ? <ArrowUp size={12} /> : <ArrowDown size={12} />}{Math.abs(delta).toFixed(0)}%</span>}{sub}</div>
+const KPI_GRID = 'grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]';
+/** Each report group gets its own icon and colour so the library is easy to scan. */
+const GROUP: [RegExp, LucideIcon, string][] = [[/statement|ledger|account(?!s)/i, Landmark, 'accent'], [/sales|profit/i, LineChart, 'success'], [/client/i, Users, 'info'], [/supplier|payable|payment/i, Truck, 'warn'], [/cash|bank/i, Wallet, 'info'], [/tax/i, Banknote, 'accent'], [/planning|forecast|due|aging|upcoming/i, Clock, 'warn']];
+const groupStyle = (label: string): { Icon: LucideIcon; hue: string } => { const g = GROUP.find(([re]) => re.test(label)); return { Icon: g?.[1] ?? BarChart3, hue: g?.[2] ?? 'accent' }; };
+const Kpi = ({ label, value, sub, delta, to, tone, icon: Icon, hue = 'accent' }: { label: string; value: string; sub?: ReactNode; delta?: number | null; to: string; tone?: string; icon?: LucideIcon; hue?: string }) => (
+  <Link to={to} className="card glow-card block focus-visible:border-accent" style={{ ['--hue' as any]: `var(--${hue})` }}>
+    <div className="flex items-start justify-between gap-2"><span className="text-xs font-medium text-muted">{label}</span>{Icon && <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg" style={{ background: `rgb(var(--${hue}) / .14)`, color: `rgb(var(--${hue}))` }}><Icon size={14} /></span>}</div>
+    <div className={`num mt-1.5 text-2xl font-bold tracking-tight ${tone ?? ''}`}>{value}</div>
+    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">{delta != null && <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 font-medium ${delta >= 0 ? 'bg-success/12 bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>{delta >= 0 ? <ArrowUp size={11} /> : <ArrowDown size={11} />}{Math.abs(delta).toFixed(0)}%</span>}{sub}</div>
   </Link>
 );
 
@@ -99,24 +102,25 @@ function Overview({ cat, open }: { cat: Cat[]; open: (k: string, extra?: Record<
       {ov === null ? <div className={KPI_GRID}>{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div> : ov && (
         <section aria-label="Key numbers">
           <div className={KPI_GRID}>
-            <Kpi label="Sales this month" value={money(m.revenue, cur)} delta={chg(m.revenue, p.revenue)} sub="vs same days last month" to={`/reports?report=pnl&from=${m.from}&to=${m.to}`} />
-            <Kpi label="Profit this month" value={money(m.profit, cur)} delta={chg(m.profit, p.profit)} sub="gross, sales basis" tone={m.profit < 0 ? 'text-danger' : ''} to={`/reports?report=pnl&from=${m.from}&to=${m.to}`} />
-            <Kpi label="Money in / out" value={money(m.cashIn, cur)} sub={<>out {money(m.cashOut, cur)}</>} to={`/reports?report=cash-flow&from=${m.from}&to=${m.to}`} />
-            <Kpi label="Owed to you" value={money(ov.receivables.total, cur)} sub={ov.receivables.overdue ? <span className="text-warn">{money(ov.receivables.overdue, cur)} overdue</span> : 'nothing overdue'} to="/reports?report=ar-aging-summary" />
-            <Kpi label="You owe" value={money(ov.payables.total, cur)} sub={ov.payables.overdue ? <span className="text-warn">{money(ov.payables.overdue, cur)} overdue</span> : 'nothing overdue'} to="/reports?report=ap-aging" />
-            <Kpi label="Cash & bank" value={money(ov.cash, cur)} sub="in the ledger now" to="/reports?report=cash-book" />
+            <Kpi icon={LineChart} hue="success" label="Sales this month" value={money(m.revenue, cur)} delta={chg(m.revenue, p.revenue)} sub="vs same days last month" to={`/reports?report=pnl&from=${m.from}&to=${m.to}`} />
+            <Kpi icon={BarChart3} hue="accent" label="Profit this month" value={money(m.profit, cur)} delta={chg(m.profit, p.profit)} sub="gross, sales basis" tone={m.profit < 0 ? 'text-danger' : ''} to={`/reports?report=pnl&from=${m.from}&to=${m.to}`} />
+            <Kpi icon={Wallet} hue="info" label="Money in / out" value={money(m.cashIn, cur)} sub={<>out {money(m.cashOut, cur)}</>} to={`/reports?report=cash-flow&from=${m.from}&to=${m.to}`} />
+            <Kpi icon={Users} hue="warn" label="Owed to you" value={money(ov.receivables.total, cur)} sub={ov.receivables.overdue ? <span className="text-warn">{money(ov.receivables.overdue, cur)} overdue</span> : 'nothing overdue'} to="/reports?report=ar-aging-summary" />
+            <Kpi icon={Truck} hue="danger" label="You owe" value={money(ov.payables.total, cur)} sub={ov.payables.overdue ? <span className="text-warn">{money(ov.payables.overdue, cur)} overdue</span> : 'nothing overdue'} to="/reports?report=ap-aging" />
+            <Kpi icon={Landmark} hue="info" label="Cash & bank" value={money(ov.cash, cur)} sub="in the ledger now" to="/reports?report=cash-book" />
           </div>
         </section>)}
-      {mine.length > 0 && <section><h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted/80">Recently opened</h2>
+      {mine.length > 0 && <section><h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><Clock size={14} className="text-muted" />Recently opened</h2>
         <div className="flex flex-wrap gap-2">{mine.map((r) => <button key={r.key} className="btn-ghost" onClick={() => open(r.key)}>{r.label}</button>)}</div></section>}
       {cat.map((c) => (
-        <section key={c.label}><h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted/80">{c.label}</h2>
+        <section key={c.label}>{(() => { const { Icon, hue } = groupStyle(c.label); return <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg" style={{ background: `rgb(var(--${hue}) / .14)`, color: `rgb(var(--${hue}))` }}><Icon size={14} /></span>{c.label}<span className="rounded-full bg-surface2 px-2 py-0.5 text-[11px] font-normal text-muted num">{c.reports.length}</span></h2>; })()}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {c.reports.map((r) => (
-              <button key={r.key} className="card group flex items-start justify-between gap-3 text-left transition hover:border-accent/50" onClick={() => open(r.key)}>
-                <span className="min-w-0"><span className="block font-medium">{r.label}</span><span className="mt-0.5 line-clamp-3 block text-xs text-muted">{r.about}</span></span>
+            {c.reports.map((r) => { const { hue } = groupStyle(c.label); return (
+              <button key={r.key} className="card glow-card group flex items-start justify-between gap-3 text-left" style={{ ['--hue' as any]: `var(--${hue})` }} onClick={() => open(r.key)}>
+                <span className="min-w-0"><span className="block font-semibold">{r.label}</span><span className="mt-1 line-clamp-3 block text-xs leading-relaxed text-muted">{r.about}</span>
+                  {(r.asAt || r.forecast || r.compare || r.client) && <span className="mt-2 flex flex-wrap gap-1">{r.asAt && <span className="rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">As at a date</span>}{r.forecast && <span className="rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">Forecast</span>}{r.compare && <span className="rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">Compare periods</span>}{r.client && <span className="rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">Per client</span>}</span>}</span>
                 <ChevronRight size={16} className="mt-1 shrink-0 text-muted transition group-hover:translate-x-0.5 group-hover:text-accent" />
-              </button>))}
+              </button>); })}
           </div></section>))}
     </div>
   );
@@ -201,11 +205,11 @@ export default function Reports() {
             <Search size={14} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted" />
             <input className="input pl-8 text-sm" placeholder="Find a report…" aria-label="Find a report" value={find} onChange={(e) => setFind(e.target.value)} />
           </div>
-          <button onClick={() => go({ report: '' })} aria-current={!key} className={`flex w-full items-center gap-2 border-b border-line px-3 py-2 text-left text-sm ${!key ? 'bg-accent/15 font-medium text-accent' : 'hover:bg-surface2'}`}><Home size={14} />Overview</button>
+          <button onClick={() => go({ report: '' })} aria-current={!key} className={`flex w-full items-center gap-2 border-b border-line px-3 py-2.5 text-left text-sm ${!key ? 'nav-active font-medium text-accent' : 'hover:bg-surface2'}`}><Home size={14} />Overview</button>
           {menu.map((c) => (
             <div key={c.label}>
-              <div className="border-b border-line px-3 py-2 text-xs uppercase text-muted">{c.label}</div>
-              {c.reports.map((r) => <button key={r.key} onClick={() => open(r.key)} aria-current={key === r.key} className={`block w-full px-3 py-1.5 text-left text-sm ${key === r.key ? 'bg-accent/15 font-medium text-accent' : 'hover:bg-surface2'}`}>{r.label}</button>)}
+              <div className="flex items-center gap-1.5 border-b border-line bg-surface2/40 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted">{(() => { const { Icon } = groupStyle(c.label); return <Icon size={11} />; })()}{c.label}</div>
+              {c.reports.map((r) => <button key={r.key} onClick={() => open(r.key)} aria-current={key === r.key} className={`block w-full px-3 py-1.5 text-left text-sm ${key === r.key ? 'nav-active font-medium text-accent' : 'hover:bg-surface2'}`}>{r.label}</button>)}
             </div>))}
           {cat && menu.length === 0 && <div className="px-3 py-4 text-sm text-muted">No report matches “{find}”.</div>}
         </nav>
@@ -218,7 +222,7 @@ export default function Reports() {
           {cat === null ? <Skeleton className="h-64" /> : !def ? <Overview cat={cat} open={open} /> : (<>
             <div className="card mb-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0"><h2 className="text-base font-semibold">{def.label}</h2><p className="mt-0.5 max-w-2xl text-xs text-muted">{def.about}</p></div>
+                <div className="min-w-0">{(() => { const c = (cat ?? []).find((x) => x.reports.some((r) => r.key === def.key)); if (!c) return null; const { Icon, hue } = groupStyle(c.label); return <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: `rgb(var(--${hue}) / .14)`, color: `rgb(var(--${hue}))` }}><Icon size={11} />{c.label}</span>; })()}<h2 className="text-lg font-bold tracking-tight">{def.label}</h2><p className="mt-0.5 max-w-2xl text-xs text-muted">{def.about}</p></div>
                 <div className="flex flex-wrap items-center gap-2">
                   {canSchedule && !def.account && def.client !== 'required' && !forecast && <Link to={`/automation?schedule=${def.key}`} className="btn-ghost"><CalendarClock size={15} />Schedule</Link>}
                   <button className="btn-icon border border-line" aria-label="Run again" title="Run again" onClick={() => setBump((n) => n + 1)} disabled={!ready || loading}><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>
@@ -244,9 +248,9 @@ export default function Reports() {
                   <select className="input" value={compare} onChange={(e) => go({ compare: e.target.value })}><option value="">Nothing</option><option value="prev">The period before</option><option value="year">Same period last year</option></select></div>}
               </div>
               <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Quick dates">
-                {def.asAt ? AS_AT.map(([l, f]) => <button key={l} className="rounded-md border border-line px-2 py-1 text-xs hover:bg-surface2" onClick={() => go({ to: f() })}>{l}</button>)
-                  : forecast ? AHEAD.map(([l, n]) => <button key={l} className="rounded-md border border-line px-2 py-1 text-xs hover:bg-surface2" onClick={() => go({ from: today(), to: plusDays(n) })}>{l}</button>)
-                    : PRESETS.map(([l, f]) => <button key={l} className="rounded-md border border-line px-2 py-1 text-xs hover:bg-surface2" onClick={() => { const [a, b] = f(); go({ from: a, to: b }); }}>{l}</button>)}
+                {def.asAt ? AS_AT.map(([l, f]) => <button key={l} className="rounded-full border border-line px-2.5 py-1 text-xs text-muted transition hover:border-accent/50 hover:bg-surface2 hover:text-fg" onClick={() => go({ to: f() })}>{l}</button>)
+                  : forecast ? AHEAD.map(([l, n]) => <button key={l} className="rounded-full border border-line px-2.5 py-1 text-xs text-muted transition hover:border-accent/50 hover:bg-surface2 hover:text-fg" onClick={() => go({ from: today(), to: plusDays(n) })}>{l}</button>)
+                    : PRESETS.map(([l, f]) => <button key={l} className="rounded-full border border-line px-2.5 py-1 text-xs text-muted transition hover:border-accent/50 hover:bg-surface2 hover:text-fg" onClick={() => { const [a, b] = f(); go({ from: a, to: b }); }}>{l}</button>)}
               </div>
             </div>
 
@@ -258,16 +262,16 @@ export default function Reports() {
               <div className={loading ? 'opacity-60 transition' : 'transition'}>
                 {rep.summary && rep.summary.length > 0 && (
                   <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-                    {rep.summary.map((s) => <div key={s.label} className="card !py-3"><div className="text-xs text-muted">{s.label}</div><div className={`num mt-0.5 text-lg font-semibold ${s.tone ? TONE[s.tone] : ''}`}>{s.unit === '%' ? `${show(s.value, 'money')}%` : show(s.value, MONEY.test(s.value) ? 'money' : undefined)}</div></div>)}
+                    {rep.summary.map((s) => <div key={s.label} className={`card !py-3 ${s.tone === 'bad' ? 'border-l-4 !border-l-danger' : s.tone === 'warn' ? 'border-l-4 !border-l-warn' : s.tone === 'good' ? 'border-l-4 !border-l-success' : ''}`}><div className="text-xs font-medium text-muted">{s.label}</div><div className={`num mt-1 text-xl font-bold tracking-tight ${s.tone ? TONE[s.tone] : ''}`}>{s.unit === '%' ? `${show(s.value, 'money')}%` : show(s.value, MONEY.test(s.value) ? 'money' : undefined)}</div></div>)}
                   </div>)}
                 {rep.reconcile && <div className="mb-4 space-y-2">{rep.reconcile.map((c) => (
                   <div key={c.label} className={`flex flex-wrap justify-between gap-2 rounded-lg border p-3 text-sm ${c.ok ? 'border-success/30 bg-success/10 text-success' : 'border-danger/30 bg-danger/10 text-danger'}`}>
-                    <span>{c.ok ? '✓ Reconciled' : '⚠ Does not reconcile'} — {c.label}</span>
+                    <span className="flex items-center gap-2">{c.ok ? <CheckCircle2 size={16} /> : <XCircle size={16} />}<span><b>{c.ok ? 'Reconciled' : 'Does not reconcile'}</b> — {c.label}</span></span>
                     <span className="num">report {show(c.report.toFixed(2), 'money')} · source {show(c.source.toFixed(2), 'money')}{!c.ok && ` · diff ${show(c.difference.toFixed(2), 'money')}`}</span></div>))}</div>}
                 {rep.hints?.map((h) => <div key={h} className="mb-3 flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 p-3 text-sm text-warn" role="note"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>{h}</span></div>)}
                 {rep.chart && rep.chart.labels.length > 0 && <div className="card mb-4"><Bars chart={rep.chart} /></div>}
 
-                <h3 className="mb-1 font-bold">{rep.title}</h3>
+                <h3 className="mb-1 flex items-center gap-2 font-bold">{rep.title}{ran && <span className="rounded-full bg-surface2 px-2 py-0.5 text-[11px] font-normal text-muted num">{bodyCount} row{bodyCount === 1 ? '' : 's'}</span>}</h3>
                 {rep.note && <p className="mb-3 text-xs text-muted">{rep.note}</p>}
                 {plain && bodyCount > 12 && (
                   <div className="relative mb-2 max-w-xs"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
