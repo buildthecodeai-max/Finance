@@ -6,7 +6,7 @@ import { Tenant, pool } from '../db.js';
 import { deliver } from './portal.js';
 import { fmt } from './money.js';
 
-export const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api'] as const;
+export const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api', 'ai_assistant'] as const;
 export type Feature = (typeof FEATURES)[number];
 export const FULL_ACCESS = ['trialing', 'active', 'past_due', 'grace'];     // everything works (past_due/grace show a banner)
 export const GRACE_DAYS = 7, TRIAL_REMINDER_DAYS = [3, 1];
@@ -42,7 +42,10 @@ export async function getSub(agencyId: number) {
 export async function entitlements(agencyId: number) {
   const s = await getSub(agencyId);
   if (!s) return { status: 'cancelled', readOnly: true, features: new Set<string>(), limits: { seats: 0, branches: 0, bookings: 0 }, plan: null as any, sub: null as any };
-  return { status: s.status as string, readOnly: !FULL_ACCESS.includes(s.status), features: new Set<string>(String(s.features).split(',').filter(Boolean)),
+  const features = new Set<string>(String(s.features).split(',').filter(Boolean));
+  const [[ag]]: any = await pool.query('SELECT ai_access FROM agencies WHERE id = ?', [agencyId]);      // a platform operator can force the AI assistant on or off for one agency
+  if (ag?.ai_access === 'on') features.add('ai_assistant'); else if (ag?.ai_access === 'off') features.delete('ai_assistant');
+  return { status: s.status as string, readOnly: !FULL_ACCESS.includes(s.status), features,
     limits: { seats: s.max_seats as number | null, branches: s.max_branches as number | null, bookings: s.max_bookings_month as number | null }, plan: { code: s.plan_code, name: s.plan_name }, sub: s };
 }
 export async function usage(agencyId: number) {

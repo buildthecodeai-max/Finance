@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { HttpError } from '../errors.js';
 import { Tenant, pool } from '../db.js';
 import { FEATURES, getSub, grantManual, usage } from './billing.js';
+import { aiStatus, aiUsedThisMonth } from './ai.js';
 import { deliver } from './portal.js';
 import { sendMail } from './email.js';
 import { authenticator } from 'otplib';
@@ -114,7 +115,7 @@ export async function audit(req: Request, action: string, agencyId: number | nul
   await pool.query('INSERT INTO platform_audit_log (admin_user_id, action, agency_id, detail, reason, ip, actor_role, user_agent, before_json, after_json) VALUES (?,?,?,?,?,?,?,?,?,?)',
     [req.platform!.userId, action, agencyId, detail?.slice(0, 600) ?? null, reason || null, req.ip ?? null, req.platform!.role, String(req.headers['user-agent'] ?? '').slice(0, 200) || null, json(state?.before), json(state?.after)]);
 }
-async function agencyOrThrow(id: number) { const [[a]]: any = await pool.query('SELECT id, name, base_currency, created_at FROM agencies WHERE id = ?', [id]); if (!a) throw new HttpError(404, 'Agency not found'); return a; }
+async function agencyOrThrow(id: number) { const [[a]]: any = await pool.query('SELECT id, name, base_currency, created_at, ai_access, ai_monthly_limit FROM agencies WHERE id = ?', [id]); if (!a) throw new HttpError(404, 'Agency not found'); return a; }
 async function admins(agencyId: number) { const [r]: any = await pool.query(`SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.agency_id = ? AND m.role = 'admin'`, [agencyId]); return r.map((x: any) => x.email as string); }
 const sec = (agencyId: number, userId: number, ip: string | undefined, event: string, detail: string) => pool.query('INSERT INTO security_events (agency_id, user_id, ip, event, detail) VALUES (?,?,?,?,?)', [agencyId, userId, ip ?? null, event, detail.slice(0, 500)]);
 const bev = (agencyId: number, kind: string, detail: string, by: number) => pool.query('INSERT INTO billing_events (agency_id, kind, detail, created_by) VALUES (?,?,?,?)', [agencyId, kind, detail.slice(0, 400), by]);
@@ -160,7 +161,7 @@ export async function agencyDetail(id: number) {
   const [[act]]: any = await pool.query('SELECT MAX(created_at) at, COUNT(*) n FROM api_log WHERE agency_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)', [id]);
   return { agency: a, subscription: s ? { status: s.status, plan: s.plan_code, plan_name: s.plan_name, interval: s.billing_interval, trial_ends_at: s.trial_ends_at, current_period_end: s.current_period_end, grace_until: s.grace_until, manual: !!s.is_manual,
       cancel_at_period_end: !!s.cancel_at_period_end, platform_hold: !!s.platform_hold, hold_reason: s.hold_reason, stripe_customer_id: s.stripe_customer_id } : null,
-    usage: await usage(id), members, billing_events: events, security_events: secEv, support_sessions: sessions, failed_emails_7d: fail.n, open_critical_exceptions: crit.n, last_active: act.at, requests_30d: act.n };
+    usage: await usage(id), ai: { ...(await aiStatus(id)), ...(await aiUsedThisMonth(id)), key_configured: !!config.anthropicKey }, members, billing_events: events, security_events: secEv, support_sessions: sessions, failed_emails_7d: fail.n, open_critical_exceptions: crit.n, last_active: act.at, requests_30d: act.n };
 }
 
 /* ------------------------------------------------------------------ actions on an agency (all need a reason, all are audited) */

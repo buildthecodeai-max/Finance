@@ -28,6 +28,10 @@ export const config = {
     bucket: process.env.R2_BUCKET ?? '',
     signedTtl: Number(env('SIGNED_URL_TTL_SECONDS', '300')),
   },
+  /** AI assistant. Without a key the feature shows as "not set up" and nothing is sent anywhere. */
+  anthropicKey: process.env.ANTHROPIC_API_KEY ?? '',
+  aiModel: process.env.AI_MODEL ?? 'claude-sonnet-5-5',
+  aiDefaultMonthlyLimit: Number(process.env.AI_DEFAULT_MONTHLY_LIMIT ?? '300'),
   sendgridKey: process.env.SENDGRID_API_KEY ?? '',
   mailFrom: env('MAIL_FROM', 'billing@example.com'),
   stripeKey: process.env.STRIPE_SECRET_KEY ?? '',

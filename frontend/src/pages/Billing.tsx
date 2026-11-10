@@ -4,7 +4,7 @@ import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Page, Pill, Table } from '../components/ui';
 
-const FEATURE_LABEL: Record<string, string> = { portal: 'Client portal & payment links', accounting_export: 'Accounting export', automation: 'Automation rules', scheduled_reports: 'Scheduled reports', integrations: 'Webhooks & integrations', api: 'Public API' };
+const FEATURE_LABEL: Record<string, string> = { portal: 'Client portal & payment links', accounting_export: 'Accounting export', automation: 'Automation rules', scheduled_reports: 'Scheduled reports', integrations: 'Webhooks & integrations', api: 'Public API', ai_assistant: 'AI assistant' };
 const day = (d: string | null) => (d ? String(d).slice(0, 10) : '—');
 
 const daysTo = (d: string | null) => (d ? Math.max(0, Math.ceil((new Date(String(d).slice(0, 10)).getTime() - Date.now()) / 864e5)) : null);

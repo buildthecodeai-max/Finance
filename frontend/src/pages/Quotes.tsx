@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Check, Copy, Plus, Save, Search, Send, X } from 'lucide-react';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Check, Copy, Plus, Save, Search, Send, Sparkles, X } from 'lucide-react';
+import { EnquiryModal } from '../components/AiAssistant';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { ClientPick } from '../components/ClientPick';
@@ -39,7 +40,7 @@ export function QuoteList() {
   const nav = useNavigate(); const { can } = useAuth(); const [sp] = useSearchParams();
   const [rows, setRows] = useState<any[] | null>(null); const [err, setErr] = useState('');
   const [tab, setTab] = useState(TABS.some((t) => t.key === sp.get('tab')) ? sp.get('tab')! : 'all'); const [q, setQ] = useState('');
-  const editor = can('admin', 'finance_manager', 'agent');
+  const editor = can('admin', 'finance_manager', 'agent'); const [enquiry, setEnquiry] = useState(false);
   const load = () => api('/quotes').then((r) => { setRows(r); setErr(''); }).catch((e) => { setErr(e.message); setRows([]); });
   useEffect(() => { load(); }, []);
   useOpenOnNew(() => nav('/quotes/new'));
@@ -55,7 +56,8 @@ export function QuoteList() {
 
   return (
     <Page title="Quotes" description="Price a trip, send it to the client, and turn it into a booking once they accept. Click any quote to open it."
-      actions={editor ? <button className="btn inline-flex items-center gap-1" onClick={() => nav('/quotes/new')}><Plus size={16} />New quote</button> : undefined}>
+      actions={editor ? <div className="flex flex-wrap gap-2"><button className="btn-ghost inline-flex items-center gap-1" onClick={() => setEnquiry(true)}><Sparkles size={16} />From an enquiry</button><button className="btn inline-flex items-center gap-1" onClick={() => nav('/quotes/new')}><Plus size={16} />New quote</button></div> : undefined}>
+      {enquiry && <EnquiryModal onClose={() => setEnquiry(false)} />}
       {rows === null ? <div className="grid sm:grid-cols-3 gap-3 mb-4"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div> : (
         <div className="grid sm:grid-cols-3 gap-3 mb-4">
           {stat('waiting', 'With the client', String(waiting.length), expiring.length ? `${plural(expiring.length, 'quote')} expire within 7 days` : waiting.length ? 'Waiting for a reply' : 'Nothing waiting', expiring.length ? 'text-warn' : '')}
@@ -98,13 +100,20 @@ export function QuoteList() {
 
 let seq = 0; const key = () => `k${++seq}`;
 const line = (k: string): any => ({ _k: k, _lk: key(), product_type: 'hotel', description: '', quantity: 1, unit_cost: 0, markup_pct: 15, discount_pct: 0, tax_rate: 0, supplier_id: '', service_start: '', service_end: '' });
+/** A quote pre-filled from the AI assistant's draft (see components/AiAssistant). Prices are left at zero for the agent. */
+const fromAi = (base: any, r: any) => {
+  const d = r.draft; const opts = (d.options as string[]).map((name) => ({ k: key(), name }));
+  return { ...base, title: d.title, client_id: d.client_id ? String(d.client_id) : '', currency: d.currency, valid_until: d.valid_until ?? '', inclusions: d.inclusions, exclusions: d.exclusions, internal_notes: [d.internal_notes, r.client_guess ? `Client named in the enquiry: ${r.client_guess}` : '', r.missing?.length ? `To confirm with the client: ${r.missing.join('; ')}` : ''].filter(Boolean).join('\n'),
+    opts, components: d.components.map((c: any) => ({ ...line(opts.find((o) => o.name === c.option_name)!.k), product_type: c.product_type, description: c.description, quantity: c.quantity, service_start: c.service_start, service_end: c.service_end })) };
+};
 const blankQuote = (sp: URLSearchParams, cur: string) => { const k = key(); return { title: '', client_id: sp.get('client') ?? '', lead_id: sp.get('lead') ? Number(sp.get('lead')) : null, currency: cur, valid_until: '', inclusions: '', exclusions: '', payment_terms: '', cancellation_terms: '', internal_notes: '', opts: [{ k, name: 'Option 1' }], components: [line(k)] }; };
 
 export function QuoteEditor() {
   const { id } = useParams(); const [sp] = useSearchParams(); const nav = useNavigate(); const { can, agency } = useAuth();
   const clients = useList('/clients'); const suppliers = useList('/suppliers');
   const isNew = id === 'new'; const finance = can('admin', 'finance_manager'); const editor = can('admin', 'finance_manager', 'agent');
-  const [q, setQ] = useState<any>(() => blankQuote(sp, agency?.base_currency ?? 'USD')); const [snap, setSnap] = useState(() => JSON.stringify(q));
+  const ai = (useLocation().state as any)?.aiDraft;                       // set when the agent came from "From an enquiry"
+  const [q, setQ] = useState<any>(() => { const b = blankQuote(sp, agency?.base_currency ?? 'USD'); return ai ? fromAi(b, ai) : b; }); const [snap, setSnap] = useState(() => JSON.stringify(blankQuote(sp, agency?.base_currency ?? 'USD')));
   const [meta, setMeta] = useState<any>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [sent, setSent] = useState<any>(null); const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false); const [accepting, setAccepting] = useState<any>(null); const [minMargin, setMinMargin] = useState<number | null>(null); const [lead, setLead] = useState<any>(null);
 
@@ -171,6 +180,7 @@ export function QuoteEditor() {
         {!isNew && editor && meta.status === 'accepted' && <button className="btn" disabled={busy || !meta.client_id} title={!meta.client_id ? 'Link the quote to a client first' : undefined} onClick={() => act(async () => { const r = await api(`/quotes/${id}/convert`, 'POST'); nav(`/bookings/${r.booking_id}`); })}>Create booking</button>}
         {meta?.booking_id && <button className="btn-ghost" onClick={() => nav(`/bookings/${meta.booking_id}`)}>Open booking</button>}</>}>
       <Err e={err} />{msg && <Banner ok onClose={() => setMsg('')}>{msg}</Banner>}
+      {isNew && ai && <div className="mb-3 flex gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-sm"><Sparkles size={16} className="mt-0.5 shrink-0 text-accent" /><span><b>Draft from the enquiry.</b> Check every line, choose the client{ai.client ? '' : ' (none matched)'}, and add prices — the assistant doesn’t set them. {ai.missing?.length ? `Still to ask the client: ${ai.missing.join('; ')}.` : ''}</span></div>}
 
       {sent && <div className="card mb-4 text-sm"><div className="font-medium mb-1">Client link</div>
         <p className="text-xs text-muted mb-2">{sent.emailed ? `We emailed this link to ${client?.email ?? 'the client'}. ` : client?.email ? '' : 'This client has no email address on file, so nothing was emailed — copy the link and send it yourself. '}The client can view the quote and accept, decline or ask for changes. This link is shown only once; sending again replaces it.</p>

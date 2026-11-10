@@ -7,7 +7,7 @@ import { Err, Field, Modal, Pill, Table } from '../components/ui';
 import { ThemeMenuButton } from '../components/ThemeToggle';
 
 const day = (d: any) => (d ? String(d).replace('T', ' ').slice(0, 16) : '—');
-const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api'];
+const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api', 'ai_assistant'];
 const MODULE_CODES: { code: string; label: string }[] = [
   { code: 'crm', label: 'CRM (Leads, Quotes, Bookings, Clients)' },
   { code: 'ticketing', label: 'Ticketing (Ticket Invoices, Refunds, Airlines)' },
@@ -244,6 +244,30 @@ function MembersPanel({ detail, canManage, onRefresh }: { detail: any; canManage
   </div>;
 }
 
+/** Operator control: may this agency use the AI assistant? Follow its plan, force it on, or switch it off, with an optional monthly cap. Every change needs a reason and is audited. */
+function AiAccess({ detail, canEdit, onRefresh }: { detail: any; canEdit: boolean; onRefresh(): void }) {
+  const ai = detail.ai, id = detail.agency.id;
+  const [access, setAccess] = useState<string>(ai.access); const [cap, setCap] = useState<string>(detail.agency.ai_monthly_limit == null ? '' : String(detail.agency.ai_monthly_limit)); const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [ok, setOk] = useState('');
+  const changed = access !== ai.access || cap !== (detail.agency.ai_monthly_limit == null ? '' : String(detail.agency.ai_monthly_limit));
+  const save = async () => {
+    setBusy(true); setErr(''); setOk('');
+    try { await api(`/platform/agencies/${id}/ai`, 'PUT', { access, monthly_limit: cap.trim() === '' ? null : Number(cap), reason }); setReason(''); setOk('Saved.'); onRefresh(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const why: Record<string, string> = { not_configured: 'no AI key on the server', off: 'switched off for this agency', plan: 'not in their plan', limit: 'monthly limit reached' };
+  return <div className="card">
+    <div className="flex flex-wrap items-center justify-between gap-2"><div className="font-medium text-sm">AI assistant</div>
+      <span className={`text-xs px-2 py-0.5 rounded-full border ${ai.available ? 'border-success/30 bg-success/10 text-success' : 'border-line text-muted'}`}>{ai.available ? 'Available' : `Not available — ${why[ai.reason] ?? ai.reason}`}</span></div>
+    <p className="text-xs text-muted mt-1">{ai.requests} request{ai.requests === 1 ? '' : 's'} this month (limit {ai.limit}) · {ai.tokens.toLocaleString()} tokens.{!ai.key_configured && ' The server has no ANTHROPIC_API_KEY, so nobody can use it yet.'}</p>
+    {canEdit && <div className="grid gap-x-4 sm:grid-cols-3 mt-3">
+      <Field label="Access"><select className="input" value={access} onChange={(e) => setAccess(e.target.value)}><option value="plan">Follow their plan</option><option value="on">Always on</option><option value="off">Off</option></select></Field>
+      <Field label="Requests per month" hint="Blank = server default"><input className="input num" type="number" min={0} value={cap} onChange={(e) => setCap(e.target.value)} placeholder={String(ai.limit)} /></Field>
+      <Field label="Reason (audited)"><input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. pilot customer" /></Field></div>}
+    <Err e={err} />{ok && <div role="status" className="text-sm text-success mb-2">{ok}</div>}
+    {canEdit && <div className="flex justify-end"><button className="btn" disabled={busy || !changed || reason.trim().length < 3} onClick={save}>{busy ? 'Saving…' : 'Save'}</button></div>}
+  </div>;
+}
+
 function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: any; me: Me; onClose(): void; onAct(a: Act): void; onRefresh(): void }) {
   const ag = detail.agency;
   return <Modal title={ag.name} wide onClose={onClose}>
@@ -256,6 +280,7 @@ function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: 
           <div className="card"><div className="text-xs text-muted">Usage</div><div className="text-sm mt-1">{detail.usage.seats} members · {detail.usage.branches} branches · {detail.usage.bookings} bookings this month</div><div className="text-xs text-muted mt-2">Last active {day(detail.last_active)} · {detail.requests_30d} req / 30 d</div></div>
           <div className="card"><div className="text-xs text-muted">Health</div><div className="text-sm mt-1">{detail.open_critical_exceptions} critical exceptions · {detail.failed_emails_7d} failed emails (7 d)</div></div>
         </div>
+        <AiAccess detail={detail} canEdit={me.caps.includes('billing')} onRefresh={onRefresh} />
         <MembersPanel detail={detail} canManage={me.caps.includes('suspend')} onRefresh={onRefresh} />
         <div className="grid gap-4 md:grid-cols-2">
           <div><div className="font-medium text-sm mb-1">Billing events</div><Table rows={detail.billing_events.map((m: any, i: number) => ({ ...m, id: i }))} empty="None" cols={[{ h: 'When', render: (e: any) => <span className="text-xs num">{day(e.created_at)}</span> }, { h: 'Event', render: (e: any) => <>{e.kind}<div className="text-xs text-muted">{e.detail}</div></> }]} /></div>

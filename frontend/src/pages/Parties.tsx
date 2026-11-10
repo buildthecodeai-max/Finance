@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, FilePlus2, MailWarning, Mail, Pencil, Phone, Plus, Search, Trash2, Users, Wallet, X, type LucideIcon } from 'lucide-react';
+import { Archive, ArchiveRestore, FilePlus2, MailWarning, Mail, Pencil, Sparkles, Phone, Plus, Search, Trash2, Users, Wallet, X, type LucideIcon } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Page, Pill, Skeleton, Table } from '../components/ui';
 import { useOpenOnNew } from '../lookup';
 import { SendSms } from '../components/SendSms';
+import { AiPanel } from '../components/AiAssistant';
 
 type Kind = 'clients' | 'suppliers';
 const SUPPLIER_TYPES = ['airline', 'hotel', 'cruise', 'transfer', 'tour_operator', 'other'];
@@ -64,7 +65,7 @@ const fmtMap = (m: Record<string, number>) => Object.entries(m).map(([c, v]) => 
 function ClientDetail({ id, canManage, canEdit, startDelete, onClose, onChanged, names }: { id: number; canManage: boolean; canEdit: boolean; startDelete?: boolean; onClose(): void; onChanged(msg?: string): void; names: string[] }) {
   const nav = useNavigate(); const { agency } = useAuth(); const tabs = ['Overview', 'Bookings', 'Quotes', 'Invoices', 'Payments', 'Activity'];
   const [d, setD] = useState<any>(null); const [tl, setTl] = useState<any[]>([]); const [bks, setBks] = useState<any[]>([]); const [qts, setQts] = useState<any[]>([]); const [usage, setUsage] = useState<any>(null);
-  const [tab, setTab] = useState('Overview'); const [sms, setSms] = useState(false); const [edit, setEdit] = useState(false); const [err, setErr] = useState(''); const [confirmDel, setConfirmDel] = useState(!!startDelete);
+  const [tab, setTab] = useState('Overview'); const [sms, setSms] = useState(false); const [ai, setAi] = useState(false); const [edit, setEdit] = useState(false); const [err, setErr] = useState(''); const [confirmDel, setConfirmDel] = useState(!!startDelete);
   const load = () => {
     api(`/clients/${id}`).then(setD).catch((e) => setErr(e.message));
     api(`/crm/timeline/client/${id}`).then(setTl).catch(() => {});
@@ -92,6 +93,7 @@ function ClientDetail({ id, canManage, canEdit, startDelete, onClose, onChanged,
           <button className="btn-ghost" onClick={() => go(`/quotes/new?client=${id}`)}>New quote</button>
           <button className="btn-ghost inline-flex items-center gap-1" onClick={() => go(`/invoices?client=${id}`)}><FilePlus2 size={14} />New invoice</button></>}
         {!archived && canEdit && <button className="btn-ghost" onClick={() => setSms(true)}>Send text</button>}
+        {!archived && canEdit && <button className="btn-ghost inline-flex items-center gap-1" onClick={() => setAi(true)}><Sparkles size={14} />Write message</button>}
         {!archived && canManage && Object.keys(owed).length > 0 && <button className="btn-ghost" onClick={() => go(`/client-receipts?client=${id}`)}>Receive payment</button>}
         <div className="ml-auto flex flex-wrap gap-2">
           {canEdit && <button className="btn-ghost inline-flex items-center gap-1" onClick={() => setEdit(true)}><Pencil size={14} />Edit</button>}
@@ -125,6 +127,7 @@ function ClientDetail({ id, canManage, canEdit, startDelete, onClose, onChanged,
         { h: 'Status', render: (r: any) => (r.voided ? <Pill s="voided" /> : <Pill s="received" />) }, { h: 'Amount', right: true, render: (r: any) => money(r.amount, r.currency) }]} />}
       {tab === 'Activity' && (tl.length ? <div className="space-y-2 max-h-80 overflow-auto">{tl.map((x: any, i: number) => <div key={i} className="text-sm flex gap-3"><span className="num text-xs text-muted shrink-0">{day(x.at ?? x.created_at)}</span><span>{x.text ?? x.body ?? x.title}</span></div>)}</div> : <p className="text-sm text-muted">No activity recorded yet.</p>)}
 
+      {ai && <AiPanel tab="write" clientId={id} onClose={() => setAi(false)} />}
       {sms && <SendSms target={{ client_id: id, name: d.name, phone: d.phone }} onClose={() => setSms(false)} onSent={(m) => { setSms(false); onChanged(m); }} />}
       {edit && <PartyForm kind="clients" initial={{ ...blank('clients', agency?.base_currency), ...d, email: d.email ?? '' }} names={names} onClose={() => setEdit(false)} onSaved={() => { setEdit(false); load(); onChanged(`${d.name} was updated.`); }} />}
       {confirmDel && <Modal title={`Delete ${d.name}?`} onClose={() => setConfirmDel(false)}>

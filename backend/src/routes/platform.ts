@@ -45,6 +45,14 @@ platformRouter.delete('/agencies/:id', P.needs('suspend'), async (req, res) => {
   await P.audit(req, 'delete_agency', id, `deleted "${r.name}": ${r.rows} rows in ${r.tables} tables, ${r.users} users removed`, b.reason, { before: { name: r.name }, after: { deleted: true, rows: r.rows, tables: r.tables, users: r.users } });
   res.json({ ok: true });
 });
+platformRouter.put('/agencies/:id/ai', P.needs('billing'), async (req, res) => {
+  const id = idParam(req), b = parse(Reason.extend({ reason: z.string().trim().min(3, 'Say why you are changing this.'), access: z.enum(['plan', 'on', 'off']), monthly_limit: z.number().int().min(0).max(1_000_000).nullable() }), req.body);
+  const [[before]]: any = await pool.query('SELECT ai_access, ai_monthly_limit FROM agencies WHERE id=?', [id]);
+  if (!before) throw new HttpError(404, 'Agency not found');
+  await pool.query('UPDATE agencies SET ai_access=?, ai_monthly_limit=? WHERE id=?', [b.access, b.monthly_limit, id]);
+  await P.audit(req, 'set_ai_access', id, `access=${b.access} monthly_limit=${b.monthly_limit ?? 'default'}`, b.reason, { before, after: { ai_access: b.access, ai_monthly_limit: b.monthly_limit } });
+  res.json({ ok: true });
+});
 platformRouter.post('/agencies/:id/extend-trial', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ days: z.number().int().min(1).max(60) }), req.body); res.json(await P.extendTrial(req, idParam(req), b.days, b.reason)); });
 platformRouter.post('/agencies/:id/set-plan', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ plan: z.string(), interval: Interval.default('monthly') }), req.body); await P.setPlan(req, idParam(req), b.plan, b.interval, b.reason); res.json({ ok: true }); });
 platformRouter.post('/agencies/:id/grant', P.needs('billing'), async (req, res) => { const b = parse(Reason.extend({ plan: z.string(), interval: Interval.default('yearly'), until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }), req.body); await P.grant(req, idParam(req), b.plan, b.interval, b.until, b.reason); res.json({ ok: true }); });

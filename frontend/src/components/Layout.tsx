@@ -1,3 +1,4 @@
+import { AiButton } from './AiAssistant';
 import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -242,6 +243,7 @@ export default function Layout() {
                   <MenuBtn key={to} onClick={() => { close(); nav(to); }}><Icon size={15} className="text-muted" />{label}</MenuBtn>))}
               </Popover>)}
             <button className="btn-icon hidden sm:inline-flex" onClick={() => setCalc(true)} aria-label="Calculator" title="Calculator"><CalcIcon size={18} /></button>
+            <AiButton />
             <button className="btn-icon hidden sm:inline-flex" onClick={() => nav('/help')} aria-label="User guide" title="User guide"><HelpCircle size={18} /></button>
             <ThemeMenu />
             <Popover width="w-60" trigger={(_o, t) => <button onClick={t} aria-label="Account menu" className="ml-1 h-9 w-9 rounded-full bg-accent/15 text-accent text-xs font-semibold grid place-items-center hover:bg-accent/25">{initials}</button>}>
