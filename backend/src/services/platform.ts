@@ -529,3 +529,41 @@ export async function listAudit(q: { q?: string; category?: string; operator?: s
   const [ops]: any = await pool.query('SELECT DISTINCT u.email FROM platform_audit_log a JOIN users u ON u.id = a.admin_user_id ORDER BY u.email');
   return { rows: rows.map((r: any) => ({ ...r, category: categoryOf(r.action) })), total: tot.n, page, page_size: size, summary, operators: ops.map((o: any) => o.email) };
 }
+
+/* ------------------------------------------------------------------ security events across every agency */
+/** What kind of event this is. "blocked" events are someone trying something they may not do, which is what an operator wants to spot first. */
+export const SECURITY_CATEGORIES: Record<string, string[]> = {
+  blocked: ['role_denied', 'agency_access_denied', 'foreign_reference_denied'],
+  sensitive: ['sensitive_view'],
+  support: ['support_access_granted', 'support_access_revoked'],
+  recovery: ['password_reset_requested', 'password_reset_completed'],
+  platform: ['platform_suspended'],
+};
+const secCategory = (e: string) => Object.entries(SECURITY_CATEGORIES).find(([, a]) => a.includes(e))?.[0] ?? 'other';
+/** Trying to reach another agency's data is the serious one; being refused an action inside your own agency is routine. */
+const secSeverity = (e: string) => (['agency_access_denied', 'foreign_reference_denied'].includes(e) ? 'high' : ['role_denied', 'platform_suspended', 'sensitive_view'].includes(e) ? 'medium' : 'info');
+
+export async function listSecurityEvents(q: { q?: string; category?: string; from?: string; to?: string; page?: number; size?: number }) {
+  const where: string[] = ['1 = 1'], p: any[] = []; const size = Math.min(1000, Math.max(1, q.size ?? 25)), page = Math.max(1, q.page ?? 1);
+  const s = (q.q ?? '').trim().replace(/[%_]/g, '');
+  if (s) { where.push('(e.event LIKE ? OR e.detail LIKE ? OR e.ip LIKE ? OR ag.name LIKE ? OR u.email LIKE ? OR u.name LIKE ?)'); p.push(...Array(6).fill(`%${s}%`)); }
+  if (q.from) { where.push('e.created_at >= ?'); p.push(`${q.from} 00:00:00`); }
+  if (q.to) { where.push('e.created_at < DATE_ADD(?, INTERVAL 1 DAY)'); p.push(q.to); }
+  const base = 'FROM security_events e LEFT JOIN agencies ag ON ag.id = e.agency_id LEFT JOIN users u ON u.id = e.user_id';
+  const [byEvent]: any = await pool.query(`SELECT e.event, COUNT(*) n ${base} WHERE ${where.join(' AND ')} GROUP BY e.event`, p);
+  const summary: Record<string, number> = { all: 0, blocked: 0, sensitive: 0, support: 0, recovery: 0, platform: 0, other: 0 };
+  for (const r of byEvent) { const c = secCategory(r.event); summary[c] += Number(r.n); summary.all += Number(r.n); }
+  const blocked = SECURITY_CATEGORIES.blocked;
+  const [hot]: any = await pool.query(`SELECT u.id, u.name, u.email, ag.name agency_name, COUNT(*) n, MAX(e.created_at) last_at ${base} WHERE ${where.join(' AND ')} AND e.event IN (${blocked.map(() => '?').join(',')}) AND e.user_id IS NOT NULL GROUP BY u.id, u.name, u.email, ag.name ORDER BY n DESC, last_at DESC LIMIT 5`, [...p, ...blocked]);
+  const [trend]: any = await pool.query("SELECT DATE_FORMAT(created_at, '%Y-%m-%d') d, SUM(event IN (?)) blocked, COUNT(*) n FROM security_events WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 13 DAY) GROUP BY d ORDER BY d", [blocked]);
+  if (q.category && q.category !== 'all') {
+    const known = SECURITY_CATEGORIES[q.category];
+    if (known) { where.push(`e.event IN (${known.map(() => '?').join(',')})`); p.push(...known); }
+    else if (q.category === 'other') { const all = Object.values(SECURITY_CATEGORIES).flat(); where.push(`e.event NOT IN (${all.map(() => '?').join(',')})`); p.push(...all); }
+  }
+  const w = where.join(' AND ');
+  const [[tot]]: any = await pool.query(`SELECT COUNT(*) n ${base} WHERE ${w}`, p);
+  const [rows]: any = await pool.query(`SELECT e.id, e.agency_id, ag.name agency_name, e.user_id, u.name user_name, u.email user_email, e.event, e.detail, e.ip, e.created_at ${base} WHERE ${w} ORDER BY e.id DESC LIMIT ? OFFSET ?`, [...p, size, (page - 1) * size]);
+  return { rows: rows.map((r: any) => ({ ...r, category: secCategory(r.event), severity: secSeverity(r.event) })), total: tot.n, page, page_size: size, summary,
+    attention: hot.map((h: any) => ({ ...h, n: Number(h.n) })), trend: trend.map((t: any) => ({ day: t.d, total: Number(t.n), blocked: Number(t.blocked ?? 0) })) };
+}

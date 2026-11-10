@@ -104,4 +104,5 @@ platformRouter.put('/plans/:id', P.needs('billing'), async (req, res) => { const
 
 platformRouter.get('/audit', async (req, res) => res.json(await P.listAudit(parse(z.object({ q: z.string().max(100).optional(), category: z.string().max(20).optional(), operator: z.string().max(255).optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), page: z.coerce.number().int().min(1).optional(), size: z.coerce.number().int().min(1).max(1000).optional() }), req.query))));
-platformRouter.get('/security-events', async (_req, res) => res.json((await pool.query(`SELECT e.id, e.agency_id, ag.name agency_name, e.event, e.detail, e.ip, e.created_at FROM security_events e LEFT JOIN agencies ag ON ag.id = e.agency_id ORDER BY e.id DESC LIMIT 300`))[0]));
+platformRouter.get('/security-events', async (req, res) => res.json(await P.listSecurityEvents(parse(z.object({ q: z.string().max(100).optional(), category: z.string().max(20).optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), page: z.coerce.number().int().min(1).optional(), size: z.coerce.number().int().min(1).max(1000).optional() }), req.query))));

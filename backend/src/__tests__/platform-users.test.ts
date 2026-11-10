@@ -116,3 +116,18 @@ describe('audit log search', () => {
     const ro = await operator('readonly'); expect((await call(ro.token, 'GET', '/platform/audit')).status).toBe(200);              // reading the audit log is open to every operator role
   });
 });
+
+describe('security events', () => {
+  it('lists events from every agency with a category, a severity and who it was, and summarises them', async () => {
+    const a = await person('Hana'); const b = await person('Ivo');
+    // Hana tries to use Ivo's agency: refused, and recorded as a cross-agency attempt
+    const r = await fetch(`${base}/api/clients`, { headers: { authorization: `Bearer ${a.token}`, 'x-agency-id': String(b.agencyId) } }); expect(r.status).toBe(403);
+    const ev = await P('GET', `/security-events?q=${encodeURIComponent(a.email)}`); expect(ev.status).toBe(200);
+    const hit = ev.body.rows.find((x: any) => x.event === 'agency_access_denied'); expect(hit).toMatchObject({ category: 'blocked', severity: 'high', user_email: a.email, agency_id: b.agencyId });
+    const all = await P('GET', '/security-events'); const sm = all.body.summary; expect(sm.all).toBe(sm.blocked + sm.sensitive + sm.support + sm.recovery + sm.platform + sm.other); expect(sm.blocked).toBeGreaterThan(0);
+    const blocked = await P('GET', '/security-events?category=blocked&size=1000'); expect(blocked.body.rows.every((x: any) => x.category === 'blocked')).toBe(true); expect(blocked.body.summary.all).toBe(sm.all);
+    expect(all.body.attention.length).toBeGreaterThan(0); expect(all.body.attention[0]).toHaveProperty('email'); expect(all.body.trend.length).toBeGreaterThan(0);
+    expect((await P('GET', '/security-events?from=2000-01-01&to=2000-01-02')).body.total).toBe(0); expect((await P('GET', '/security-events?from=nope')).status).toBe(400);
+    expect((await call(a.token, 'GET', '/platform/security-events')).status).toBe(404);          // an ordinary admin cannot see the console
+  });
+});

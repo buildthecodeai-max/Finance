@@ -125,9 +125,10 @@ function UserWindow({ id, me, onClose, onOpenAgency, onChanged }: { id: number; 
 
 /* ---------------------------------------------------------------------------- the directory */
 const FILTERS: [string, string][] = [['all', 'Everyone'], ['operators', 'Operators'], ['owners', 'Agency owners'], ['multi', 'Several agencies'], ['no2fa', 'No 2FA'], ['disabled', 'Switched off']];
-export function PlatformUsers({ me, onOpenAgency }: { me: Me; onOpenAgency(id: number): void }) {
+export function PlatformUsers({ me, onOpenAgency, focus, onFocused }: { me: Me; onOpenAgency(id: number): void; focus?: number | null; onFocused?(): void }) {
   const [res, setRes] = useState<any>(null); const [q, setQ] = useState(''); const [filter, setFilter] = useState('all'); const [page, setPage] = useState(1);
   const [open, setOpen] = useState<number | null>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState('');
+  useEffect(() => { if (focus) { setOpen(focus); onFocused?.(); } }, [focus]);
   const load = () => api(`/platform/users?page=${page}&filter=${filter}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`).then((r) => { setRes(r); setErr(''); }).catch((e) => setErr(e.message));
   useEffect(() => { const h = setTimeout(load, q ? 250 : 0); return () => clearTimeout(h); }, [q, filter, page]);
   useEffect(() => { setPage(1); }, [q, filter]);

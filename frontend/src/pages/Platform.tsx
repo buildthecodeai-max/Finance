@@ -8,6 +8,7 @@ import { Avatar, Err, Field, Modal, Pager, Pill, Skeleton, Table } from '../comp
 import { ThemeMenuButton } from '../components/ThemeToggle';
 import { PlatformOperators, PlatformUsers, rel } from './PlatformPeople';
 import { PlatformAudit } from './PlatformAudit';
+import { PlatformSecurity } from './PlatformSecurity';
 
 const day = (d: any) => (d ? String(d).replace('T', ' ').slice(0, 16) : '—');
 const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api', 'ai_assistant'];
@@ -81,7 +82,7 @@ export default function Platform() {
   const { user, ready, logout } = useAuth(); const nav = useNavigate();
   const [tab, setTab] = useState<Tab>('dashboard'); const [need2fa, setNeed2fa] = useState(false);
   const [me, setMe] = useState<Me | null>(null); const [pending, setPending] = useState(0);
-  const [palette, setPalette] = useState(false); const [focus, setFocus] = useState<number | null>(null);
+  const [palette, setPalette] = useState(false); const [focus, setFocus] = useState<number | null>(null); const [focusUser, setFocusUser] = useState<number | null>(null);
   useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
   useEffect(() => { if (tab) refreshPending(); }, [tab, me]);
   const refreshPending = () => { if (me?.caps.includes('suspend')) api('/platform/approvals?status=pending').then((r) => setPending(r.length)).catch(() => {}); };
@@ -158,7 +159,7 @@ export default function Platform() {
                     </button>
                   ))}
                 </div>
-                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <PlatformAudit me={me} />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
+                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <PlatformAudit me={me} />}{tab === 'security' && <PlatformSecurity onOpenUser={me.caps.includes('support') ? (id) => { setFocusUser(id); setTab('users'); } : undefined} />}{tab === 'system' && <System />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} focus={focusUser} onFocused={() => setFocusUser(null)} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
               </OpCtx.Provider>}
           </div>
         </main>
@@ -871,8 +872,6 @@ function Approvals({ onChange }: { onChange(): void }) {
         <div className="flex gap-1 justify-end"><button className="btn" onClick={() => confirm(`Approve suspending ${r.agency_name}? Their workspace becomes read-only immediately.`) && run(() => api(`/platform/approvals/${r.id}/approve`, 'POST', {}))}>Approve</button><button className="btn-ghost" onClick={() => run(() => api(`/platform/approvals/${r.id}/reject`, 'POST', {}))}>Reject</button></div> }]} /></>;
 }
 
-function SecurityEvents() { const [rows, setRows] = useState<any[]>([]); useEffect(() => { api('/platform/security-events').then(setRows); }, []);
-  return <Table rows={rows} empty="No events" cols={[{ h: 'When', render: (a: any) => <span className="text-xs num">{day(a.created_at)}</span> }, { h: 'Agency', render: (a: any) => a.agency_name ?? '—' }, { h: 'Event', render: (a: any) => a.event.replace(/_/g, ' ') }, { h: 'Detail', render: (a: any) => a.detail }, { h: 'IP', render: (a: any) => <span className="text-xs num">{a.ip}</span> }]} />; }
 function System() { const [s, setS] = useState<any>(null); useEffect(() => { api('/platform/system').then(setS); }, []);
   if (!s) return <div className="skeleton h-40" />; const h = s.health;
   return <div className="grid gap-3 md:grid-cols-2"><div className="card"><div className="font-medium mb-2">Readiness</div><div className="text-sm space-y-1"><div className="flex justify-between"><span>Database</span><Pill s={h.checks.database === 'ok' ? 'approved' : 'void'} /></div><div className="flex justify-between"><span>Migrations</span><span className="num text-xs">{h.checks.migrations?.applied} · {h.checks.migrations?.latest}</span></div></div></div>
