@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Check, Copy, Plus, Save, Search, Send, Sparkles, X } from 'lucide-react';
+import { Check, CheckCircle2, Copy, MessageSquareWarning, Plus, Save, Search, Send, Sparkles, X, type LucideIcon } from 'lucide-react';
 import { EnquiryModal } from '../components/AiAssistant';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { ClientPick } from '../components/ClientPick';
-import { Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
+import { Avatar, Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
 import { today, useList, useOpenOnNew } from '../lookup';
 
 const TYPES = ['flight', 'hotel', 'package', 'cruise', 'transfer', 'tour', 'rail', 'car', 'insurance', 'visa', 'fee', 'other'];
@@ -50,9 +50,11 @@ export function QuoteList() {
   const list = useMemo(() => { const s = q.trim().toLowerCase(); return all.filter(TABS.find((t) => t.key === tab)!.test).filter((r) => !s || [r.quote_no, r.title, r.client_name, r.lead_name].some((v) => String(v ?? '').toLowerCase().includes(s))); }, [rows, tab, q]);
   const waiting = all.filter(TABS[2].test), expiring = waiting.filter((r) => r.valid_until && daysFrom(r.valid_until) <= 7);
   const convert = async (r: any) => { try { const x = await api(`/quotes/${r.id}/convert`, 'POST'); nav(`/bookings/${x.booking_id}`); } catch (e: any) { setErr(`${r.quote_no}: ${e.message}`); } };
-  const stat = (key: string, title: string, value: string, sub: string, tone = '') => (
-    <button type="button" onClick={() => setTab(key)} className={`card text-left hover:bg-surface2/70 transition-colors ${tab === key ? 'ring-1 ring-accent' : ''}`}>
-      <div className="text-xs text-muted">{title}</div><div className={`text-xl font-semibold num mt-0.5 ${tone}`}>{value}</div><div className="text-xs text-muted mt-0.5">{sub}</div></button>);
+  const stat = (key: string, title: string, value: string, sub: string, Icon: LucideIcon, tone = '') => {
+    const t = tone.includes('success') ? ['border-l-4 !border-l-success', 'bg-success/10 text-success'] : tone ? ['border-l-4 !border-l-warn', 'bg-warn/10 text-warn'] : ['', 'bg-accent/10 text-accent'];
+    return (<button type="button" aria-pressed={tab === key} onClick={() => setTab(key)} className={`card text-left hover:bg-surface2/70 transition-colors ${t[0]} ${tab === key ? 'ring-2 ring-accent' : ''}`}>
+      <div className="flex items-start justify-between gap-2"><div className="text-xs font-medium text-muted">{title}</div><span className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 ${t[1]}`}><Icon size={15} /></span></div>
+      <div className={`text-2xl font-semibold num mt-1 ${tone}`}>{value}</div><div className="text-xs text-muted mt-0.5 truncate">{sub}</div></button>); };
 
   return (
     <Page title="Quotes" description="Price a trip, send it to the client, and turn it into a booking once they accept. Click any quote to open it."
@@ -60,9 +62,9 @@ export function QuoteList() {
       {enquiry && <EnquiryModal onClose={() => setEnquiry(false)} />}
       {rows === null ? <div className="grid sm:grid-cols-3 gap-3 mb-4"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div> : (
         <div className="grid sm:grid-cols-3 gap-3 mb-4">
-          {stat('waiting', 'With the client', String(waiting.length), expiring.length ? `${plural(expiring.length, 'quote')} expire within 7 days` : waiting.length ? 'Waiting for a reply' : 'Nothing waiting', expiring.length ? 'text-warn' : '')}
-          {stat('changes', 'Client asked for changes', String(counts.changes), counts.changes ? 'Revise and send again' : 'No requests', counts.changes ? 'text-warn' : '')}
-          {stat('accepted', 'Accepted — ready to book', String(counts.accepted), counts.accepted ? 'Turn these into bookings' : 'Nothing to book yet', counts.accepted ? 'text-success' : '')}
+          {stat('waiting', 'With the client', String(waiting.length), expiring.length ? `${plural(expiring.length, 'quote')} expire within 7 days` : waiting.length ? 'Waiting for a reply' : 'Nothing waiting', Send, expiring.length ? 'text-warn' : '')}
+          {stat('changes', 'Client asked for changes', String(counts.changes), counts.changes ? 'Revise and send again' : 'No requests', MessageSquareWarning, counts.changes ? 'text-warn' : '')}
+          {stat('accepted', 'Accepted — ready to book', String(counts.accepted), counts.accepted ? 'Turn these into bookings' : 'Nothing to book yet', CheckCircle2, counts.accepted ? 'text-success' : '')}
         </div>)}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -79,15 +81,15 @@ export function QuoteList() {
       </div>
       <Err e={err} />
       {rows === null ? <Skeleton className="h-64" /> : (
-        <Table rows={list} onRow={(r) => nav(`/quotes/${r.id}`)}
+        <Table rows={list} noun="quotes" onRow={(r) => nav(`/quotes/${r.id}`)}
           empty={all.length === 0 ? (editor ? 'No quotes yet — click “New quote” to price your first trip.' : 'No quotes yet.') : `Nothing in “${TABS.find((t) => t.key === tab)!.label}”${q ? ` matching “${q}”` : ''}.`}
           cols={[
-            { h: 'Quote', render: (r) => <><span className="num font-medium">{r.quote_no}</span>{r.current_version > 1 && <span className="text-xs text-muted ml-1">v{r.current_version}</span>}<div className="text-xs text-muted truncate max-w-[16rem]">{r.title}</div></> },
-            { h: 'For', render: (r) => (r.client_name ?? (r.lead_name ? <>{r.lead_name} <span className="text-xs text-muted">(lead)</span></> : <span className="text-muted">—</span>)) },
+            { h: 'Quote', render: (r) => <><span className="num font-semibold">{r.quote_no}</span>{r.current_version > 1 && <span className="text-xs text-muted ml-1">v{r.current_version}</span>}<div className="text-xs text-muted truncate max-w-[16rem]">{r.title}</div></> },
+            { h: 'For', render: (r) => { const n = r.client_name ?? r.lead_name; return n ? <div className="flex items-center gap-2.5 min-w-0"><Avatar name={n} size={28} /><div className="min-w-0"><div className="truncate">{n}</div>{!r.client_name && <div className="text-xs text-muted">Lead</div>}</div></div> : <span className="text-muted">—</span>; } },
             { h: 'Status', render: (r) => <Pill s={shown(r)} /> },
             { h: 'Valid until', render: (r) => { if (!r.valid_until) return <span className="text-muted">Not set</span>; const n = daysFrom(r.valid_until), live = r.status === 'sent'; return <><span className="num">{day(r.valid_until)}</span>{live && <div className={`text-xs ${n < 0 ? 'text-danger' : n <= 7 ? 'text-warn' : 'text-muted'}`}>{n < 0 ? `expired ${-n} day${n === -1 ? '' : 's'} ago` : n === 0 ? 'expires today' : `${n} day${n === 1 ? '' : 's'} left`}</div>}</>; } },
-            { h: 'Price from', right: true, render: (r) => (r.from_total != null ? money(r.from_total, r.currency) : '—') },
-            { h: 'Margin', right: true, render: (r) => (r.margin_pct != null ? <span className={r.margin_pct < 10 ? 'text-warn' : ''}>{r.margin_pct}%</span> : '—') },
+            { h: 'Price from', right: true, render: (r) => (r.from_total != null ? <span className="font-medium">{money(r.from_total, r.currency)}</span> : <span className="text-muted">No price yet</span>) },
+            { h: 'Margin', right: true, render: (r) => (r.margin_pct != null ? <span className={r.margin_pct < 0 ? 'text-danger font-medium' : r.margin_pct < 10 ? 'text-warn' : ''}>{r.margin_pct}%</span> : '—') },
             { h: '', render: (r) => <div className="flex gap-1 justify-end whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
               {editor && r.status === 'accepted' && <button className="btn" onClick={() => convert(r)}>Create booking</button>}
               {r.booking_id && <button className="btn-ghost" onClick={() => nav(`/bookings/${r.booking_id}`)}>Open booking</button>}
