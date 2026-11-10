@@ -143,7 +143,14 @@ export async function overview() {
   const [[crit]]: any = await pool.query(`SELECT COUNT(*) n FROM exceptions WHERE status = 'open' AND severity = 'critical'`);
   const [[holds]]: any = await pool.query('SELECT COUNT(*) n FROM subscriptions WHERE platform_hold = 1');
   const [[sess]]: any = await pool.query('SELECT COUNT(*) n FROM support_sessions WHERE revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()');
-  return { agencies: a.n, new_30d: Number(a.new30 ?? 0), by_status: Object.fromEntries(st.map((r: any) => [r.status, r.n])), by_plan: byPlan, mrr: Math.round(m.mrr * 100) / 100, manual_mrr: Math.round(m.manual_mrr * 100) / 100, arr: Math.round(m.mrr * 1200) / 100,
+  // New agencies per week for the last 12 weeks (week 0 is the current one), filled in so a quiet week shows as zero
+  const [wk]: any = await pool.query('SELECT FLOOR(DATEDIFF(CURDATE(), DATE(created_at)) / 7) w, COUNT(*) n FROM agencies WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 84 DAY) GROUP BY w');
+  const signups = Array.from({ length: 12 }, (_, i) => Number(wk.find((x: any) => Number(x.w) === 11 - i)?.n ?? 0));
+  const [[act7]]: any = await pool.query('SELECT COUNT(DISTINCT agency_id) n FROM api_log WHERE created_at > DATE_SUB(NOW(), INTERVAL 7 DAY)');
+  const [trials]: any = await pool.query(`SELECT a.id, a.name, pl.name plan_name, s.trial_ends_at, CEIL(TIMESTAMPDIFF(MINUTE, UTC_TIMESTAMP(), s.trial_ends_at) / 1440) days_left
+      FROM subscriptions s JOIN agencies a ON a.id = s.agency_id LEFT JOIN plans pl ON pl.id = s.plan_id WHERE s.status = 'trialing' ORDER BY s.trial_ends_at LIMIT 6`);
+  const [fresh]: any = await pool.query(`SELECT a.id, a.name, a.created_at, s.status, pl.name plan_name FROM agencies a LEFT JOIN subscriptions s ON s.agency_id = a.id LEFT JOIN plans pl ON pl.id = s.plan_id ORDER BY a.id DESC LIMIT 5`);
+  return { signups, active_7d: Number(act7.n), trials, recent_agencies: fresh, agencies: a.n, new_30d: Number(a.new30 ?? 0), by_status: Object.fromEntries(st.map((r: any) => [r.status, r.n])), by_plan: byPlan, mrr: Math.round(m.mrr * 100) / 100, manual_mrr: Math.round(m.manual_mrr * 100) / 100, arr: Math.round(m.mrr * 1200) / 100,
     trials_ending_7d: tr.n, dead_webhook_deliveries: dead.n, open_critical_exceptions: crit.n, platform_holds: holds.n, pending_approvals: (await pool.query("SELECT COUNT(*) n FROM platform_approvals WHERE status = 'pending' AND expires_at > UTC_TIMESTAMP()") as any)[0][0].n, active_support_sessions: sess.n };
 }
 

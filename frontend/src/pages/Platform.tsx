@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { Activity, Check, Copy, Infinity as InfinityIcon, LayoutGrid, List, MoreHorizontal, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { Activity, Check, CheckCircle2, Copy, Infinity as InfinityIcon, LayoutGrid, List, MoreHorizontal, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Avatar, Err, Field, Modal, Pager, Pill, Skeleton, Table } from '../components/ui';
@@ -522,32 +522,18 @@ function Hero({ o, alerts, onNavigate, onNew, canNew, pending }: { o: any; alert
 /* ------------------------------------------------------------------ Dashboard ------------------------------------------------------------------ */
 function Dashboard({ onNavigate, focus, onFocused }: { onNavigate(t: Tab): void; focus?: number | null; onFocused?(): void }) {
   const { me } = useOp();
-  const [o, setO] = useState<any>(null);
-  const [res, setRes] = useState<any>({ rows: [], total: 0, page_size: 25 });
-  const [recent, setRecent] = useState<any[]>([]);
-  const [q, setQ] = useState(''); const [status, setStatus] = useState('');
+  const [o, setO] = useState<any>(null); const [recent, setRecent] = useState<any[] | null>(null);
   const [detail, setDetail] = useState<any>(null); const [act, setAct] = useState<Act | null>(null);
-  const [notice, setNotice] = useState(''); const [newAgency, setNewAgency] = useState(false);
-  const [plans, setPlans] = useState<any[]>([]); const [err, setErr] = useState('');
-  const [openMenu, setOpenMenu] = useState<number | null>(null);
+  const [notice, setNotice] = useState(''); const [newAgency, setNewAgency] = useState(false); const [plans, setPlans] = useState<any[]>([]); const [err, setErr] = useState('');
   const [barsVisible, setBarsVisible] = useState(false);
 
-  const loadAgencies = (qs = q, st = status) =>
-    api(`/platform/agencies?${qs ? `q=${encodeURIComponent(qs)}&` : ''}${st ? `status=${st}&` : ''}`).then(setRes).catch((e: any) => setErr(e.message));
-
+  const loadOverview = () => api('/platform/overview').then(setO).catch(() => {});
   useEffect(() => {
-    api('/platform/overview').then(setO).catch(() => {});
-    loadAgencies();
-    api('/platform/audit').then((r: any[]) => setRecent(r.slice(0, 8))).catch(() => {});
+    loadOverview();
+    api('/platform/audit?size=7').then((r: any) => setRecent(r.rows ?? [])).catch(() => setRecent([]));
     if (me.caps.includes('billing')) api('/platform/plans').then(setPlans).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    if (!o) return;
-    const t = setTimeout(() => setBarsVisible(true), 200);
-    return () => clearTimeout(t);
-  }, [o]);
-
+  useEffect(() => { if (!o) return; const t = setTimeout(() => setBarsVisible(true), 200); return () => clearTimeout(t); }, [o]);
   const open = async (id: number) => { try { setDetail(await api(`/platform/agencies/${id}`)); } catch (e: any) { setErr(e.message); } };
   useEffect(() => { if (focus) { open(focus); onFocused?.(); } }, [focus]);
 
@@ -555,136 +541,82 @@ function Dashboard({ onNavigate, focus, onFocused }: { onNavigate(t: Tab): void;
     { icon: Building2, label: 'Total agencies', rawValue: o?.agencies, sub: '', hue: 'accent' as const, trend: o ? `${o.new_30d} new this month` : undefined, trendDir: 'up' as const },
     { icon: DollarSign, label: 'MRR', formattedValue: o ? money(o.mrr) : undefined, sub: '', hue: 'success' as const, trend: o ? `${money(o.arr)} ARR` : undefined, trendDir: 'flat' as const },
     { icon: DollarSign, label: 'Invoiced MRR', formattedValue: o ? money(o.manual_mrr) : undefined, sub: '', hue: 'info' as const, trend: o ? 'manual billing' : undefined, trendDir: 'flat' as const },
+    { icon: Activity, label: 'Active this week', rawValue: o?.active_7d, sub: '', hue: 'success' as const, trend: o ? (o.agencies ? `${Math.round((o.active_7d / o.agencies) * 100)}% of agencies` : '') : undefined, trendDir: 'flat' as const },
     { icon: Clock, label: 'Trials expiring', rawValue: o?.trials_ending_7d, sub: 'within 7 days', hue: 'warn' as const, alert: !!(o?.trials_ending_7d), trend: o ? 'within 7 days' : undefined, trendDir: o?.trials_ending_7d ? 'down' as const : 'flat' as const },
-    { icon: Users, label: 'Support sessions', rawValue: o?.active_support_sessions, sub: '', hue: 'info' as const, trend: o ? 'live now' : undefined, trendDir: 'flat' as const },
     { icon: ShieldAlert, label: 'Operator holds', rawValue: o?.platform_holds, sub: '', hue: 'danger' as const, alert: !!(o?.platform_holds || o?.pending_approvals), trend: o ? (o.pending_approvals ? `${o.pending_approvals} pending approval` : 'no holds') : undefined, trendDir: o?.platform_holds ? 'down' as const : 'flat' as const },
   ];
-
-  const alerts: string[] = o ? [
-    ...(o.trials_ending_7d ? [`${o.trials_ending_7d} trial(s) expiring within 7 days`] : []),
-    ...(o.platform_holds ? [`${o.platform_holds} agenc${o.platform_holds === 1 ? 'y' : 'ies'} on operator hold`] : []),
-    ...(o.pending_approvals ? [`${o.pending_approvals} suspension request(s) awaiting approval`] : []),
-    ...(o.dead_webhook_deliveries ? [`${o.dead_webhook_deliveries} dead webhook deliveries`] : []),
-    ...(o.open_critical_exceptions ? [`${o.open_critical_exceptions} open critical exception(s)`] : []),
+  /** What needs a person, each with a button to the place where it is dealt with. */
+  const attention: { text: string; hue: string; icon: any; go: string; to: Tab }[] = o ? [
+    ...(o.pending_approvals ? [{ text: `${o.pending_approvals} suspension request${o.pending_approvals === 1 ? '' : 's'} waiting for a second operator`, hue: 'danger', icon: ShieldAlert, go: 'Review', to: 'approvals' as Tab }] : []),
+    ...(o.platform_holds ? [{ text: `${o.platform_holds} agenc${o.platform_holds === 1 ? 'y is' : 'ies are'} on operator hold`, hue: 'danger', icon: ShieldAlert, go: 'See agencies', to: 'agencies' as Tab }] : []),
+    ...(o.trials_ending_7d ? [{ text: `${o.trials_ending_7d} trial${o.trials_ending_7d === 1 ? '' : 's'} ending within 7 days`, hue: 'warn', icon: Clock, go: 'See agencies', to: 'agencies' as Tab }] : []),
+    ...(o.dead_webhook_deliveries ? [{ text: `${o.dead_webhook_deliveries} webhook deliver${o.dead_webhook_deliveries === 1 ? 'y' : 'ies'} failed for good`, hue: 'warn', icon: AlertTriangle, go: 'Open system', to: 'system' as Tab }] : []),
+    ...(o.open_critical_exceptions ? [{ text: `${o.open_critical_exceptions} open critical exception${o.open_critical_exceptions === 1 ? '' : 's'} across agencies`, hue: 'warn', icon: AlertTriangle, go: 'Security events', to: 'security' as Tab }] : []),
   ] : [];
+  const alertsForHero = attention.map((a) => a.text);
+  const maxSignup = Math.max(1, ...(o?.signups ?? [0])); const totalSignup = (o?.signups ?? []).reduce((t: number, n: number) => t + n, 0);
+  const planMax = Math.max(1, ...(o?.by_plan ?? []).map((p: any) => p.n));
 
   return (
     <div className="space-y-5">
-      <Hero o={o} alerts={alerts} onNavigate={onNavigate} onNew={() => setNewAgency(true)} canNew={me.caps.includes('billing')} pending={o?.pending_approvals ?? 0} />
-      {/* KPI strip */}
-      <div className="grid gap-3 grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {kpis.map((k, i) => <KpiCard key={k.label} index={i} {...k} />)}
-      </div>
+      <Hero o={o} alerts={alertsForHero} onNavigate={onNavigate} onNew={() => setNewAgency(true)} canNew={me.caps.includes('billing')} pending={o?.pending_approvals ?? 0} />
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">{kpis.map((k, i) => <KpiCard key={k.label} index={i} {...k} />)}</div>
+      <Err e={err} />
 
-      {/* Alert banner */}
-      {alerts.length > 0 && (
-        <div className="rounded-lg border border-warn/30 bg-warn/5 px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-1.5">
-          <AlertTriangle size={15} className="text-warn shrink-0" />
-          {alerts.map((a) => <span key={a} className="text-sm text-warn">{a}</span>)}
-          {!!(o?.pending_approvals || o?.platform_holds) && (
-            <button className="ml-auto text-xs font-medium text-warn underline underline-offset-2 shrink-0" onClick={() => onNavigate('approvals')}>Review →</button>
-          )}
-        </div>
-      )}
+      <div className="grid gap-4 xl:grid-cols-3">
+        <div className="space-y-4 xl:col-span-2">
+          <section className="card !p-0 overflow-hidden" aria-label="Needs attention">
+            <div className="flex items-center justify-between border-b border-line px-4 py-3"><div className="flex items-center gap-2 text-sm font-semibold"><AlertTriangle size={15} className="text-warn" />Needs attention{attention.length > 0 && <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn">{attention.length}</span>}</div></div>
+            {!o ? <Skeleton className="m-4 h-20" /> : !attention.length ? <div className="flex items-center gap-3 px-4 py-6 text-sm"><span className="grid h-9 w-9 place-items-center rounded-xl bg-success/12 bg-success/10 text-success"><CheckCircle2 size={18} /></span><div><div className="font-medium">Nothing needs you right now</div><div className="text-xs text-muted">No pending approvals, holds, expiring trials or failed deliveries.</div></div></div>
+              : <ul className="divide-y divide-line/70">{attention.map((a) => { const I = a.icon; return <li key={a.text} className="flex items-center gap-3 px-4 py-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl" style={{ background: `rgb(var(--${a.hue}) / .14)`, color: `rgb(var(--${a.hue}))` }}><I size={15} /></span><span className="min-w-0 flex-1 text-sm">{a.text}</span><button className="btn-ghost !h-8 shrink-0 text-xs" onClick={() => onNavigate(a.to)}>{a.go}<ArrowRight size={13} /></button></li>; })}</ul>}
+          </section>
 
-      {/* Agency management table */}
-      <div className="card !p-0 overflow-hidden">
-        <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-line">
-          <span className="font-semibold text-sm">All agencies</span>
-          <span className="pill bg-surface2 text-muted">{res.total}</span>
-          <form className="flex flex-wrap gap-2 ml-auto" onSubmit={(e) => { e.preventDefault(); loadAgencies(); }}>
-            <div className="relative"><Search size={14} className="absolute left-3 top-2.5 text-muted" />
-              <input className="input pl-8 w-48" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-            <select className="input w-36" value={status} onChange={(e) => { setStatus(e.target.value); loadAgencies(q, e.target.value); }}>
-              <option value="">All statuses</option>
-              {['trialing', 'active', 'past_due', 'grace', 'suspended', 'cancelled'].map((s) => <option key={s}>{s}</option>)}
-            </select>
-            <button className="btn-ghost text-sm">Search</button>
-          </form>
-          {me.caps.includes('billing') && <button className="btn text-sm" onClick={() => setNewAgency(true)}>+ New agency</button>}
+          <section className="card !p-0 overflow-hidden" aria-label="Trials">
+            <div className="flex items-center justify-between border-b border-line px-4 py-3"><div className="flex items-center gap-2 text-sm font-semibold"><Clock size={15} className="text-info" />Trials in progress</div><button className="text-xs text-accent hover:underline" onClick={() => onNavigate('agencies')}>All agencies</button></div>
+            {!o ? <Skeleton className="m-4 h-32" /> : !o.trials.length ? <div className="px-4 py-8 text-center text-sm text-muted">Nobody is on a trial right now.</div>
+              : <ul className="divide-y divide-line/70">{o.trials.map((t: any) => { const left = Number(t.days_left); const hot = left <= 3; return (
+                <li key={t.id}><button className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface2/60" onClick={() => open(t.id)}><Avatar name={t.name} size={34} />
+                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{t.name}</span><span className="block text-xs text-muted">{t.plan_name ?? 'No plan'}</span></span>
+                  <span className="hidden w-32 sm:block"><span className="block h-1.5 overflow-hidden rounded-full bg-surface2"><span className="block h-full rounded-full" style={{ width: `${Math.max(4, Math.min(100, (left / 14) * 100))}%`, background: hot ? 'rgb(var(--warn))' : 'rgb(var(--accent))' }} /></span></span>
+                  <span className={`w-16 shrink-0 text-right text-xs font-medium num ${hot ? 'text-warn' : 'text-muted'}`}>{left <= 0 ? 'Ends today' : `${left} day${left === 1 ? '' : 's'}`}</span></button></li>); })}</ul>}
+          </section>
         </div>
-        <Err e={err} />
-        <Table rows={res.rows} onRow={(r: any) => open(r.id)} empty="No agencies match"
-          cols={[
-            { h: 'Agency', render: (r: any) => <div className="flex items-center gap-3 min-w-0"><Avatar name={r.name} size={34} /><div className="min-w-0"><div className="font-medium truncate">{r.name}</div><div className="text-xs text-muted num">#{r.id} · {String(r.created_at).slice(0, 10)}</div></div></div> },
-            { h: 'Plan', render: (r: any) => <span className="text-sm">{r.plan_name ?? '—'}</span> },
-            { h: 'Status', render: (r: any) => <><Pill s={r.status ?? 'cancelled'} />{!!r.platform_hold && <span className="text-xs text-danger ml-1.5">hold</span>}</> },
-            { h: 'Seats', right: true, render: (r: any) => r.seats },
-            { h: 'Last active', render: (r: any) => <span className="text-xs num text-muted">{day(r.last_active)}</span> },
-            { h: '', render: (r: any) => (
-              <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
-                <button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => open(r.id)}>View</button>
-                <div className="relative">
-                  <button className="btn-ghost !py-0.5 !px-2 text-xs font-bold tracking-widest" onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === r.id ? null : r.id); }}>⋯</button>
-                  {openMenu === r.id && (
-                    <div className="absolute right-0 top-full mt-1 w-44 rounded-lg border border-line bg-surface shadow-pop z-20 py-1" onMouseLeave={() => setOpenMenu(null)}>
-                      {me.caps.includes('billing') && r.status === 'trialing' && <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2" onClick={() => { setOpenMenu(null); setAct({ kind: 'extend-trial', id: r.id, name: r.name }); }}>Extend trial</button>}
-                      {me.caps.includes('billing') && <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2" onClick={() => { setOpenMenu(null); setAct({ kind: 'set-plan', id: r.id, name: r.name }); }}>Set plan</button>}
-                      {me.caps.includes('support') && <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2" onClick={() => { setOpenMenu(null); setAct({ kind: 'support-session', id: r.id, name: r.name }); }}>Support session</button>}
-                      {me.caps.includes('support') && <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2" onClick={() => { setOpenMenu(null); setAct({ kind: 'access-workspace', id: r.id, name: r.name }); }}>Access workspace</button>}
-                      {me.caps.includes('suspend') && (r.platform_hold
-                        ? <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2 text-accent" onClick={() => { setOpenMenu(null); setAct({ kind: 'reactivate', id: r.id, name: r.name }); }}>Release hold</button>
-                        : <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface2 text-danger" onClick={() => { setOpenMenu(null); setAct({ kind: 'suspend', id: r.id, name: r.name }); }}>Suspend</button>)}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )},
-          ]} />
-      </div>
 
-      {/* Plan distribution + Recent audit */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="font-semibold text-sm">Plan distribution</span>
-            <button className="text-xs text-accent hover:underline" onClick={() => onNavigate('plans')}>Manage plans</button>
-          </div>
-          {!o && <div className="skeleton h-24 rounded" />}
-          {o?.by_plan.map((p: any) => (
-            <div key={p.code} className="flex items-center gap-2.5 py-1.5">
-              <span className="text-sm flex-1 truncate">{p.name}</span>
-              <div className="w-28 h-1.5 bg-surface2 rounded-full overflow-hidden shrink-0">
-                <div className="h-full bg-accent rounded-full transition-all duration-700" style={{ width: barsVisible ? `${Math.min(100, Math.round((p.n / Math.max(1, o.agencies)) * 100))}%` : '0%' }} />
-              </div>
-              <span className="num text-sm w-5 text-right shrink-0 text-muted">{p.n}</span>
-            </div>
-          ))}
-          {o && (
-            <div className="mt-3 pt-3 border-t border-line grid grid-cols-3 gap-2 text-center">
-              {Object.entries(o.by_status as Record<string, number>).slice(0, 3).map(([k, v]) => (
-                <div key={k}><div className="text-lg font-semibold num">{v}</div><Pill s={k} /></div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="font-semibold text-sm">Recent operator actions</span>
-            <button className="text-xs text-accent hover:underline" onClick={() => onNavigate('audit')}>View all</button>
-          </div>
-          {!o && <div className="skeleton h-24 rounded" />}
-          {o && recent.length === 0 && <div className="text-sm text-muted">No operator actions yet.</div>}
-          <div className="space-y-2.5">
-            {recent.map((a: any) => (
-              <div key={a.id} className="flex items-start gap-2 text-xs">
-                <span className="text-muted num shrink-0">{String(a.created_at).slice(0, 10)}</span>
-                <div className="min-w-0 flex-1">
-                  <span className="capitalize">{a.action.replace(/_/g, ' ')}</span>
-                  {a.agency_name && <span className="text-muted"> · {a.agency_name}</span>}
-                </div>
-                <span className="text-muted shrink-0 truncate max-w-[80px]">{a.admin_email?.split('@')[0]}</span>
-              </div>
-            ))}
-          </div>
+        <div className="space-y-4">
+          <section className="card" aria-label="New agencies">
+            <div className="flex items-start justify-between"><div><div className="text-sm font-semibold">New agencies</div><div className="text-xs text-muted">Per week, last 12 weeks</div></div><div className="text-right"><div className="text-2xl font-bold num">{o ? totalSignup : '—'}</div><div className="text-[10px] uppercase tracking-wide text-muted">joined</div></div></div>
+            <div className="mt-4 flex h-24 items-end gap-1" role="img" aria-label={`${totalSignup} agencies joined in the last 12 weeks`}>{(o?.signups ?? Array(12).fill(0)).map((n: number, i: number) => <div key={i} className="group flex h-full flex-1 items-end" title={`${n} joined ${11 - i === 0 ? 'this week' : `${11 - i} week${11 - i === 1 ? '' : 's'} ago`}`}>
+              <div className="w-full rounded-t-sm transition-all duration-700" style={{ height: barsVisible ? `${n ? Math.max(8, (n / maxSignup) * 100) : 3}%` : '3%', background: i === 11 ? 'rgb(var(--accent))' : 'rgb(var(--accent) / .45)', opacity: n ? 1 : 0.35 }} /></div>)}</div>
+            <div className="mt-1 flex justify-between text-[10px] text-muted"><span>12 wks ago</span><span>This week</span></div>
+          </section>
+          <section className="card" aria-label="Plan mix">
+            <div className="flex items-center justify-between"><div className="text-sm font-semibold">Plan mix</div><button className="text-xs text-accent hover:underline" onClick={() => onNavigate('plans')}>Manage plans</button></div>
+            {!o ? <Skeleton className="mt-3 h-24" /> : <div className="mt-3 space-y-2.5">{o.by_plan.map((p: any) => <div key={p.code}><div className="mb-1 flex items-center justify-between text-xs"><span className="font-medium">{p.name}</span><span className="num text-muted">{p.n} agenc{p.n === 1 ? 'y' : 'ies'}</span></div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-surface2"><div className="h-full rounded-full bg-accent transition-all duration-700" style={{ width: barsVisible ? `${(p.n / planMax) * 100}%` : '0%' }} /></div></div>)}
+              {!o.by_plan.length && <div className="py-4 text-center text-sm text-muted">No subscriptions yet.</div>}</div>}
+            {o && <div className="mt-4 grid grid-cols-3 gap-2 border-t border-line/70 pt-3 text-center">{Object.entries(o.by_status as Record<string, number>).slice(0, 3).map(([k, v]) => <div key={k}><div className="text-lg font-semibold num">{v}</div><Pill s={k} /></div>)}</div>}
+          </section>
         </div>
       </div>
 
-      {/* Modals */}
-      {newAgency && <NewAgencyModal plans={plans} onClose={() => setNewAgency(false)} onDone={(msg) => { setNewAgency(false); setNotice(msg); loadAgencies(); }} />}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <section className="card !p-0 overflow-hidden" aria-label="Recently joined">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3"><div className="flex items-center gap-2 text-sm font-semibold"><Building2 size={15} className="text-accent" />Recently joined</div><button className="text-xs text-accent hover:underline" onClick={() => onNavigate('agencies')}>View all</button></div>
+          {!o ? <Skeleton className="m-4 h-32" /> : <ul className="divide-y divide-line/70">{o.recent_agencies.map((a: any) => <li key={a.id}><button className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface2/60" onClick={() => open(a.id)}><Avatar name={a.name} size={34} />
+            <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{a.name}</span><span className="block text-xs text-muted">{a.plan_name ?? 'No plan'} · joined {rel(a.created_at)}</span></span><Pill s={a.status ?? 'cancelled'} /></button></li>)}</ul>}
+        </section>
+        <section className="card !p-0 overflow-hidden" aria-label="Recent operator activity">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3"><div className="flex items-center gap-2 text-sm font-semibold"><ScrollText size={15} className="text-accent" />Recent operator activity</div><button className="text-xs text-accent hover:underline" onClick={() => onNavigate('audit')}>Open audit log</button></div>
+          {!recent ? <Skeleton className="m-4 h-32" /> : !recent.length ? <div className="px-4 py-8 text-center text-sm text-muted">No operator actions yet.</div>
+            : <ul className="divide-y divide-line/70">{recent.map((r: any) => <li key={r.id} className="flex items-start gap-3 px-4 py-2.5"><Avatar name={r.admin_name || r.admin_email} size={30} />
+              <div className="min-w-0 flex-1 text-sm"><b>{r.admin_name || String(r.admin_email).split('@')[0]}</b> <span className="text-muted">{String(r.action).replace(/_/g, ' ')}</span>{r.agency_name && <> <b>{r.agency_name}</b></>}</div><span className="shrink-0 text-xs text-muted num">{rel(r.created_at)}</span></li>)}</ul>}
+        </section>
+      </div>
+
+      {newAgency && <NewAgencyModal plans={plans} onClose={() => setNewAgency(false)} onDone={(msg) => { setNewAgency(false); setNotice(msg); loadOverview(); }} />}
       {detail && <AgencyDetailModal detail={detail} me={me} onClose={() => setDetail(null)} onAct={setAct} onRefresh={() => open(detail.agency.id)} />}
-      {act && <ActionModal act={act} onClose={() => setAct(null)} onDone={(msg, closeDetail) => { setAct(null); if (msg) setNotice(msg); loadAgencies(); if (closeDetail) setDetail(null); else if (detail) open(detail.agency.id); }} />}
-      {notice && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-info/30 bg-surface shadow-pop text-sm px-4 py-3 max-w-md" role="status">{notice}<button className="ml-3 text-muted" onClick={() => setNotice('')}>×</button></div>}
+      {act && <ActionModal act={act} onClose={() => setAct(null)} onDone={(msg, closeDetail) => { setAct(null); if (msg) setNotice(msg); loadOverview(); if (closeDetail) setDetail(null); else if (detail) open(detail.agency.id); }} />}
+      {notice && <div className="fixed bottom-4 left-1/2 z-[60] max-w-md -translate-x-1/2 rounded-lg border border-info/30 bg-surface px-4 py-3 text-sm shadow-pop" role="status">{notice}<button className="ml-3 text-muted" onClick={() => setNotice('')}>×</button></div>}
     </div>
   );
 }

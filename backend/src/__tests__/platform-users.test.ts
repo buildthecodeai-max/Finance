@@ -143,3 +143,12 @@ describe('system status', () => {
     expect((await call(op.token, 'GET', '/platform/system')).status).toBe(200);
   });
 });
+
+describe('dashboard overview', () => {
+  it('adds weekly signups, activity, trials and recent agencies to the overview', async () => {
+    await person('Newbie'); const o = (await P('GET', '/overview')).body;
+    expect(o.signups).toHaveLength(12); expect(o.signups.every((n: number) => Number.isInteger(n) && n >= 0)).toBe(true); expect(o.signups[11]).toBeGreaterThan(0);         // the newest week is last and includes the agency just made
+    expect(typeof o.active_7d).toBe('number'); expect(o.recent_agencies.length).toBeGreaterThan(0); expect(o.recent_agencies.length).toBeLessThanOrEqual(5); expect(o.recent_agencies[0]).toHaveProperty('name');
+    expect(Array.isArray(o.trials)).toBe(true); expect(o.trials[0]).toHaveProperty('days_left');
+  });
+});
