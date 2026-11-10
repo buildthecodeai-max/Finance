@@ -6,6 +6,7 @@ import { Tenant, pool } from '../db.js';
 import { FEATURES, getSub, grantManual, usage } from './billing.js';
 import { aiStatus, aiUsedThisMonth } from './ai.js';
 import { deliver } from './portal.js';
+import { counters, health } from './observability.js';
 import { sendMail } from './email.js';
 import { authenticator } from 'otplib';
 import crypto from 'node:crypto';
@@ -566,4 +567,31 @@ export async function listSecurityEvents(q: { q?: string; category?: string; fro
   const [rows]: any = await pool.query(`SELECT e.id, e.agency_id, ag.name agency_name, e.user_id, u.name user_name, u.email user_email, e.event, e.detail, e.ip, e.created_at ${base} WHERE ${w} ORDER BY e.id DESC LIMIT ? OFFSET ?`, [...p, size, (page - 1) * size]);
   return { rows: rows.map((r: any) => ({ ...r, category: secCategory(r.event), severity: secSeverity(r.event) })), total: tot.n, page, page_size: size, summary,
     attention: hot.map((h: any) => ({ ...h, n: Number(h.n) })), trend: trend.map((t: any) => ({ day: t.d, total: Number(t.n), blocked: Number(t.blocked ?? 0) })) };
+}
+
+
+/* ------------------------------------------------------------------ system status page */
+/** Everything an operator wants to know about the running platform. Only yes/no and numbers: no keys, addresses or credentials ever leave here. */
+export async function systemStatus() {
+  const t0 = Date.now(); const h = await health(); const dbMs = Date.now() - t0;
+  let sizeMb: number | null = null, agencies = 0, users = 0, backlog = 0, dead = 0, failedMail = 0, critical = 0;
+  if (h.checks.database === 'ok') {
+    const [[sz]]: any = await pool.query('SELECT ROUND(SUM(data_length + index_length) / 1048576, 1) mb FROM information_schema.tables WHERE table_schema = DATABASE()'); sizeMb = Number(sz?.mb ?? 0);
+    agencies = ((await pool.query('SELECT COUNT(*) n FROM agencies')) as any)[0][0].n; users = ((await pool.query('SELECT COUNT(*) n FROM users')) as any)[0][0].n;
+    const [[w]]: any = await pool.query("SELECT COALESCE(SUM(status IN ('pending','failed')), 0) backlog, COALESCE(SUM(status = 'dead'), 0) dead FROM webhook_deliveries"); backlog = Number(w.backlog); dead = Number(w.dead);
+    failedMail = ((await pool.query("SELECT COUNT(*) n FROM delivery_log WHERE status = 'failed' AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)")) as any)[0][0].n;
+    critical = ((await pool.query("SELECT COUNT(*) n FROM exceptions WHERE status = 'open' AND severity = 'critical'")) as any)[0][0].n;
+  }
+  const mem = process.memoryUsage(), c = counters, total = c.total;
+  return {
+    health: h, checked_at: new Date().toISOString(),
+    process: { uptime_s: Math.round((Date.now() - c.startedAt) / 1000), started_at: new Date(c.startedAt).toISOString(), node: process.version, env: config.isProd ? 'production' : process.env.NODE_ENV ?? 'development', rss_mb: Math.round(mem.rss / 1048576), heap_mb: Math.round(mem.heapUsed / 1048576) },
+    database: { latency_ms: dbMs, size_mb: sizeMb, agencies, users, migrations: h.checks.migrations ?? null },
+    traffic: { total, by_class: c.byClass, avg_ms: total ? Math.round(c.sumMs / total) : 0, error_rate: total ? Math.round(((c.byClass['5xx'] ?? 0) / total) * 1000) / 10 : 0, latency: c.ms },
+    queues: { webhook_backlog: backlog, webhook_dead: dead, failed_emails_24h: failedMail, critical_exceptions: critical },
+    integrations: {
+      email: !!config.sendgridKey, storage: !!(config.r2.bucket && config.r2.accessKeyId), payments: !!config.stripeKey, payments_webhook: !!config.stripeWebhookSecret,
+      ai: !!config.anthropicKey, exchange_rates: !!config.oxrAppId, cache: !!config.redisUrl,
+    },
+  };
 }

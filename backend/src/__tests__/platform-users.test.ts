@@ -131,3 +131,15 @@ describe('security events', () => {
     expect((await call(a.token, 'GET', '/platform/security-events')).status).toBe(404);          // an ordinary admin cannot see the console
   });
 });
+
+describe('system status', () => {
+  it('reports health, traffic, queues and which services are configured, without exposing any secret', async () => {
+    const r = await P('GET', '/system'); expect(r.status).toBe(200); const b = r.body;
+    expect(b.health.ok).toBe(true); expect(b.database.latency_ms).toBeGreaterThanOrEqual(0); expect(b.database.size_mb).toBeGreaterThan(0); expect(b.database.agencies).toBeGreaterThan(0); expect(b.database.migrations.applied).toBeGreaterThan(20);
+    expect(b.process.uptime_s).toBeGreaterThanOrEqual(0); expect(b.process.node).toMatch(/^v\d+/); expect(b.traffic.total).toBeGreaterThan(0); expect(Object.keys(b.traffic.by_class)).toEqual(expect.arrayContaining(['2xx', '5xx']));
+    for (const k of ['webhook_backlog', 'webhook_dead', 'failed_emails_24h', 'critical_exceptions']) expect(typeof b.queues[k]).toBe('number');
+    for (const v of Object.values(b.integrations)) expect(typeof v).toBe('boolean');
+    const raw = JSON.stringify(b); for (const secret of [process.env.JWT_SECRET, process.env.ENCRYPTION_KEY, process.env.DATABASE_URL, process.env.SENDGRID_API_KEY, process.env.STRIPE_SECRET_KEY].filter((x) => x && x.length > 8)) expect(raw).not.toContain(secret as string);
+    expect((await call(op.token, 'GET', '/platform/system')).status).toBe(200);
+  });
+});

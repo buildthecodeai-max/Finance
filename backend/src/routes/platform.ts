@@ -35,7 +35,7 @@ platformRouter.put('/agencies/:id/users/:userId', P.needs('suspend'), async (req
 platformRouter.get('/agencies/:id/users/:userId/workload', P.needs('suspend'), async (req, res) => res.json(await P.agencyUserWorkload(idParam(req), UserId(req))));
 platformRouter.delete('/agencies/:id/users/:userId', P.needs('suspend'), async (req, res) => { const b = parse(Reason.extend({ reassign_to: z.number().int().nullish(), delete_account: z.boolean().optional() }), req.body ?? {}); res.json({ ok: true, ...(await P.removeAgencyUser(req, idParam(req), UserId(req), { reassignTo: b.reassign_to, deleteAccount: b.delete_account, reason: b.reason })) }); });
 platformRouter.get('/overview', async (_req, res) => res.json(await P.overview()));
-platformRouter.get('/system', async (_req, res) => { const [hb]: any = await pool.query("SELECT k, v, updated_at FROM system_state WHERE k LIKE 'hb:%'"); res.json({ health: await health(), heartbeats: hb }); });
+platformRouter.get('/system', async (_req, res) => { const [hb]: any = await pool.query("SELECT k, v, updated_at FROM system_state WHERE k LIKE 'hb:%'"); res.json({ ...(await P.systemStatus()), heartbeats: hb }); });
 
 platformRouter.get('/agencies', async (req, res) => res.json(await P.listAgencies(parse(z.object({ q: z.string().max(100).optional(), status: z.string().max(20).optional(), plan: z.string().max(30).optional(), page: z.coerce.number().int().min(1).optional() }), req.query))));
 platformRouter.get('/agencies/:id', async (req, res) => { const id = idParam(req), d = await P.agencyDetail(id); await P.audit(req, 'view_agency', id); res.json(d); });   // viewing member emails is itself audited
