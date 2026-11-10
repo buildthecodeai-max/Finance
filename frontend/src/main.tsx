@@ -31,6 +31,7 @@ const TicketInvoices = lazy(() => import('./pages/TicketInvoices'));
 const Refunds = lazy(() => import('./pages/Refunds'));
 const TicketSearch = lazy(() => import('./pages/TicketSearch'));
 const Settings = lazy(() => import('./pages/Settings'));
+const Help = lazy(() => import('./pages/Help'));
 const Audit = lazy(() => import('./pages/Audit'));
 const Leads = lazy(() => import('./pages/Leads'));
 const QuoteList = lazy(() => import('./pages/Quotes').then((m) => ({ default: m.QuoteList })));
@@ -102,6 +103,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Route path="refunds" element={<Refunds />} />
       <Route path="ticket-search" element={<TicketSearch />} />
       <Route path="settings" element={<Settings />} />
+      <Route path="help" element={<Help />} />
       <Route path="audit" element={<Audit />} />
       <Route path="leads" element={<Leads />} />
       <Route path="quotes" element={<QuoteList />} />
