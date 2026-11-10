@@ -6,7 +6,7 @@ import { Avatar, Err, Field, Modal, Pager, Skeleton } from '../components/ui';
 /* People in the platform console: the directory of every account, and the operators who run the console. Both are driven by the capabilities of the signed-in operator. */
 
 type Me = { email: string; role: string; caps: string[] };
-const rel = (d: any) => {
+export const rel = (d: any) => {
   if (!d) return 'Never';
   const s = Math.max(0, (Date.now() - new Date(String(d).replace(' ', 'T') + (String(d).endsWith('Z') || /[+-]\d\d:?\d\d$/.test(String(d)) ? '' : 'Z')).getTime()) / 1000);
   return s < 90 ? 'Just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : s < 86400 * 30 ? `${Math.round(s / 86400)} d ago` : String(d).slice(0, 10);
@@ -24,6 +24,24 @@ const CAP_ROWS: [string, string][] = [
   ['read', 'See agencies, plans, audit and system health'], ['support', 'Browse every user, open support sessions and customer workspaces'],
   ['billing', 'Change plans, trials, invoiced access and AI access'], ['suspend', 'Suspend agencies, manage operators, reset or switch off accounts'],
 ];
+/** The roles inside a customer agency (what an agency's own admin hands out on their Team page), and what each can do. 'full' = all records, 'own' = only their own, 'view' = read-only. */
+type Level = 'full' | 'own' | 'view' | 'none';
+export const AGENCY_ROLES: { key: string; name: string; blurb: string; tone: string }[] = [
+  { key: 'admin', name: 'Owner / Admin', blurb: 'Runs the agency: settings, billing, team and everything below.', tone: 'accent' },
+  { key: 'finance_manager', name: 'Finance manager', blurb: 'All finance work and reports. No settings or billing.', tone: 'success' },
+  { key: 'agent', name: 'Agent', blurb: 'Sells: leads, quotes, bookings and clients. Sees only their own work.', tone: 'info' },
+  { key: 'viewer', name: 'Viewer', blurb: 'Read-only, for auditors, trainees and partners.', tone: 'muted' },
+];
+const AGENCY_MATRIX: [string, [Level, Level, Level, Level]][] = [
+  ['Leads, quotes, bookings and clients', ['full', 'full', 'own', 'view']],
+  ['Draft invoices', ['full', 'full', 'own', 'none']],
+  ['Approve, issue and send invoices', ['full', 'full', 'none', 'none']],
+  ['Payments, receipts, supplier bills and bank', ['full', 'full', 'none', 'none']],
+  ['Ledger, journals and finance reports', ['full', 'full', 'none', 'none']],
+  ['Agency settings, billing and invoice design', ['full', 'none', 'none', 'none']],
+  ['Team, branches and the agency audit log', ['full', 'none', 'none', 'none']],
+];
+const LEVEL: Record<Level, [string, string]> = { full: ['Full', 'text-success'], own: ['Own only', 'text-info'], view: ['View', 'text-muted'], none: ['—', 'text-muted/60'] };
 const roleTone = (r: string) => OPERATOR_ROLES.find((x) => x.key === r)?.tone ?? 'muted';
 const RolePill = ({ role }: { role: string }) => <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: `rgb(var(--${roleTone(role)}) / .14)`, color: `rgb(var(--${roleTone(role)}))` }}><ShieldCheck size={11} />{OPERATOR_ROLES.find((r) => r.key === role)?.name ?? role}</span>;
 
@@ -146,6 +164,7 @@ export function PlatformOperators({ me }: { me: Me }) {
   const [rows, setRows] = useState<any[] | null>(null); const [dlg, setDlg] = useState<any>(null); const [act, setAct] = useState<Act | null>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false);
   const load = () => api('/platform/operators').then(setRows).catch((e) => setErr(e.message)); useEffect(() => { load(); }, []);
   const run = async (fn: () => Promise<any>, ok: string) => { setBusy(true); try { await fn(); setDlg(null); setErr(''); setMsg(ok); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const [roleCounts, setRoleCounts] = useState<any[] | null>(null); useEffect(() => { api('/platform/agency-roles').then(setRoleCounts).catch(() => setRoleCounts(null)); }, []);
   const all = rows ?? []; const no2fa = all.filter((r) => !r.totp_enabled && !r.disabled_at);
   return <div className="space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3"><p className="max-w-2xl text-sm text-muted">Give each person the lowest role that lets them do their job. Everything an operator does is written to the audit log with their name and a reason.</p>
@@ -178,6 +197,16 @@ export function PlatformOperators({ me }: { me: Me }) {
     <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-3 text-sm font-semibold">What each role can do</div>
       <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>Capability</th>{OPERATOR_ROLES.map((r) => <th key={r.key} className="text-center">{r.name}</th>)}</tr></thead>
         <tbody>{CAP_ROWS.map(([cap, label]) => <tr key={cap}><td className="text-sm">{label}</td>{OPERATOR_ROLES.map((r) => <td key={r.key} className="text-center">{r.caps.includes(cap) ? <Check size={16} className="mx-auto text-success" aria-label="Allowed" /> : <span className="text-muted" aria-label="Not allowed">—</span>}</td>)}</tr>)}</tbody></table></div></div>
+
+    <div className="pt-2"><h3 className="text-lg font-semibold">Agency roles</h3>
+      <p className="mt-0.5 max-w-3xl text-sm text-muted">These are the roles inside every customer agency, chosen by that agency's own admin. They never grant access to this console. Open a person under People to see where they work.</p></div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{AGENCY_ROLES.map((r) => { const c = roleCounts?.find((x: any) => x.role === r.key); return (
+      <div key={r.key} className="card glow-card" style={{ ['--hue' as any]: `var(--${r.tone})` }}>
+        <div className="flex items-center justify-between"><span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: `rgb(var(--${r.tone}) / .14)`, color: `rgb(var(--${r.tone}))` }}><Building2 size={11} />{r.name}</span><span className="text-2xl font-bold num">{c?.people ?? '—'}</span></div>
+        <p className="mt-2 text-xs leading-relaxed text-muted">{r.blurb}</p><p className="mt-2 text-[11px] text-muted">{c ? `across ${c.agencies} agenc${c.agencies === 1 ? 'y' : 'ies'}` : ' '}</p></div>); })}</div>
+    <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-3 text-sm font-semibold">What each agency role can do</div>
+      <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>Area</th>{AGENCY_ROLES.map((r) => <th key={r.key} className="text-center">{r.name}</th>)}</tr></thead>
+        <tbody>{AGENCY_MATRIX.map(([label, lv]) => <tr key={label}><td className="text-sm">{label}</td>{lv.map((l, i) => <td key={i} className={`text-center text-xs font-medium ${LEVEL[l][1]}`}>{l === 'full' ? <Check size={16} className="mx-auto" aria-label="Full access" /> : LEVEL[l][0]}</td>)}</tr>)}</tbody></table></div></div>
 
     {dlg && <Modal title={dlg.kind === 'add' ? 'Add operator' : dlg.kind === 'edit' ? `Change role: ${dlg.r.name}` : `Remove ${dlg.r.name}`} onClose={() => setDlg(null)}><Err e={err} />
       {dlg.kind === 'add' && <Field label="Email of an existing account" hint="They must also turn on 2FA before the console opens for them."><input className="input" type="email" autoFocus value={dlg.email} onChange={(e) => setDlg({ ...dlg, email: e.target.value })} /></Field>}

@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { Activity, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { Activity, LayoutGrid, List, MoreHorizontal, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
-import { Avatar, Err, Field, Modal, Pill, Table } from '../components/ui';
+import { Avatar, Err, Field, Modal, Pager, Pill, Skeleton, Table } from '../components/ui';
 import { ThemeMenuButton } from '../components/ThemeToggle';
-import { PlatformOperators, PlatformUsers } from './PlatformPeople';
+import { PlatformOperators, PlatformUsers, rel } from './PlatformPeople';
 
 const day = (d: any) => (d ? String(d).replace('T', ' ').slice(0, 16) : '—');
 const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api', 'ai_assistant'];
@@ -238,33 +238,73 @@ function NewAgencyModal({ plans, onClose, onDone }: { plans: any[]; onClose(): v
     <div className="flex justify-end mt-2"><button className="btn" disabled={busy || !valid} onClick={submit}>Create agency</button></div>
   </Modal>;
 }
+const STATUS_HUE: Record<string, string> = { trialing: 'info', active: 'success', past_due: 'warn', grace: 'warn', suspended: 'danger', cancelled: 'danger', none: 'muted' };
+const STATUS_TILES: [string, string, any][] = [['', 'All agencies', Building2], ['trialing', 'Trialing', Clock], ['active', 'Active', ShieldCheck], ['past_due', 'Payment late', AlertTriangle], ['suspended', 'Suspended', ShieldAlert]];
+const daysTo = (d: any) => (d ? Math.ceil((Date.parse(String(d).slice(0, 10)) - Date.now()) / 864e5) : null);
 function Agencies({ focus, onFocused }: { focus?: number | null; onFocused?(): void }) {
-  const [res, setRes] = useState<any>({ rows: [], total: 0 }); const [q, setQ] = useState(''); const [status, setStatus] = useState(''); const [page, setPage] = useState(1);
+  const [res, setRes] = useState<any>(null); const [q, setQ] = useState(''); const [status, setStatus] = useState(''); const [page, setPage] = useState(1);
+  const [view, setView] = useState<'cards' | 'table'>(() => { try { return localStorage.getItem('tf-agencies-view') === 'table' ? 'table' : 'cards'; } catch { return 'cards'; } });
   const { me } = useOp(); const [notice, setNotice] = useState(''); const [detail, setDetail] = useState<any>(null); const [act, setAct] = useState<Act | null>(null); const [err, setErr] = useState('');
   const [newAgency, setNewAgency] = useState(false); const [plans, setPlans] = useState<any[]>([]);
-  const load = () => api(`/platform/agencies?page=${page}${q ? `&q=${encodeURIComponent(q)}` : ''}${status ? `&status=${status}` : ''}`).then(setRes).catch((e) => setErr(e.message));
-  useEffect(() => { load(); }, [page, status]);
+  const load = () => api(`/platform/agencies?page=${page}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}${status ? `&status=${status}` : ''}`).then((r) => { setRes(r); setErr(''); }).catch((e) => setErr(e.message));
+  useEffect(() => { const h = setTimeout(load, q ? 250 : 0); return () => clearTimeout(h); }, [page, status, q]);
+  useEffect(() => { setPage(1); }, [q, status]);
   useEffect(() => { if (me.caps.includes('billing')) api('/platform/plans').then(setPlans); }, []);
   const open = async (id: number) => { try { setDetail(await api(`/platform/agencies/${id}`)); } catch (e: any) { setErr(e.message); } };
   useEffect(() => { if (focus) { open(focus); onFocused?.(); } }, [focus]);
-  return <>
+  const counts = res?.counts ?? {}; const total = Object.values(counts).reduce((s: number, n: any) => s + Number(n), 0);
+  const setV = (v: 'cards' | 'table') => { setView(v); try { localStorage.setItem('tf-agencies-view', v); } catch { /* ignore */ } };
+  const count = (k: string) => (k === '' ? total : k === 'past_due' ? Number(counts.past_due ?? 0) + Number(counts.grace ?? 0) : Number(counts[k] ?? 0));
+  const rows: any[] = res?.rows ?? [];
+  const card = (r: any) => {
+    const hue = r.platform_hold ? 'danger' : STATUS_HUE[r.status ?? 'none'] ?? 'muted'; const end = r.status === 'trialing' ? r.trial_ends_at : r.current_period_end; const left = daysTo(end);
+    return (
+      <div key={r.id} role="button" tabIndex={0} onClick={() => open(r.id)} onKeyDown={(e) => e.key === 'Enter' && open(r.id)} aria-label={`Open ${r.name}`}
+        className="card glow-card kpi-enter group cursor-pointer overflow-hidden !p-0 focus-visible:ring-2 focus-visible:ring-accent" style={{ ['--hue' as any]: `var(--${hue})` }}>
+        <div className="h-1" style={{ background: `linear-gradient(90deg, rgb(var(--${hue})), rgb(var(--${hue}) / .15))` }} />
+        <div className="p-4">
+          <div className="flex items-start gap-3"><Avatar name={r.name} size={44} />
+            <div className="min-w-0 flex-1"><div className="truncate font-semibold leading-tight">{r.name}</div><div className="mt-0.5 text-xs text-muted num">#{r.id} · joined {String(r.created_at).slice(0, 10)}</div></div>
+            <Pill s={r.status ?? 'cancelled'} /></div>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-full bg-accent/12 bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">{r.plan_name ?? 'No plan'}</span>
+            {!!r.is_manual && <span className="rounded-full bg-surface2 px-2 py-0.5 text-[11px] text-muted">Invoiced</span>}
+            {!!r.platform_hold && <span className="rounded-full bg-danger/15 px-2 py-0.5 text-[11px] font-medium text-danger">On hold</span>}</div>
+          <div className="mt-4 grid grid-cols-3 gap-2 border-t border-line/70 pt-3 text-center">
+            <div><div className="text-lg font-semibold num">{r.seats}</div><div className="text-[10px] uppercase tracking-wide text-muted">Members</div></div>
+            <div><div className="text-sm font-semibold leading-7">{rel(r.last_active)}</div><div className="text-[10px] uppercase tracking-wide text-muted">Last active</div></div>
+            <div><div className={`text-sm font-semibold leading-7 ${left !== null && left <= 3 && r.status === 'trialing' ? 'text-warn' : ''}`}>{left === null ? '—' : left < 0 ? 'Ended' : `${left} d`}</div><div className="text-[10px] uppercase tracking-wide text-muted">{r.status === 'trialing' ? 'Trial left' : 'Renews in'}</div></div></div>
+          {me.caps.includes('support') && <div className="mt-3 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100" onClick={(e) => e.stopPropagation()}>
+            <button className="btn-ghost !h-8 flex-1 text-xs" onClick={() => open(r.id)}>View</button>
+            <button className="btn !h-8 flex-1 text-xs" onClick={() => setAct({ kind: 'access-workspace', id: r.id, name: r.name })}>Access workspace</button></div>}
+        </div>
+      </div>);
+  };
+  return <div className="space-y-4">
     <Err e={err} />
-    <form className="flex flex-wrap gap-2 mb-3" onSubmit={(e) => { e.preventDefault(); setPage(1); load(); }}>
-      <div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted" /><input className="input pl-8 w-64" placeholder="Agency name or member email" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search agencies" /></div>
-      <select className="input w-44" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} aria-label="Status"><option value="">All statuses</option>{['trialing', 'active', 'past_due', 'grace', 'suspended', 'cancelled'].map((s) => <option key={s}>{s}</option>)}</select><button className="btn-ghost">Search</button>
-      {me.caps.includes('billing') && <button type="button" className="btn ml-auto" onClick={() => setNewAgency(true)}>New agency</button>}
-    </form>
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">{STATUS_TILES.map(([k, label, Icon]) => { const hue = k === '' ? 'accent' : STATUS_HUE[k]; const n = res ? count(k) : null; return (
+      <button key={k || 'all'} type="button" aria-pressed={status === k} onClick={() => setStatus(status === k ? '' : k)} className={`card glow-card text-left ${status === k ? 'ring-2 ring-accent' : ''}`} style={{ ['--hue' as any]: `var(--${hue})` }}>
+        <div className="flex items-start justify-between"><span className="text-xs font-medium text-muted">{label}</span><span className="grid h-8 w-8 place-items-center rounded-xl" style={{ background: `rgb(var(--${hue}) / .14)`, color: `rgb(var(--${hue}))` }}><Icon size={16} /></span></div>
+        <div className="mt-2 text-3xl font-bold num">{n ?? '—'}</div></button>); })}</div>
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="relative min-w-[14rem] flex-1 sm:max-w-md"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input className="input pl-8" aria-label="Search agencies" placeholder="Agency name or member email…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+      <div className="ml-auto flex items-center gap-2">
+        <div className="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="View">{([['cards', LayoutGrid, 'Cards'], ['table', List, 'Table']] as const).map(([k, I, l]) => <button key={k} aria-pressed={view === k} onClick={() => setV(k)} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm ${view === k ? 'bg-accent text-accent-ink' : 'text-muted hover:text-fg'}`}><I size={14} />{l}</button>)}</div>
+        {me.caps.includes('billing') && <button type="button" className="btn" onClick={() => setNewAgency(true)}><Plus size={16} />New agency</button>}</div></div>
     {newAgency && <NewAgencyModal plans={plans} onClose={() => setNewAgency(false)} onDone={(msg) => { setNewAgency(false); setNotice(msg); load(); }} />}
-    <Table rows={res.rows} onRow={(r: any) => open(r.id)} empty="No agencies match" cols={[
-      { h: 'Agency', render: (r: any) => <div className="flex items-center gap-3 min-w-0"><Avatar name={r.name} size={34} /><div className="min-w-0"><div className="font-medium truncate">{r.name}</div><div className="text-xs text-muted num">#{r.id} · created {String(r.created_at).slice(0, 10)}</div></div></div> }, { h: 'Plan', render: (r: any) => r.plan_name ?? '—' },
-      { h: 'Status', render: (r: any) => <><Pill s={r.status ?? 'cancelled'} />{!!r.platform_hold && <span className="text-xs text-danger ml-2">hold</span>}{!!r.is_manual && <span className="text-xs text-muted ml-2">invoiced</span>}</> },
-      { h: 'Seats', right: true, render: (r: any) => r.seats }, { h: 'Last active', render: (r: any) => <span className="text-xs num">{day(r.last_active)}</span> }]} />
-    <div className="flex items-center justify-between mt-3 text-sm text-muted"><span>{res.total} agencies</span><div className="flex gap-2"><button className="btn-ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button><button className="btn-ghost" disabled={page * res.page_size >= res.total} onClick={() => setPage(page + 1)}>Next</button></div></div>
-
+    {!res ? <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-52" />)}</div>
+      : !rows.length ? <div className="card py-14 text-center"><Building2 size={28} className="mx-auto mb-2 text-muted" /><div className="text-sm font-medium">No agencies match</div><p className="mt-1 text-xs text-muted">{q ? `Nothing matches “${q}”.` : 'Try another status.'}</p></div>
+      : view === 'cards' ? <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{rows.map(card)}</div>
+      : <Table rows={rows} paginate={false} onRow={(r: any) => open(r.id)} empty="No agencies match" cols={[
+        { h: 'Agency', render: (r: any) => <div className="flex min-w-0 items-center gap-3"><Avatar name={r.name} size={34} /><div className="min-w-0"><div className="truncate font-medium">{r.name}</div><div className="text-xs text-muted num">#{r.id} · created {String(r.created_at).slice(0, 10)}</div></div></div> },
+        { h: 'Plan', render: (r: any) => r.plan_name ?? '—' },
+        { h: 'Status', render: (r: any) => <><Pill s={r.status ?? 'cancelled'} />{!!r.platform_hold && <span className="ml-2 text-xs text-danger">hold</span>}{!!r.is_manual && <span className="ml-2 text-xs text-muted">invoiced</span>}</> },
+        { h: 'Seats', right: true, render: (r: any) => r.seats }, { h: 'Last active', render: (r: any) => <span className="text-xs text-muted">{rel(r.last_active)}</span> }]} />}
+    {res && res.total > res.page_size && <div className="card !p-0 overflow-hidden"><Pager total={res.total} page={page - 1} size={res.page_size} onPage={(p) => setPage(p + 1)} noun="agencies" /></div>}
     {detail && <AgencyDetailModal detail={detail} me={me} onClose={() => setDetail(null)} onAct={setAct} onRefresh={() => open(detail.agency.id)} />}
-    {notice && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-info/30 bg-surface shadow-pop text-sm px-4 py-3 max-w-md" role="status">{notice}<button className="ml-3 text-muted" onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
+    {notice && <div className="fixed bottom-4 left-1/2 z-[60] max-w-md -translate-x-1/2 rounded-lg border border-info/30 bg-surface px-4 py-3 text-sm shadow-pop" role="status">{notice}<button className="ml-3 text-muted" onClick={() => setNotice('')}>×</button></div>}
     {act && <ActionModal act={act} onClose={() => setAct(null)} onDone={(msg, closeDetail) => { setAct(null); if (msg) setNotice(msg); load(); if (closeDetail) setDetail(null); else if (detail) open(detail.agency.id); }} />}
-  </>;
+  </div>;
 }
 
 const AGENCY_ROLES: [string, string][] = [['admin', 'Owner / Admin'], ['finance_manager', 'Finance manager'], ['agent', 'Agent'], ['viewer', 'Viewer']];
@@ -323,64 +363,70 @@ function AiAccess({ detail, canEdit, onRefresh }: { detail: any; canEdit: boolea
 }
 
 function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: any; me: Me; onClose(): void; onAct(a: Act): void; onRefresh(): void }) {
-  const ag = detail.agency;
-  return <Modal title={ag.name} wide onClose={onClose}>
-    <div className="flex gap-5">
-      {/* Left: data */}
-      <div className="flex-1 min-w-0 space-y-4">
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="card"><div className="text-xs text-muted">Subscription</div>{detail.subscription ? <><div className="mt-1"><Pill s={detail.subscription.status} /> <span className="font-medium ml-1">{detail.subscription.plan_name}</span> <span className="text-xs text-muted">{detail.subscription.interval}</span></div>
-            <dl className="text-xs mt-2 space-y-0.5 text-muted"><div>Trial ends: <span className="num text-fg">{day(detail.subscription.trial_ends_at)}</span></div><div>Period ends: <span className="num text-fg">{day(detail.subscription.current_period_end)}</span></div>{detail.subscription.manual && <div>Invoiced customer (no card)</div>}{detail.subscription.platform_hold && <div className="text-danger">Hold: {detail.subscription.hold_reason}</div>}</dl></> : '—'}</div>
-          <div className="card"><div className="text-xs text-muted">Usage</div><div className="text-sm mt-1">{detail.usage.seats} members · {detail.usage.branches} branches · {detail.usage.bookings} bookings this month</div><div className="text-xs text-muted mt-2">Last active {day(detail.last_active)} · {detail.requests_30d} req / 30 d</div></div>
-          <div className="card"><div className="text-xs text-muted">Health</div><div className="text-sm mt-1">{detail.open_critical_exceptions} critical exceptions · {detail.failed_emails_7d} failed emails (7 d)</div></div>
-        </div>
-        <AiAccess detail={detail} canEdit={me.caps.includes('billing')} onRefresh={onRefresh} />
-        <MembersPanel detail={detail} canManage={me.caps.includes('suspend')} onRefresh={onRefresh} />
-        <div className="grid gap-4 md:grid-cols-2">
-          <div><div className="font-medium text-sm mb-1">Billing events</div><Table rows={detail.billing_events.map((m: any, i: number) => ({ ...m, id: i }))} empty="None" cols={[{ h: 'When', render: (e: any) => <span className="text-xs num">{day(e.created_at)}</span> }, { h: 'Event', render: (e: any) => <>{e.kind}<div className="text-xs text-muted">{e.detail}</div></> }]} /></div>
-        </div>
-        <div><div className="font-medium text-sm mb-1">Support access history</div>
-          <Table rows={detail.support_sessions} empty="No support sessions" cols={[{ h: 'Operator', render: (s: any) => s.admin_email }, { h: 'Reason', render: (s: any) => s.reason }, { h: 'Expires', render: (s: any) => <span className="text-xs num">{day(s.expires_at)}</span> },
-            { h: '', render: (s: any) => (s.revoked_at ? <Pill s="void" /> : new Date(s.expires_at) > new Date() ? me.caps.includes('support') ? <button className="btn-ghost" onClick={async () => { await api(`/platform/support-sessions/${s.id}/revoke`, 'POST', {}); onRefresh(); }}>End</button> : '' : '') }]} />
-        </div>
-      </div>
+  const ag = detail.agency, sub = detail.subscription; const [tab, setTab] = useState<'overview' | 'people' | 'billing' | 'activity'>('overview'); const [menu, setMenu] = useState(false);
+  const canBill = me.caps.includes('billing'), canSup = me.caps.includes('support'), canSus = me.caps.includes('suspend');
+  const hue = sub?.platform_hold ? 'danger' : STATUS_HUE[sub?.status ?? 'none'] ?? 'muted'; const left = daysTo(sub?.status === 'trialing' ? sub?.trial_ends_at : sub?.current_period_end);
+  const target = { id: ag.id, name: ag.name };
+  const items: { label: string; on(): void; show: boolean; danger?: boolean }[] = [
+    { label: 'Set plan', on: () => onAct({ kind: 'set-plan', ...target }), show: canBill }, { label: 'Extend trial', on: () => onAct({ kind: 'extend-trial', ...target }), show: canBill && sub?.status === 'trialing' },
+    { label: 'Grant invoiced access', on: () => onAct({ kind: 'grant', ...target }), show: canBill },
+    { label: 'Edit agency details', on: () => onAct({ kind: 'edit-agency', ...target, data: { name: ag.name, base_currency: ag.base_currency ?? 'USD', tax_label: ag.tax_label ?? 'TAX' } }), show: canBill },
+    sub?.platform_hold ? { label: 'Release operator hold', on: () => onAct({ kind: 'reactivate', ...target }), show: canSus } : { label: 'Request suspension', on: () => onAct({ kind: 'suspend', ...target }), show: canSus, danger: true },
+    { label: 'Delete agency', on: () => onAct({ kind: 'delete-agency', ...target }), show: canSus, danger: true },
+  ].filter((i) => i.show);
+  const tabs: [typeof tab, string, number?][] = [['overview', 'Overview'], ['people', 'People', detail.members.length], ['billing', 'Billing', detail.billing_events.length], ['activity', 'Activity']];
+  const tile = (label: string, value: any, hint?: string, tone = '') => <div className="card !p-3"><div className="text-xs text-muted">{label}</div><div className={`mt-1 text-2xl font-bold num ${tone}`}>{value}</div>{hint && <div className="mt-0.5 text-[11px] text-muted">{hint}</div>}</div>;
+  return <Modal title="Agency" wide onClose={onClose}>
+    <section className="hero-mesh -mt-1 mb-4 rounded-xl border border-line p-4 md:p-5" style={{ ['--hue' as any]: `var(--${hue})` }}>
+      <div className="flex flex-wrap items-start gap-4">
+        <Avatar name={ag.name} size={60} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-xl font-bold tracking-tight md:text-2xl">{ag.name}</h3>{sub && <Pill s={sub.status} />}
+            {sub && <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">{sub.plan_name}{sub.interval ? ` · ${sub.interval}` : ''}</span>}
+            {sub?.manual && <span className="rounded-full bg-surface2 px-2 py-0.5 text-[11px] text-muted">Invoiced</span>}{sub?.platform_hold && <span className="rounded-full bg-danger/15 px-2 py-0.5 text-[11px] font-medium text-danger">On operator hold</span>}</div>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted"><span className="num">#{ag.id}</span><span>Joined {String(ag.created_at).slice(0, 10)}</span><span>{ag.base_currency}</span><span>Last active {rel(detail.last_active)}</span></div></div>
+        <div className="flex flex-wrap items-center gap-2">
+          {canSup && <button className="btn" onClick={() => onAct({ kind: 'access-workspace', ...target })}><ArrowRight size={15} />Access workspace</button>}
+          {canSup && <button className="btn-ghost" onClick={() => onAct({ kind: 'support-session', ...target })}>Support session</button>}
+          {items.length > 0 && <div className="relative"><button className="btn-ghost" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><MoreHorizontal size={16} />Manage</button>
+            {menu && <><button className="fixed inset-0 z-10 cursor-default" aria-label="Close menu" onClick={() => setMenu(false)} />
+              <div role="menu" className="pop-in absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">{items.map((i) => <button key={i.label} role="menuitem" className={`block w-full px-3 py-2 text-left text-sm hover:bg-surface2 ${i.danger ? 'text-danger' : ''}`} onClick={() => { setMenu(false); i.on(); }}>{i.label}</button>)}</div></>}</div>}</div></div>
+      {sub?.platform_hold && <div className="mt-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">Operator hold: {sub.hold_reason || 'no reason recorded'}</div>}
+    </section>
 
-      {/* Right: action panel */}
-      <div className="w-48 shrink-0 space-y-5">
-        {(me.caps.includes('billing') || me.caps.includes('support')) && (
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5 px-1">Billing</div>
-            <div className="flex flex-col gap-0.5">
-              {me.caps.includes('billing') && detail.subscription?.status === 'trialing' && <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'extend-trial', id: ag.id, name: ag.name })}>Extend trial</button>}
-              {me.caps.includes('billing') && <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'set-plan', id: ag.id, name: ag.name })}>Set plan</button>}
-              {me.caps.includes('billing') && <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'grant', id: ag.id, name: ag.name })}>Grant invoiced access</button>}
-              {me.caps.includes('billing') && <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'edit-agency', id: ag.id, name: ag.name, data: { name: ag.name, base_currency: ag.base_currency ?? 'USD', tax_label: ag.tax_label ?? 'TAX' } })}>Edit agency</button>}
-            </div>
-          </div>
-        )}
-        {me.caps.includes('support') && (
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5 px-1">Workspace</div>
-            <div className="flex flex-col gap-0.5">
-              <button className="w-full btn-ghost text-left text-sm !justify-start" onClick={() => onAct({ kind: 'support-session', id: ag.id, name: ag.name })}>Open support session</button>
-              <button className="w-full btn text-sm" onClick={() => onAct({ kind: 'access-workspace', id: ag.id, name: ag.name })}>Access workspace</button>
-            </div>
-          </div>
-        )}
-        {me.caps.includes('suspend') && (
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-danger mb-1.5 px-1">Danger zone</div>
-            <div className="flex flex-col gap-0.5">
-              {detail.subscription?.platform_hold
-                ? <button className="w-full btn text-sm" onClick={() => onAct({ kind: 'reactivate', id: ag.id, name: ag.name })}>Release hold</button>
-                : <button className="w-full btn-ghost text-left text-sm !justify-start text-danger" onClick={() => onAct({ kind: 'suspend', id: ag.id, name: ag.name })}>Request suspension</button>}
-              <button className="w-full btn-ghost text-left text-sm !justify-start text-danger" onClick={() => onAct({ kind: 'delete-agency', id: ag.id, name: ag.name })}>Delete agency</button>
-            </div>
-          </div>
-        )}
-        {me.role === 'readonly' && <p className="text-xs text-muted px-1">Read-only operator role.</p>}
-      </div>
-    </div>
+    <div className="mb-4 flex gap-1 overflow-x-auto border-b border-line" role="tablist">{tabs.map(([k, l, n]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`whitespace-nowrap px-3.5 py-2 text-sm ${tab === k ? 'border-b-2 border-accent font-medium text-accent' : 'text-muted hover:text-fg'}`}>{l}{n != null && <span className="ml-1.5 rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted num">{n}</span>}</button>)}</div>
+
+    {tab === 'overview' && <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{tile('Members', detail.usage.seats)}{tile('Branches', detail.usage.branches)}{tile('Bookings this month', detail.usage.bookings)}{tile('Requests (30 days)', detail.requests_30d.toLocaleString())}</div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="card"><div className="text-xs font-medium text-muted">Subscription</div>{sub ? <>
+          <div className="mt-2 flex items-baseline justify-between"><span className="text-lg font-semibold">{sub.plan_name}</span><span className="text-xs text-muted capitalize">{sub.interval}</span></div>
+          {left !== null && <div className="mt-3"><div className="mb-1 flex justify-between text-xs"><span className="text-muted">{sub.status === 'trialing' ? 'Trial' : 'Current period'}</span><span className={left <= 3 ? 'font-medium text-warn' : ''}>{left < 0 ? 'ended' : `${left} day${left === 1 ? '' : 's'} left`}</span></div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface2"><div className="h-full rounded-full" style={{ width: `${Math.max(4, Math.min(100, (left / (sub.status === 'trialing' ? 14 : 31)) * 100))}%`, background: left <= 3 ? 'rgb(var(--warn))' : 'rgb(var(--accent))' }} /></div></div>}
+          <dl className="mt-3 space-y-0.5 text-xs text-muted"><div>Trial ends <span className="num text-fg">{day(sub.trial_ends_at)}</span></div><div>Period ends <span className="num text-fg">{day(sub.current_period_end)}</span></div>{sub.cancel_at_period_end && <div className="text-warn">Cancels at the end of the period</div>}</dl></> : <p className="mt-2 text-sm text-muted">No subscription.</p>}</div>
+        <div className="card"><div className="text-xs font-medium text-muted">Health</div>
+          <div className="mt-2 grid grid-cols-2 gap-3"><div><div className={`text-2xl font-bold num ${detail.open_critical_exceptions ? 'text-danger' : 'text-success'}`}>{detail.open_critical_exceptions}</div><div className="text-[11px] text-muted">Critical exceptions</div></div>
+            <div><div className={`text-2xl font-bold num ${detail.failed_emails_7d ? 'text-warn' : 'text-success'}`}>{detail.failed_emails_7d}</div><div className="text-[11px] text-muted">Failed emails (7 d)</div></div></div>
+          <p className="mt-3 text-xs text-muted">{detail.open_critical_exceptions || detail.failed_emails_7d ? 'Something here needs a look. Access the workspace or open a support session to investigate.' : 'Nothing needs attention.'}</p></div></div>
+      <AiAccess detail={detail} canEdit={canBill} onRefresh={onRefresh} />
+    </div>}
+
+    {tab === 'people' && <MembersPanel detail={detail} canManage={canSus} onRefresh={onRefresh} />}
+
+    {tab === 'billing' && <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-2.5 text-sm font-semibold">Billing history</div>
+      {!detail.billing_events.length && <div className="px-4 py-8 text-center text-sm text-muted">No billing events yet.</div>}
+      <ol className="px-4 py-3">{detail.billing_events.map((e: any, i: number) => <li key={i} className="relative flex gap-3 pb-4 last:pb-0"><span className="relative mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-accent" />{i < detail.billing_events.length - 1 && <span className="absolute left-[4px] top-4 h-full w-px bg-line" aria-hidden />}
+        <div className="min-w-0"><div className="text-sm font-medium capitalize">{String(e.kind).replace(/_/g, ' ')}</div>{e.detail && <div className="text-xs text-muted">{e.detail}</div>}<div className="text-[11px] text-muted num">{day(e.created_at)}</div></div></li>)}</ol></div>}
+
+    {tab === 'activity' && <div className="grid gap-4 lg:grid-cols-2">
+      <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-2.5 text-sm font-semibold">Support access</div>
+        {!detail.support_sessions.length && <div className="px-4 py-8 text-center text-sm text-muted">No support sessions.</div>}
+        {detail.support_sessions.map((x: any) => { const live = !x.revoked_at && new Date(x.expires_at) > new Date(); return <div key={x.id} className="flex items-start gap-3 border-b border-line/70 px-4 py-2.5 last:border-0"><div className="min-w-0 flex-1"><div className="truncate text-sm">{x.admin_email}</div><div className="truncate text-xs text-muted">{x.reason}</div><div className="text-[11px] text-muted num">{day(x.created_at)}</div></div>
+          {live ? <><span className="rounded-full bg-success/15 px-2 py-0.5 text-[11px] text-success">Live</span>{canSup && <button className="btn-ghost !h-7 !px-2 text-xs" onClick={async () => { await api(`/platform/support-sessions/${x.id}/revoke`, 'POST', {}); onRefresh(); }}>End</button>}</> : <span className="rounded-full bg-surface2 px-2 py-0.5 text-[11px] text-muted">{x.revoked_at ? 'Ended' : 'Expired'}</span>}</div>; })}</div>
+      <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-2.5 text-sm font-semibold">Security events</div>
+        {!detail.security_events.length && <div className="px-4 py-8 text-center text-sm text-muted">Nothing recorded.</div>}
+        {detail.security_events.map((e: any, i: number) => <div key={i} className="border-b border-line/70 px-4 py-2 last:border-0"><div className="flex items-baseline justify-between gap-2"><span className="text-sm capitalize">{String(e.event).replace(/_/g, ' ')}</span><span className="shrink-0 text-[11px] text-muted num">{day(e.created_at)}</span></div>{e.detail && <div className="truncate text-xs text-muted">{e.detail}</div>}</div>)}</div>
+    </div>}
   </Modal>;
 }
 

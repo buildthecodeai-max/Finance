@@ -22,6 +22,7 @@ platformRouter.delete('/operators/:id', P.needs('suspend'), async (req, res) => 
 // ---- user directory: every account on the platform. Reading needs 'support'; changing needs 'suspend'; every read of a person's detail and every change is audited.
 const Why = z.object({ reason: z.string().trim().min(3, 'Say why you are doing this.').max(300) });
 const UId = (req: any) => { const n = Number(req.params.id); if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Bad user id'); return n; };
+platformRouter.get('/agency-roles', P.needs('support'), async (_req, res) => res.json(await P.agencyRoleCounts()));
 platformRouter.get('/users', P.needs('support'), async (req, res) => res.json(await P.listUsers(parse(z.object({ q: z.string().max(100).optional(), filter: z.enum(P.USER_FILTERS).optional(), page: z.coerce.number().int().min(1).optional() }), req.query))));
 platformRouter.get('/users/:id', P.needs('support'), async (req, res) => { const d = await P.userDetail(UId(req)); await P.audit(req, 'view_user', null, d.user.email); res.json(d); });
 platformRouter.post('/users/:id/reset-2fa', P.needs('suspend'), async (req, res) => res.json(await P.resetUserTwoFactor(req, UId(req), parse(Why, req.body).reason)));

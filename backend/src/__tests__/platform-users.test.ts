@@ -90,6 +90,11 @@ describe('other account actions', () => {
     expect((await call(null, 'POST', '/auth/login', { email: u.email, password: 'BrandNew#Pass2026' })).status).toBe(200);
     await P('POST', `/users/${u.id}/password-reset`, { reason: 'third link' }); expect((await P('POST', `/users/${u.id}/password-reset`, { reason: 'fourth link' })).status).toBe(429);
   });
+  it('counts the people holding each agency role, for support-level operators only', async () => {
+    const r = await P('GET', '/agency-roles'); expect(r.status).toBe(200);
+    expect(r.body.map((x: any) => x.role)).toEqual(['admin', 'finance_manager', 'agent', 'viewer']); expect(r.body[0].people).toBeGreaterThan(0); expect(r.body[0].agencies).toBeGreaterThan(0);
+    const ro = await operator('readonly'); expect((await call(ro.token, 'GET', '/platform/agency-roles')).status).toBe(403);
+  });
   it('lists operators with 2FA, last seen and recent activity', async () => {
     const r = await P('GET', '/operators'); const me = r.body.find((x: any) => x.id === op.id);
     expect(me).toMatchObject({ email: op.email, role: 'admin', totp_enabled: 1, disabled_at: null }); expect(me.last_seen).toBeTruthy(); expect(typeof me.actions_30d).toBe('number');

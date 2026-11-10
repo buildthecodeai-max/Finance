@@ -155,7 +155,8 @@ export async function listAgencies(q: { q?: string; status?: string; plan?: stri
       (SELECT COUNT(*) FROM memberships m WHERE m.agency_id = a.id) seats, (SELECT MAX(created_at) FROM api_log l WHERE l.agency_id = a.id) last_active
     FROM agencies a LEFT JOIN subscriptions s ON s.agency_id = a.id LEFT JOIN plans pl ON pl.id = s.plan_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY a.id DESC LIMIT ? OFFSET ?`, [...p, limit, off]);
   const [[c]]: any = await pool.query(`SELECT COUNT(*) n FROM agencies a LEFT JOIN subscriptions s ON s.agency_id = a.id LEFT JOIN plans pl ON pl.id = s.plan_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`, p);
-  return { total: c.n, page: q.page ?? 1, page_size: limit, rows };
+  const [cs]: any = await pool.query("SELECT COALESCE(s.status, 'none') st, COUNT(*) n FROM agencies a LEFT JOIN subscriptions s ON s.agency_id = a.id GROUP BY st");
+  return { total: c.n, page: q.page ?? 1, page_size: limit, rows, counts: Object.fromEntries(cs.map((r: any) => [r.st, Number(r.n)])) };
 }
 
 export async function agencyDetail(id: number) {
@@ -487,4 +488,10 @@ export async function sendUserPasswordReset(req: Request, id: number, reason: st
   void sendMail(u.email, 'Reset your Travel CRM password', `<p>Hi ${String(u.name).replace(/</g, '&lt;')},</p><p>An administrator sent you a link to choose a new password: <a href="${link}">Choose a new password</a>. It works once and expires in 30 minutes.</p>`);
   await audit(req, 'send_user_password_reset', null, u.email, reason);
   return { email: u.email, expires_minutes: 30, ...(!config.isProd && !config.sendgridKey ? { link } : {}) };
+}
+
+/** How many people hold each role inside customer agencies, and in how many agencies. */
+export async function agencyRoleCounts() {
+  const [r]: any = await pool.query('SELECT role, COUNT(*) people, COUNT(DISTINCT agency_id) agencies FROM memberships GROUP BY role');
+  return ['admin', 'finance_manager', 'agent', 'viewer'].map((k) => { const x = r.find((y: any) => y.role === k); return { role: k, people: Number(x?.people ?? 0), agencies: Number(x?.agencies ?? 0) }; });
 }
