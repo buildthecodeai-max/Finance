@@ -7,6 +7,7 @@ import { FEATURES, getSub, grantManual, usage } from './billing.js';
 import { aiStatus, aiUsedThisMonth } from './ai.js';
 import { deliver } from './portal.js';
 import { counters, health } from './observability.js';
+import { setPasswordFor } from './passwords.js';
 import { sendMail } from './email.js';
 import { authenticator } from 'otplib';
 import crypto from 'node:crypto';
@@ -594,4 +595,12 @@ export async function systemStatus() {
       ai: !!config.anthropicKey, exchange_rates: !!config.oxrAppId, cache: !!config.redisUrl,
     },
   };
+}
+
+/** An operator sets someone's password directly (for a person who cannot use the reset email). They are signed out everywhere and must use the new password. */
+export async function setUserPasswordByOperator(req: Request, id: number, password: string, reason: string) {
+  notSelf(req, id, 'set the password of'); const u = await userOrThrow(id);
+  const r = await setPasswordFor(id, password, 'A platform administrator');
+  await audit(req, 'set_user_password', null, `${u.email}: password set, ${r.sessions_ended} session(s) ended`, reason);
+  return { email: u.email, sessions_ended: r.sessions_ended };
 }

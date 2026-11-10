@@ -1,3 +1,4 @@
+import { setPasswordFor } from '../services/passwords.js';
 import { assertWithinLimit } from '../services/billing.js';
 import { archive, changeMember, deleteParty, dependents, memberWorkload, removeMember, restore } from '../services/records.js';
 import { Router } from 'express';
@@ -121,6 +122,20 @@ teamRouter.post('/', requireRole('admin'), async (req, res) => {
     userId = u.insertId;
   }
   res.status(201).json({ id: await T(req).insert('memberships', { user_id: userId, role: b.role, default_commission_pct: b.default_commission_pct, branch_id: b.branch_id ?? null }) });
+});
+/** The agency owner sets a password for someone on their team (e.g. a new hire without email access). Only for people who work for this agency alone: a password is one login across every agency, so it is never changed from here for someone who is in more than one. */
+teamRouter.put('/:id/password', requireRole('admin'), async (req, res) => {
+  const t = T(req), b = parse(z.object({ password: z.string().min(10, 'Use at least 10 characters.').max(200) }), req.body), m = await t.get('memberships', idParam(req));
+  if (!m) throw new HttpError(404, 'Team member not found');
+  if (m.user_id === req.ctx!.userId) throw new HttpError(409, 'Change your own password under your account menu.');
+  if (m.role === 'admin') throw new HttpError(409, 'Admins change their own password. They can use “Forgot password” if they are locked out.');
+  const [[u]]: any = await pool.query('SELECT is_platform_admin FROM users WHERE id = ?', [m.user_id]);
+  if (u?.is_platform_admin) throw new HttpError(409, 'This account is managed by the platform.');
+  const [[n]]: any = await pool.query('SELECT COUNT(*) n FROM memberships WHERE user_id = ?', [m.user_id]);
+  if (n.n > 1) throw new HttpError(409, 'This person also works for another agency, so their password can only be changed by them. Ask them to use “Forgot password”.');
+  const r = await setPasswordFor(m.user_id, b.password, 'The owner of your agency');
+  await t.event('update', 'user_password', m.user_id, null, { set_by: req.ctx!.userId, sessions_ended: r.sessions_ended });
+  res.json({ ok: true, name: r.name, sessions_ended: r.sessions_ended });
 });
 teamRouter.put('/:id', requireRole('admin'), async (req, res) => {
   const b = parse(z.object({ role: z.enum(['admin', 'finance_manager', 'agent', 'viewer']).optional(), default_commission_pct: z.number().min(0).max(100).optional(), branch_id: z.number().int().nullish() }), req.body);

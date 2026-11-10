@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Ban, Building2, Check, CheckCircle2, Copy, KeyRound, LogOut, Mail, MonitorSmartphone, Plus, Search, ShieldAlert, ShieldCheck, ShieldOff, UserCog, UserPlus, Users as UsersIcon, X } from 'lucide-react';
+import { Ban, LockKeyhole, Building2, Check, CheckCircle2, Copy, KeyRound, LogOut, Mail, MonitorSmartphone, Plus, Search, ShieldAlert, ShieldCheck, ShieldOff, UserCog, UserPlus, Users as UsersIcon, X } from 'lucide-react';
 import { api } from '../api';
 import { Avatar, Err, Field, Modal, Pager, Skeleton } from '../components/ui';
+import { PasswordField, passwordOk } from '../components/PasswordField';
 
 /* People in the platform console: the directory of every account, and the operators who run the console. Both are driven by the capabilities of the signed-in operator. */
 
@@ -46,22 +47,23 @@ const roleTone = (r: string) => OPERATOR_ROLES.find((x) => x.key === r)?.tone ??
 const RolePill = ({ role }: { role: string }) => <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: `rgb(var(--${roleTone(role)}) / .14)`, color: `rgb(var(--${roleTone(role)}))` }}><ShieldCheck size={11} />{OPERATOR_ROLES.find((r) => r.key === role)?.name ?? role}</span>;
 
 /* ---------------------------------------------------------------------------- one account action, with the reason every action must carry */
-type Act = { kind: 'password' | 'signout' | 'reset2fa' | 'disable' | 'enable'; user: { id: number; name: string; email: string } };
+type Act = { kind: 'password' | 'setpw' | 'signout' | 'reset2fa' | 'disable' | 'enable'; user: { id: number; name: string; email: string } };
 const ACT: Record<Act['kind'], { title: string; path: string; body: (u: string) => string; button: string; danger?: boolean }> = {
   password: { title: 'Send a password link', path: 'password-reset', body: (u) => `${u} gets a one-time link to choose a new password. It expires in 30 minutes, and any earlier link stops working.`, button: 'Send link' },
+  setpw: { title: 'Set a password', path: 'set-password', body: (u) => `You choose a new password for ${u}. They are signed out everywhere and need it to sign in again. Use this when the reset email can't reach them; otherwise “Send password link” is safer because you never see their password.`, button: 'Set password', danger: true },
   signout: { title: 'Sign out everywhere', path: 'sign-out', body: (u) => `Every device where ${u} is signed in is signed out. They can sign in again straight away.`, button: 'Sign out everywhere' },
   reset2fa: { title: 'Reset two-factor sign-in', path: 'reset-2fa', body: (u) => `${u}'s authenticator is removed and they are signed out. Use this when they have lost their phone, after checking who they are. They set up 2FA again after the next sign-in.`, button: 'Reset 2FA', danger: true },
   disable: { title: 'Switch the account off', path: 'disable', body: (u) => `${u} can no longer sign in, and anything they have open stops working. Nothing is deleted, and you can switch the account back on at any time.`, button: 'Switch off', danger: true },
   enable: { title: 'Switch the account back on', path: 'enable', body: (u) => `${u} can sign in again.`, button: 'Switch on' },
 };
 function ActionDialog({ act, onClose, onDone }: { act: Act; onClose(): void; onDone(msg: string): void }) {
-  const a = ACT[act.kind]; const [reason, setReason] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [link, setLink] = useState(''); const [copied, setCopied] = useState(false);
+  const a = ACT[act.kind]; const [reason, setReason] = useState(''); const [pw, setPw] = useState(''); const needsPw = act.kind === 'setpw'; const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [link, setLink] = useState(''); const [copied, setCopied] = useState(false);
   const go = async () => {
     setBusy(true); setErr('');
     try {
-      const r = await api(`/platform/users/${act.user.id}/${a.path}`, 'POST', { reason });
+      const r = await api(`/platform/users/${act.user.id}/${a.path}`, 'POST', needsPw ? { reason, password: pw } : { reason });
       if (act.kind === 'password' && r.link) { setLink(r.link); return; }
-      onDone(act.kind === 'password' ? `A reset link was emailed to ${act.user.email}.` : act.kind === 'signout' ? `${act.user.name} was signed out (${r.sessions_ended} session${r.sessions_ended === 1 ? '' : 's'}).` : act.kind === 'reset2fa' ? `2FA was reset for ${act.user.name}.` : act.kind === 'disable' ? `${act.user.name}'s account was switched off.` : `${act.user.name}'s account was switched on.`);
+      onDone(act.kind === 'password' ? `A reset link was emailed to ${act.user.email}.` : act.kind === 'setpw' ? `${act.user.name}'s password was changed and they were signed out. Give them the new password yourself.` : act.kind === 'signout' ? `${act.user.name} was signed out (${r.sessions_ended} session${r.sessions_ended === 1 ? '' : 's'}).` : act.kind === 'reset2fa' ? `2FA was reset for ${act.user.name}.` : act.kind === 'disable' ? `${act.user.name}'s account was switched off.` : `${act.user.name}'s account was switched on.`);
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   if (link) return <Modal title="Reset link ready" onClose={() => onDone(`A reset link was created for ${act.user.email}.`)}>
@@ -71,8 +73,9 @@ function ActionDialog({ act, onClose, onDone }: { act: Act; onClose(): void; onD
     <div className="flex justify-end"><button className="btn" onClick={() => onDone(`A reset link was created for ${act.user.email}.`)}>Done</button></div></Modal>;
   return <Modal title={`${a.title}: ${act.user.name}`} onClose={onClose}><Err e={err} />
     <p className="mb-3 text-sm">{a.body(act.user.name)}</p>
-    <Field label="Reason" hint="Kept in the operator audit log."><input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && reason.trim().length >= 3 && !busy) go(); }} placeholder="e.g. Lost phone, identity checked by video call" /></Field>
-    <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className={`btn ${a.danger ? '!bg-danger' : ''}`} disabled={busy || reason.trim().length < 3} onClick={go}>{busy ? 'Working…' : a.button}</button></div></Modal>;
+    {needsPw && <Field label="New password" hint="The password is never stored in the audit log."><PasswordField value={pw} onChange={setPw} autoFocus /></Field>}
+    <Field label="Reason" hint="Kept in the operator audit log."><input className="input" autoFocus={!needsPw} value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && reason.trim().length >= 3 && (!needsPw || passwordOk(pw)) && !busy) go(); }} placeholder="e.g. Lost phone, identity checked by video call" /></Field>
+    <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className={`btn ${a.danger ? '!bg-danger' : ''}`} disabled={busy || reason.trim().length < 3 || (needsPw && !passwordOk(pw))} onClick={go}>{busy ? 'Working…' : a.button}</button></div></Modal>;
 }
 
 /* ---------------------------------------------------------------------------- the person window */
@@ -111,6 +114,7 @@ function UserWindow({ id, me, onClose, onOpenAgency, onChanged }: { id: number; 
           <div className="px-1 text-[10px] font-semibold uppercase tracking-wider text-muted">Account actions</div>
           {canAct && !self ? <>
             <Btn kind="password" icon={Mail} label="Send password link" />
+            <Btn kind="setpw" icon={LockKeyhole} label="Set a password" />
             <Btn kind="signout" icon={LogOut} label={`Sign out everywhere${d.live_sessions ? ` (${d.live_sessions})` : ''}`} />
             {u.totp_enabled ? <Btn kind="reset2fa" icon={KeyRound} label="Reset 2FA" danger /> : null}
             {off ? <Btn kind="enable" icon={CheckCircle2} label="Switch account on" /> : <Btn kind="disable" icon={Ban} label="Switch account off" danger />}
@@ -190,6 +194,7 @@ export function PlatformOperators({ me }: { me: Me }) {
           <td>{self ? null : <div className="flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap">
             <button className="btn-ghost !h-8 !px-2.5 text-xs" onClick={() => { setErr(''); setDlg({ kind: 'edit', r, role: r.role, reason: '' }); }}>Change role</button>
             {r.totp_enabled ? <button className="btn-icon !h-8 !w-8 border border-line" aria-label={`Reset 2FA for ${r.name}`} title="Reset 2FA: remove their authenticator and sign them out" onClick={() => setAct({ kind: 'reset2fa', user: r })}><KeyRound size={14} /></button> : null}
+            <button className="btn-icon !h-8 !w-8 border border-line" aria-label={`Set a password for ${r.name}`} title="Set a password" onClick={() => setAct({ kind: 'setpw', user: r })}><LockKeyhole size={14} /></button>
             <button className="btn-icon !h-8 !w-8 border border-line" aria-label={`Sign ${r.name} out everywhere`} title="Sign out everywhere" onClick={() => setAct({ kind: 'signout', user: r })}><LogOut size={14} /></button>
             <button className={`btn-icon !h-8 !w-8 border border-line ${r.disabled_at ? '' : 'text-danger'}`} aria-label={r.disabled_at ? `Switch ${r.name} on` : `Switch ${r.name} off`} title={r.disabled_at ? 'Switch account on' : 'Switch account off'} onClick={() => setAct({ kind: r.disabled_at ? 'enable' : 'disable', user: r })}>{r.disabled_at ? <CheckCircle2 size={14} /> : <Ban size={14} />}</button>
             <button className="btn-icon !h-8 !w-8 border border-line text-danger" aria-label={`Remove ${r.name} as operator`} title="Remove operator access" onClick={() => { setErr(''); setDlg({ kind: 'revoke', r, reason: '' }); }}><X size={14} /></button></div>}</td></tr>; })}</tbody></table></div>}
