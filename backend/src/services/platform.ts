@@ -4,7 +4,9 @@ import { config } from '../config.js';
 import { HttpError } from '../errors.js';
 import { Tenant, pool } from '../db.js';
 import { FEATURES, getSub, grantManual, usage } from './billing.js';
-import { aiStatus, aiUsedThisMonth } from './ai.js';
+import { aiStatus, aiUsedThisMonth, llm } from './ai.js';
+import { dropAiKeyCache, resolveAiKey } from './aiKey.js';
+import { encrypt } from '../crypto.js';
 import { deliver } from './portal.js';
 import { counters, health } from './observability.js';
 import { setPasswordFor } from './passwords.js';
@@ -179,7 +181,7 @@ export async function agencyDetail(id: number) {
   const [[act]]: any = await pool.query('SELECT MAX(created_at) at, COUNT(*) n FROM api_log WHERE agency_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)', [id]);
   return { agency: a, subscription: s ? { status: s.status, plan: s.plan_code, plan_name: s.plan_name, interval: s.billing_interval, trial_ends_at: s.trial_ends_at, current_period_end: s.current_period_end, grace_until: s.grace_until, manual: !!s.is_manual,
       cancel_at_period_end: !!s.cancel_at_period_end, platform_hold: !!s.platform_hold, hold_reason: s.hold_reason, stripe_customer_id: s.stripe_customer_id } : null,
-    usage: await usage(id), ai: { ...(await aiStatus(id)), ...(await aiUsedThisMonth(id)), key_configured: !!config.anthropicKey }, members, billing_events: events, security_events: secEv, support_sessions: sessions, failed_emails_7d: fail.n, open_critical_exceptions: crit.n, last_active: act.at, requests_30d: act.n };
+    usage: await usage(id), ai: { ...(await aiStatus(id)), ...(await aiUsedThisMonth(id)), key_configured: !!(await resolveAiKey()).key }, members, billing_events: events, security_events: secEv, support_sessions: sessions, failed_emails_7d: fail.n, open_critical_exceptions: crit.n, last_active: act.at, requests_30d: act.n };
 }
 
 /* ------------------------------------------------------------------ actions on an agency (all need a reason, all are audited) */
@@ -599,7 +601,7 @@ export async function systemStatus() {
     queues: { webhook_backlog: backlog, webhook_dead: dead, failed_emails_24h: failedMail, critical_exceptions: critical },
     integrations: {
       email: !!config.sendgridKey, storage: !!(config.r2.bucket && config.r2.accessKeyId), payments: !!config.stripeKey, payments_webhook: !!config.stripeWebhookSecret,
-      ai: !!config.anthropicKey, exchange_rates: !!config.oxrAppId, cache: !!config.redisUrl,
+      ai: !!(await resolveAiKey()).key, exchange_rates: !!config.oxrAppId, cache: !!config.redisUrl,
     },
   };
 }
@@ -610,4 +612,29 @@ export async function setUserPasswordByOperator(req: Request, id: number, passwo
   const r = await setPasswordFor(id, password, 'A platform administrator');
   await audit(req, 'set_user_password', null, `${u.email}: password set, ${r.sessions_ended} session(s) ended`, reason);
   return { email: u.email, sessions_ended: r.sessions_ended };
+}
+
+
+/* ------------------------------------------------------------------ AI provider key (set from the console, kept encrypted) */
+export async function aiKeyInfo() {
+  const r = await resolveAiKey();
+  return { configured: !!r.key, source: r.source, hint: r.hint, updated_at: r.updated_at, updated_by: r.updated_by, model: config.aiModel, environment_key: !!config.anthropicKey };
+}
+
+/** Saves a key an operator pasted, but only after one real request proves it works. The key is never returned, logged or audited: only its last four characters. */
+export async function setAiKey(req: Request, key: string, reasonIn: unknown) {
+  const reason = needReason(reasonIn), k = key.trim();
+  if (!/^sk-ant-[A-Za-z0-9_-]{20,300}$/.test(k)) throw new HttpError(400, 'That does not look like an Anthropic key. It starts with sk-ant- and has no spaces.');
+  try { await llm.verify(k); }
+  catch (e: any) { throw new HttpError(400, e?.message === 'rejected' ? 'Anthropic rejected that key. Check that you copied all of it and that it is active.' : 'Could not reach Anthropic to check the key, so it was not saved. Try again in a moment.'); }
+  const hint = k.slice(-4);
+  await pool.query('INSERT INTO platform_settings (k, v_enc, hint, updated_by) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE v_enc = VALUES(v_enc), hint = VALUES(hint), updated_by = VALUES(updated_by)', ['ai_api_key', encrypt(k), hint, req.platform!.userId]);
+  dropAiKeyCache(); await audit(req, 'set_ai_key', null, `AI key saved (ends ${hint})`, reason);
+  return aiKeyInfo();
+}
+export async function removeAiKey(req: Request, reasonIn: unknown) {
+  const reason = needReason(reasonIn); const [r]: any = await pool.query("DELETE FROM platform_settings WHERE k = 'ai_api_key'");
+  if (!r.affectedRows) throw new HttpError(409, 'No key was saved in the console.');
+  dropAiKeyCache(); await audit(req, 'remove_ai_key', null, 'AI key removed from the console', reason);
+  return aiKeyInfo();
 }

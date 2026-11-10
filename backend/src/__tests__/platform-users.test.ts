@@ -2,6 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { authenticator } from 'otplib';
 import { PASSWORD, apiBase, boot, shutdown, sql } from './helpers.js';
 import { OperatorRole, setPlatformAdmin } from '../services/platform.js';
+import { llm } from '../services/ai.js';
+import { dropAiKeyCache } from '../services/aiKey.js';
+import { vi } from 'vitest';
 
 let base: string; const rnd = () => Math.random().toString(36).slice(2, 7);
 const call = async (token: string | null, method: string, path: string, body?: unknown, cookie?: string) => {
@@ -150,5 +153,39 @@ describe('dashboard overview', () => {
     expect(o.signups).toHaveLength(12); expect(o.signups.every((n: number) => Number.isInteger(n) && n >= 0)).toBe(true); expect(o.signups[11]).toBeGreaterThan(0);         // the newest week is last and includes the agency just made
     expect(typeof o.active_7d).toBe('number'); expect(o.recent_agencies.length).toBeGreaterThan(0); expect(o.recent_agencies.length).toBeLessThanOrEqual(5); expect(o.recent_agencies[0]).toHaveProperty('name');
     expect(Array.isArray(o.trials)).toBe(true); expect(o.trials[0]).toHaveProperty('days_left');
+  });
+});
+
+describe('AI key from the console', () => {
+  const KEY = 'sk-ant-api03-TESTKEY_abcdefghijklmnopqrstuvwxyz0123456789';
+  it('is saved only after it is proven to work, stored encrypted, never shown again, and removable', async () => {
+    await sql("DELETE FROM platform_settings WHERE k = 'ai_api_key'"); dropAiKeyCache();
+    const verify = vi.spyOn(llm, 'verify').mockResolvedValue(undefined);
+    const before = (await P('GET', '/settings/ai')).body; expect(before).toMatchObject({ configured: expect.any(Boolean), model: expect.any(String) }); expect(JSON.stringify(before)).not.toContain('sk-ant');
+    expect((await P('PUT', '/settings/ai', { api_key: KEY })).status).toBe(400);                                          // a reason is required
+    expect((await P('PUT', '/settings/ai', { api_key: 'not-a-key-but-long-enough-xx', reason: 'first setup' })).status).toBe(400); expect(verify).not.toHaveBeenCalled();   // wrong shape is refused before any call
+    verify.mockRejectedValueOnce(Object.assign(new Error('rejected'), {})); const bad = await P('PUT', '/settings/ai', { api_key: KEY, reason: 'first setup' }); expect(bad.status).toBe(400); expect(bad.body.error).toMatch(/rejected that key/);
+    expect((await sql("SELECT COUNT(*) n FROM platform_settings WHERE k = 'ai_api_key'"))[0].n).toBe(0);                  // a key that fails is not saved
+    verify.mockRejectedValueOnce(new Error('unreachable')); expect((await P('PUT', '/settings/ai', { api_key: KEY, reason: 'first setup' })).body.error).toMatch(/Could not reach/);
+    const ok = await P('PUT', '/settings/ai', { api_key: KEY, reason: 'Go live with the AI assistant' }); expect(ok.status).toBe(200);
+    expect(ok.body).toMatchObject({ configured: true, source: 'console', hint: KEY.slice(-4) }); expect(JSON.stringify(ok.body)).not.toContain(KEY);
+    const row = (await sql("SELECT v_enc FROM platform_settings WHERE k = 'ai_api_key'"))[0]; expect(row.v_enc).not.toContain('TESTKEY');                  // encrypted at rest
+    const audit = JSON.stringify(await sql("SELECT detail, reason FROM platform_audit_log WHERE action = 'set_ai_key' ORDER BY id DESC LIMIT 1")); expect(audit).not.toContain(KEY); expect(audit).toContain(KEY.slice(-4));
+    expect((await P('GET', '/system')).body.integrations.ai).toBe(true);
+    const ro = await operator('support'); expect((await call(ro.token, 'PUT', '/platform/settings/ai', { api_key: KEY, reason: 'not allowed' })).status).toBe(403); expect((await call(ro.token, 'GET', '/platform/settings/ai')).status).toBe(200);
+    expect(JSON.stringify((await call(ro.token, 'GET', '/platform/settings/ai')).body)).not.toContain('sk-ant');
+    const gone = await P('DELETE', '/settings/ai', { reason: 'Rotating the key' }); expect(gone.status).toBe(200); expect(gone.body.source).not.toBe('console');
+    expect((await P('DELETE', '/settings/ai', { reason: 'Nothing to remove' })).status).toBe(409);
+    verify.mockRestore(); dropAiKeyCache();
+  });
+  it('a saved key switches the assistant on for agencies without any environment key', async () => {
+    await sql("DELETE FROM platform_settings WHERE k = 'ai_api_key'"); dropAiKeyCache();
+    const A = await person('Keyed'); await sql("UPDATE subscriptions SET plan_id = (SELECT id FROM plans WHERE code = 'growth') WHERE agency_id = ?", [A.agencyId]);
+    const st = async () => (await fetch(`${base}/api/ai/status`, { headers: { authorization: `Bearer ${A.token}`, 'x-agency-id': String(A.agencyId) } })).json();
+    const withoutKey = (await st()).reason; if (process.env.ANTHROPIC_API_KEY) return;                                  // only meaningful when the environment has no key
+    expect(withoutKey).toBe('not_configured');
+    vi.spyOn(llm, 'verify').mockResolvedValue(undefined); await P('PUT', '/settings/ai', { api_key: 'sk-ant-api03-TESTKEY_abcdefghijklmnopqrstuvwxyz0123456789', reason: 'enable AI' });
+    expect((await st()).available).toBe(true);
+    await P('DELETE', '/settings/ai', { reason: 'cleanup' }); dropAiKeyCache(); expect((await st()).reason).toBe('not_configured'); vi.restoreAllMocks();
   });
 });

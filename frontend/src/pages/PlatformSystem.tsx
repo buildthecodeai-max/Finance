@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Brain, CheckCircle2, Clock, CreditCard, Database, FileBox, Gauge, HardDrive, Mail, MemoryStick, RefreshCw, Server, Timer, Webhook, XCircle, type LucideIcon } from 'lucide-react';
+import { Activity, AlertTriangle, Brain, KeyRound, Trash2, CheckCircle2, Clock, CreditCard, Database, FileBox, Gauge, HardDrive, Mail, MemoryStick, RefreshCw, Server, Timer, Webhook, XCircle, type LucideIcon } from 'lucide-react';
 import { api } from '../api';
-import { Err, Skeleton } from '../components/ui';
+import { Err, Field, Modal, Skeleton } from '../components/ui';
 
 /* The System page: is the platform healthy right now, what is it connected to, and what is it doing. Everything is a yes/no or a number; no secret ever reaches the browser. */
 
@@ -24,7 +24,40 @@ function Tile({ icon: Icon, name, state, headline, detail }: { icon: LucideIcon;
     </div>);
 }
 
-export function PlatformSystem() {
+/** Add, replace or remove the AI provider key. The key is checked with one real request before it is saved, and it is never shown again. */
+function AiKey({ info, canEdit, onChanged }: { info: any; canEdit: boolean; onChanged(): void }) {
+  const [dlg, setDlg] = useState<'set' | 'remove' | null>(null); const [key, setKey] = useState(''); const [reason, setReason] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [msg, setMsg] = useState('');
+  const close = () => { setDlg(null); setKey(''); setReason(''); setErr(''); };
+  const save = async () => { setBusy(true); setErr(''); try { await api('/platform/settings/ai', 'PUT', { api_key: key.trim(), reason }); close(); setMsg('The key works and is saved. The AI assistant is now available to agencies whose plan includes it.'); onChanged(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const remove = async () => { setBusy(true); setErr(''); try { await api('/platform/settings/ai', 'DELETE', { reason }); close(); setMsg('The saved key was removed.'); onChanged(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const src = info?.source; const on = !!info?.configured;
+  return (
+    <section className="card" aria-label="AI assistant key">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: `rgb(var(--${on ? 'success' : 'warn'}) / .14)`, color: `rgb(var(--${on ? 'success' : 'warn'}))` }}><KeyRound size={18} /></span>
+          <div><h3 className="text-sm font-semibold">AI assistant key</h3>
+            <p className="mt-0.5 text-sm text-muted">{!info ? 'Checking…' : on ? <>A key is set{src === 'console' ? <> from this console</> : <> in the server’s environment</>}. It ends in <b className="font-mono text-fg">…{info.hint}</b>{info.updated_by ? <> and was saved by {info.updated_by}</> : null}.</> : 'No key yet, so the AI assistant is off for everyone. Add one to turn it on.'}</p>
+            <p className="mt-1 text-xs text-muted">Get a key from console.anthropic.com under API keys. It is stored encrypted and is never shown again. Model in use: <span className="font-mono">{info?.model ?? '—'}</span>.</p></div></div>
+        {canEdit && info && <div className="flex gap-2"><button className="btn" onClick={() => setDlg('set')}><KeyRound size={15} />{on ? 'Replace key' : 'Add key'}</button>{src === 'console' && <button className="btn-ghost text-danger" onClick={() => setDlg('remove')}><Trash2 size={14} />Remove</button>}</div>}
+        {!canEdit && info && <span className="text-xs text-muted">Only an admin operator can change this.</span>}
+      </div>
+      {msg && <div role="status" className="mt-3 flex justify-between gap-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success"><span>{msg}</span><button aria-label="Dismiss" onClick={() => setMsg('')}>×</button></div>}
+      {src === 'console' && info?.environment_key && <p className="mt-3 text-xs text-muted">The server also has a key in its environment. The one saved here is used; removing it falls back to that one.</p>}
+      {dlg === 'set' && <Modal title={on ? 'Replace the AI key' : 'Add the AI key'} onClose={close}><Err e={err} />
+        <Field label="Anthropic API key" hint="Starts with sk-ant-. We send one tiny test request to check it works before saving, which costs a fraction of a cent."><input className="input font-mono text-xs" type="password" autoComplete="off" spellCheck={false} autoFocus placeholder="sk-ant-…" value={key} onChange={(e) => setKey(e.target.value)} /></Field>
+        <Field label="Reason" hint="Kept in the operator audit log. The key itself never is."><input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Switching the AI assistant on" /></Field>
+        <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={close}>Cancel</button><button className="btn" disabled={busy || key.trim().length < 20 || reason.trim().length < 3} onClick={save}>{busy ? 'Checking the key…' : 'Test and save'}</button></div></Modal>}
+      {dlg === 'remove' && <Modal title="Remove the saved AI key?" onClose={close}><Err e={err} />
+        <p className="mb-3 text-sm text-muted">{info?.environment_key ? 'The assistant keeps working with the key in the server’s environment.' : 'With no other key set, the AI assistant switches off for everyone until you add one.'}</p>
+        <Field label="Reason" hint="Kept in the operator audit log."><input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+        <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={close}>Cancel</button><button className="btn !bg-danger" disabled={busy || reason.trim().length < 3} onClick={remove}>{busy ? 'Removing…' : 'Remove key'}</button></div></Modal>}
+    </section>
+  );
+}
+
+export function PlatformSystem({ canEdit = false }: { canEdit?: boolean }) {
+  const [aiInfo, setAiInfo] = useState<any>(null); const loadAi = () => api('/platform/settings/ai').then(setAiInfo).catch(() => {});
+  useEffect(() => { loadAi(); }, []);
   const [s, setS] = useState<any>(null); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [at, setAt] = useState(0); const [tick, setTick] = useState(0);
   const load = async () => { setBusy(true); try { setS(await api('/platform/system')); setAt(Date.now()); setErr(''); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   useEffect(() => { load(); const h = setInterval(load, 30_000); return () => clearInterval(h); }, []);
@@ -40,7 +73,7 @@ export function PlatformSystem() {
     { icon: Mail, name: 'Email', state: !i.email ? (prod ? 'bad' : 'off') : q.failed_emails_24h > 5 ? 'warn' : 'ok', headline: i.email ? `${q.failed_emails_24h} failed today` : 'Not set up', detail: i.email ? 'SendGrid is connected' : 'No emails are sent. Add a SendGrid key to turn them on.' },
     { icon: FileBox, name: 'File storage', state: i.storage ? 'ok' : prod ? 'bad' : 'off', headline: i.storage ? 'Cloud storage' : 'Local disk', detail: i.storage ? 'Invoices and documents are stored off the server' : 'Files stay on this machine. Fine for development, not for production.' },
     { icon: CreditCard, name: 'Card payments', state: !i.payments ? 'off' : i.payments_webhook ? 'ok' : 'warn', headline: i.payments ? 'Stripe connected' : 'Not connected', detail: !i.payments ? 'Customers can’t pay by card yet' : i.payments_webhook ? 'Webhook secret is set' : 'Webhook secret missing: payments won’t be confirmed' },
-    { icon: Brain, name: 'AI assistant', state: i.ai ? 'ok' : 'off', headline: i.ai ? 'Available' : 'Not set up', detail: i.ai ? 'Agencies on a plan with AI can use it' : 'No AI key. Add ANTHROPIC_API_KEY to switch it on.' },
+    { icon: Brain, name: 'AI assistant', state: i.ai ? 'ok' : 'off', headline: i.ai ? 'Available' : 'Not set up', detail: i.ai ? 'Agencies on a plan with AI can use it' : 'No AI key yet. Add one in the AI assistant key section below.' },
     { icon: Gauge, name: 'Exchange rates', state: i.exchange_rates ? 'ok' : 'off', headline: i.exchange_rates ? 'Live rates' : 'Manual rates', detail: i.exchange_rates ? 'Rates update automatically' : 'Agencies enter rates by hand' },
   ];
   const issues = tiles.filter((x) => x.state === 'bad' || x.state === 'warn'); const bad = tiles.some((x) => x.state === 'bad'); const overall: State = bad ? 'bad' : issues.length ? 'warn' : 'ok';
@@ -61,6 +94,7 @@ export function PlatformSystem() {
     <Err e={err} />
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{tiles.map((x) => <Tile key={x.name} {...x} />)}</div>
+    <AiKey info={aiInfo} canEdit={canEdit} onChanged={() => { loadAi(); load(); }} />
 
     <div className="grid gap-4 lg:grid-cols-3">
       <div className="card lg:col-span-2">
