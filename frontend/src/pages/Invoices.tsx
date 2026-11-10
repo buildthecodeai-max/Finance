@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Copy, Pencil, Plus, Search, X } from 'lucide-react';
+import { AlertCircle, Copy, FileClock, Hourglass, Pencil, Plus, Search, X, type LucideIcon } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
-import { Err, Field, Modal, Page, Pill, Skeleton, Table } from '../components/ui';
+import { Avatar, Err, Field, Modal, Page, Pill, Skeleton, Table } from '../components/ui';
 import { today, useOpenOnNew } from '../lookup';
 import { viewPdf } from '../components/PdfViewer';
 
@@ -230,18 +230,20 @@ export default function Invoices() {
   const money$ = (list: any[]) => list.reduce((s, r) => s + balance(r) * (r.fx_rate ?? 1), 0);
   const unpaid = all.filter(TABS[3].test), overdue = all.filter(TABS[4].test);
   const shown = all.filter(TABS.find((t) => t.key === tab)!.test);
-  const stat = (key: string, title: string, value: string, sub: string, tone = '') => (
-    <button type="button" onClick={() => setTab(key)} className={`card text-left hover:bg-surface2/70 transition-colors ${tab === key ? 'ring-1 ring-accent' : ''}`}>
-      <div className="text-xs text-muted">{title}</div><div className={`text-xl font-semibold num mt-0.5 ${tone}`}>{value}</div><div className="text-xs text-muted mt-0.5">{sub}</div></button>);
+  const stat = (key: string, title: string, value: string, sub: string, Icon: LucideIcon, tone = '') => {
+    const t = tone.includes('danger') ? ['border-l-4 !border-l-danger', 'bg-danger/10 text-danger'] : ['', 'bg-accent/10 text-accent'];
+    return (<button type="button" aria-pressed={tab === key} onClick={() => setTab(key)} className={`card text-left hover:bg-surface2/70 transition-colors ${t[0]} ${tab === key ? 'ring-2 ring-accent' : ''}`}>
+      <div className="flex items-start justify-between gap-2"><div className="text-xs font-medium text-muted">{title}</div><span className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 ${t[1]}`}><Icon size={15} /></span></div>
+      <div className={`text-2xl font-semibold num mt-1 ${tone}`}>{value}</div><div className="text-xs text-muted mt-0.5 truncate">{sub}</div></button>); };
 
   return (
     <Page title="Invoices" description="Create an invoice, review it, send it, then record the payment. Click any invoice to see everything about it."
       actions={editor ? <button className="btn inline-flex items-center gap-1" onClick={() => setForm({})}><Plus size={16} />New invoice</button> : undefined}>
       {rows === null ? <div className="grid sm:grid-cols-3 gap-3 mb-4"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div> : (
         <div className="grid sm:grid-cols-3 gap-3 mb-4">
-          {stat('unpaid', 'Waiting to be paid', money(r2(money$(unpaid)), base), `${unpaid.length} invoice${unpaid.length === 1 ? '' : 's'}`)}
-          {stat('overdue', 'Overdue', money(r2(money$(overdue)), base), overdue.length ? `${overdue.length} invoice${overdue.length === 1 ? '' : 's'} past due` : 'Nothing is late', overdue.length ? 'text-danger' : '')}
-          {stat(counts.ready ? 'ready' : 'draft', 'To finish', String(counts.draft + counts.ready), `${counts.draft} draft · ${counts.ready} ready to send`)}
+          {stat('unpaid', 'Waiting to be paid', money(r2(money$(unpaid)), base), `${unpaid.length} invoice${unpaid.length === 1 ? '' : 's'}`, Hourglass)}
+          {stat('overdue', 'Overdue', money(r2(money$(overdue)), base), overdue.length ? `${overdue.length} invoice${overdue.length === 1 ? '' : 's'} past due` : 'Nothing is late', AlertCircle, overdue.length ? 'text-danger' : '')}
+          {stat(counts.ready ? 'ready' : 'draft', 'To finish', String(counts.draft + counts.ready), `${counts.draft} draft · ${counts.ready} ready to send`, FileClock)}
         </div>)}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -261,14 +263,15 @@ export default function Invoices() {
         <span>{note.text}</span><button className="opacity-70 hover:opacity-100" aria-label="Dismiss" onClick={() => setNote(null)}><X size={14} /></button></div>}
 
       {rows === null ? <Skeleton className="h-64" /> : (
-        <Table rows={shown} onRow={(r) => openInvoice(r.id)}
+        <Table rows={shown} noun="invoices" onRow={(r) => openInvoice(r.id)}
           empty={all.length === 0 ? (q ? `No invoice matches “${q}”.` : editor ? 'No invoices yet — click “New invoice” to create your first one.' : 'No invoices yet.') : `Nothing in “${TABS.find((t) => t.key === tab)!.label}”${q ? ` matching “${q}”` : ''}.`}
           cols={[
-            { h: 'Number', render: (r) => <span className="num font-medium">{r.number}</span> }, { h: 'Client', render: (r) => r.client_name },
-            { h: 'Due', render: (r) => <><span className="num">{String(r.due_date).slice(0, 10)}</span>{daysLate(r) > 0 && <div className="text-xs text-danger">{daysLate(r)} day{daysLate(r) > 1 ? 's' : ''} late</div>}</> },
+            { h: 'Number', render: (r) => <span className="num font-semibold">{r.number}</span> },
+            { h: 'Client', render: (r) => <div className="flex items-center gap-2.5 min-w-0"><Avatar name={r.client_name ?? '?'} size={28} /><span className="truncate">{r.client_name}</span></div> },
+            { h: 'Due', render: (r) => <><span className="num whitespace-nowrap">{String(r.due_date).slice(0, 10)}</span>{daysLate(r) > 0 && <div className="text-xs text-danger">{daysLate(r)} day{daysLate(r) > 1 ? 's' : ''} late</div>}</> },
             { h: 'Status', render: (r) => <Pill s={shownStatus(r)} /> },
-            { h: 'Total', right: true, render: (r) => money(r.total, r.currency) },
-            { h: 'Balance', right: true, render: (r) => (['draft', 'reviewed', 'void'].includes(r.status) ? <span className="text-muted">—</span> : balance(r) > 0.005 ? <b>{money(balance(r), r.currency)}</b> : <span className="text-success">Paid</span>) },
+            { h: 'Total', right: true, render: (r) => <span className="font-medium">{money(r.total, r.currency)}</span> },
+            { h: 'Balance', right: true, render: (r) => (['draft', 'reviewed', 'void'].includes(r.status) ? <span className="text-muted">—</span> : balance(r) > 0.005 ? <div className="inline-block text-right"><b className={daysLate(r) > 0 ? 'text-danger' : ''}>{money(balance(r), r.currency)}</b>{Number(r.amount_paid) > 0.005 && r.total > 0 && <div className="mt-1 h-1 w-20 overflow-hidden rounded-full bg-surface2" title={`${Math.round((Number(r.amount_paid) / Number(r.total)) * 100)}% paid`}><div className="h-full bg-success" style={{ width: `${Math.min(100, (Number(r.amount_paid) / Number(r.total)) * 100)}%` }} /></div>}</div> : <span className="text-success font-medium">Paid</span>) },
             { h: '', render: (r) => <div className="flex gap-1 justify-end whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
               {finance && r.status === 'draft' && <button className="btn" onClick={() => act(() => api(`/invoices/${r.id}/status`, 'POST', { status: 'reviewed' }), `${r.number} is reviewed and ready to send.`)}>Mark reviewed</button>}
               {finance && r.status === 'reviewed' && <button className="btn" onClick={() => act(() => api(`/invoices/${r.id}/send`, 'POST'), `${r.number} was emailed to ${r.client_name}.`)}>Send</button>}
