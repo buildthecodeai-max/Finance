@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Ban, LockKeyhole, Building2, Check, CheckCircle2, Copy, KeyRound, LogOut, Mail, MonitorSmartphone, Plus, Search, ShieldAlert, ShieldCheck, ShieldOff, UserCog, UserPlus, Users as UsersIcon, X } from 'lucide-react';
+import { Ban, ChevronDown, LockKeyhole, Building2, Check, CheckCircle2, Copy, KeyRound, LogOut, Mail, MonitorSmartphone, Plus, Search, ShieldAlert, ShieldCheck, ShieldOff, UserCog, UserPlus, Users as UsersIcon, X } from 'lucide-react';
 import { api } from '../api';
 import { Avatar, Err, Field, Modal, Pager, Skeleton } from '../components/ui';
 import { PasswordField, passwordOk } from '../components/PasswordField';
@@ -165,62 +165,99 @@ export function PlatformUsers({ me, onOpenAgency, focus, onFocused }: { me: Me; 
 }
 
 /* ---------------------------------------------------------------------------- operators */
+/** Type an email, pick an existing account from the matches. Operators are made from people who already have an account. */
+function AccountPicker({ value, onChange, onPick, picked }: { value: string; onChange(v: string): void; onPick(u: any): void; picked: any }) {
+  const [hits, setHits] = useState<any[]>([]);
+  useEffect(() => {
+    if (picked || value.trim().length < 3) { setHits([]); return; }
+    let live = true; const h = setTimeout(() => api(`/platform/users?q=${encodeURIComponent(value.trim())}`).then((r) => live && setHits(r.rows.filter((x: any) => !x.is_platform_admin).slice(0, 5))).catch(() => live && setHits([])), 250);
+    return () => { live = false; clearTimeout(h); };
+  }, [value, picked]);
+  return (
+    <div className="relative">
+      {picked ? <div className="flex items-center gap-3 rounded-lg border border-accent/40 bg-accent/10 p-2.5"><Avatar name={picked.name} size={34} /><div className="min-w-0 flex-1"><div className="truncate text-sm font-medium">{picked.name}</div><div className="truncate text-xs text-muted">{picked.email}</div></div>
+        {picked.totp_enabled ? <span className="inline-flex items-center gap-1 text-xs text-success"><ShieldCheck size={13} />2FA on</span> : <span className="inline-flex items-center gap-1 text-xs text-warn"><ShieldOff size={13} />2FA off</span>}
+        <button type="button" className="text-muted hover:text-fg" aria-label="Choose someone else" onClick={() => { onPick(null); onChange(''); }}><X size={15} /></button></div>
+        : <><div className="relative"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input className="input pl-8" type="email" autoFocus placeholder="Name or email of an existing account…" value={value} onChange={(e) => onChange(e.target.value)} /></div>
+          {hits.length > 0 && <ul className="mt-1 overflow-hidden rounded-lg border border-line bg-surface shadow-pop" role="listbox">{hits.map((u) => <li key={u.id}><button type="button" role="option" aria-selected="false" className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface2" onClick={() => onPick(u)}><Avatar name={u.name} size={28} /><span className="min-w-0 flex-1"><span className="block truncate text-sm">{u.name}</span><span className="block truncate text-xs text-muted">{u.email}</span></span></button></li>)}</ul>}
+          {value.trim().length >= 3 && !hits.length && <p className="mt-1 text-xs text-muted">No matching account. They need to have signed up first.</p>}</>}
+    </div>
+  );
+}
+
+type OpTab = 'operators' | 'roles';
 export function PlatformOperators({ me }: { me: Me }) {
   const [rows, setRows] = useState<any[] | null>(null); const [dlg, setDlg] = useState<any>(null); const [act, setAct] = useState<Act | null>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<OpTab>('operators'); const [q, setQ] = useState(''); const [roleF, setRoleF] = useState(''); const [menu, setMenu] = useState<number | null>(null); const [roleCounts, setRoleCounts] = useState<any[] | null>(null);
   const load = () => api('/platform/operators').then(setRows).catch((e) => setErr(e.message)); useEffect(() => { load(); }, []);
+  useEffect(() => { api('/platform/agency-roles').then(setRoleCounts).catch(() => setRoleCounts(null)); }, []);
   const run = async (fn: () => Promise<any>, ok: string) => { setBusy(true); try { await fn(); setDlg(null); setErr(''); setMsg(ok); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
-  const [roleCounts, setRoleCounts] = useState<any[] | null>(null); useEffect(() => { api('/platform/agency-roles').then(setRoleCounts).catch(() => setRoleCounts(null)); }, []);
-  const all = rows ?? []; const no2fa = all.filter((r) => !r.totp_enabled && !r.disabled_at);
+  const all = rows ?? []; const active = all.filter((r) => !r.disabled_at); const no2fa = active.filter((r) => !r.totp_enabled); const covered = active.length - no2fa.length; const maxActs = Math.max(1, ...all.map((r) => r.actions_30d));
+  const s = q.trim().toLowerCase(); const shown = all.filter((r) => (!roleF || r.role === roleF) && (!s || `${r.name} ${r.email}`.toLowerCase().includes(s)));
+  const roleTile = (r: (typeof OPERATOR_ROLES)[number]) => { const n = active.filter((o) => o.role === r.key).length; const on = roleF === r.key; return (
+    <button key={r.key} type="button" aria-pressed={on} onClick={() => { setRoleF(on ? '' : r.key); setTab('operators'); }} className={`card glow-card text-left ${on ? 'ring-2 ring-accent' : ''}`} style={{ ['--hue' as any]: `var(--${r.tone})` }}>
+      <div className="flex items-center justify-between"><RolePill role={r.key} /><span className="text-2xl font-bold num">{rows ? n : '—'}</span></div><p className="mt-2 text-xs leading-relaxed text-muted">{r.blurb}</p></button>); };
+  const open = (kind: Act['kind'], r: any) => { setMenu(null); setAct({ kind, user: r }); };
+  const item = (label: string, on: () => void, Icon: any, danger = false) => <button role="menuitem" className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-surface2 ${danger ? 'text-danger' : ''}`} onClick={on}><Icon size={14} className="shrink-0" />{label}</button>;
   return <div className="space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3"><p className="max-w-2xl text-sm text-muted">Give each person the lowest role that lets them do their job. Everything an operator does is written to the audit log with their name and a reason.</p>
-      <button className="btn" onClick={() => { setErr(''); setDlg({ kind: 'add', email: '', role: 'support', reason: '' }); }}><UserPlus size={16} />Add operator</button></div>
+      <button className="btn" onClick={() => { setErr(''); setDlg({ kind: 'add', email: '', picked: null, role: 'support', reason: '' }); }}><UserPlus size={16} />Add operator</button></div>
     {msg && <div role="status" className="flex justify-between gap-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success"><span>{msg}</span><button aria-label="Dismiss" onClick={() => setMsg('')}><X size={14} /></button></div>}
-    {no2fa.length > 0 && <div className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2.5 text-sm text-warn"><ShieldAlert size={16} className="mt-0.5 shrink-0" /><span><b>{no2fa.map((r) => r.name).join(', ')}</b> {no2fa.length === 1 ? 'has' : 'have'} no two-factor sign-in, so the console stays closed to {no2fa.length === 1 ? 'them' : 'them'} until it is turned on.</span></div>}
 
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{OPERATOR_ROLES.map((r) => { const n = all.filter((o) => o.role === r.key && !o.disabled_at).length; return (
-      <div key={r.key} className="card glow-card" style={{ ['--hue' as any]: `var(--${r.tone === 'muted' ? 'muted' : r.tone})` }}>
-        <div className="flex items-center justify-between"><RolePill role={r.key} /><span className="text-2xl font-bold num">{n}</span></div>
-        <p className="mt-2 text-xs leading-relaxed text-muted">{r.blurb}</p></div>); })}</div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{OPERATOR_ROLES.map(roleTile)}
+      <div className="card glow-card" style={{ ['--hue' as any]: `var(--${no2fa.length ? 'warn' : 'success'})` }}>
+        <div className="flex items-center justify-between"><span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: `rgb(var(--${no2fa.length ? 'warn' : 'success'}) / .14)`, color: `rgb(var(--${no2fa.length ? 'warn' : 'success'}))` }}>{no2fa.length ? <ShieldAlert size={11} /> : <ShieldCheck size={11} />}Two-factor</span><span className="text-2xl font-bold num">{rows ? `${covered}/${active.length}` : '—'}</span></div>
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface2"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${active.length ? (covered / active.length) * 100 : 0}%`, background: `rgb(var(--${no2fa.length ? 'warn' : 'success'}))` }} /></div>
+        <p className="mt-2 text-xs leading-relaxed text-muted">{no2fa.length ? `${no2fa.map((r) => r.name).join(', ')} can't open the console until 2FA is on.` : 'Every active operator is protected.'}</p></div></div>
 
-    <div className="card !p-0 overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-line px-4 py-3"><UserCog size={16} className="text-muted" /><span className="text-sm font-semibold">Operators</span><span className="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{all.length}</span></div>
-      {!rows ? <Skeleton className="m-4 h-40" /> : <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>Operator</th><th>Role</th><th>2FA</th><th>Last signed in</th><th className="text-right">Actions (30 d)</th><th /></tr></thead>
-        <tbody>{all.map((r) => { const self = r.email === me.email; return <tr key={r.id} className={r.disabled_at ? 'opacity-60' : ''}>
-          <td><div className="flex items-center gap-3"><Avatar name={r.name} size={34} /><div className="min-w-0"><div className="truncate font-medium">{r.name}{self && <span className="ml-1.5 text-xs font-normal text-muted">(you)</span>}{r.disabled_at && <span className="ml-1.5 rounded-full bg-danger/15 px-1.5 py-0.5 text-[10px] font-medium text-danger">switched off</span>}</div><div className="truncate text-xs text-muted">{r.email}</div></div></div></td>
-          <td><RolePill role={r.role} /></td>
-          <td>{r.totp_enabled ? <span className="inline-flex items-center gap-1 text-xs text-success"><ShieldCheck size={13} />On</span> : <span className="inline-flex items-center gap-1 text-xs text-warn"><ShieldOff size={13} />Off</span>}</td>
-          <td className="whitespace-nowrap text-xs text-muted">{rel(r.last_seen)}</td>
-          <td className="text-right num">{r.actions_30d}</td>
-          <td>{self ? null : <div className="flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap">
-            <button className="btn-ghost !h-8 !px-2.5 text-xs" onClick={() => { setErr(''); setDlg({ kind: 'edit', r, role: r.role, reason: '' }); }}>Change role</button>
-            {r.totp_enabled ? <button className="btn-icon !h-8 !w-8 border border-line" aria-label={`Reset 2FA for ${r.name}`} title="Reset 2FA: remove their authenticator and sign them out" onClick={() => setAct({ kind: 'reset2fa', user: r })}><KeyRound size={14} /></button> : null}
-            <button className="btn-icon !h-8 !w-8 border border-line" aria-label={`Set a password for ${r.name}`} title="Set a password" onClick={() => setAct({ kind: 'setpw', user: r })}><LockKeyhole size={14} /></button>
-            <button className="btn-icon !h-8 !w-8 border border-line" aria-label={`Sign ${r.name} out everywhere`} title="Sign out everywhere" onClick={() => setAct({ kind: 'signout', user: r })}><LogOut size={14} /></button>
-            <button className={`btn-icon !h-8 !w-8 border border-line ${r.disabled_at ? '' : 'text-danger'}`} aria-label={r.disabled_at ? `Switch ${r.name} on` : `Switch ${r.name} off`} title={r.disabled_at ? 'Switch account on' : 'Switch account off'} onClick={() => setAct({ kind: r.disabled_at ? 'enable' : 'disable', user: r })}>{r.disabled_at ? <CheckCircle2 size={14} /> : <Ban size={14} />}</button>
-            <button className="btn-icon !h-8 !w-8 border border-line text-danger" aria-label={`Remove ${r.name} as operator`} title="Remove operator access" onClick={() => { setErr(''); setDlg({ kind: 'revoke', r, reason: '' }); }}><X size={14} /></button></div>}</td></tr>; })}</tbody></table></div>}
-    </div>
+    <div className="flex gap-1 border-b border-line" role="tablist">{([['operators', 'Operators', all.length], ['roles', 'Roles & permissions', 0]] as [OpTab, string, number][]).map(([k, l, n]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`px-3.5 py-2 text-sm ${tab === k ? 'border-b-2 border-accent font-medium text-accent' : 'text-muted hover:text-fg'}`}>{l}{n > 0 && <span className="ml-1.5 rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted num">{n}</span>}</button>)}</div>
 
-    <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-3 text-sm font-semibold">What each role can do</div>
-      <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>Capability</th>{OPERATOR_ROLES.map((r) => <th key={r.key} className="text-center">{r.name}</th>)}</tr></thead>
-        <tbody>{CAP_ROWS.map(([cap, label]) => <tr key={cap}><td className="text-sm">{label}</td>{OPERATOR_ROLES.map((r) => <td key={r.key} className="text-center">{r.caps.includes(cap) ? <Check size={16} className="mx-auto text-success" aria-label="Allowed" /> : <span className="text-muted" aria-label="Not allowed">—</span>}</td>)}</tr>)}</tbody></table></div></div>
+    {tab === 'operators' && <>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[14rem] flex-1 sm:max-w-sm"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input className="input pl-8" aria-label="Search operators" placeholder="Search by name or email…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        {roleF && <button className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent" onClick={() => setRoleF('')}>{OPERATOR_ROLES.find((r) => r.key === roleF)?.name} only<X size={12} /></button>}</div>
+      <Err e={!dlg && !act ? err : ''} />
+      <div className="card !p-0 overflow-hidden">
+        {!rows ? <Skeleton className="m-4 h-40" /> : <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>Operator</th><th>Role</th><th>2FA</th><th>Last signed in</th><th>Actions (30 days)</th><th className="text-right">&nbsp;</th></tr></thead>
+          <tbody>{shown.map((r) => { const self = r.email === me.email; return <tr key={r.id} className={r.disabled_at ? 'opacity-60' : ''}>
+            <td><div className="flex items-center gap-3"><Avatar name={r.name} size={36} /><div className="min-w-0"><div className="truncate font-medium">{r.name}{self && <span className="ml-1.5 rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">You</span>}{r.disabled_at && <span className="ml-1.5 rounded-full bg-danger/15 px-1.5 py-0.5 text-[10px] font-medium text-danger">Switched off</span>}</div><div className="truncate text-xs text-muted">{r.email}</div></div></div></td>
+            <td><RolePill role={r.role} /></td>
+            <td>{r.totp_enabled ? <span className="inline-flex items-center gap-1 text-xs text-success"><ShieldCheck size={13} />On</span> : <span className="inline-flex items-center gap-1 text-xs font-medium text-warn"><ShieldOff size={13} />Off</span>}</td>
+            <td className="whitespace-nowrap text-xs text-muted">{rel(r.last_seen)}</td>
+            <td><div className="flex items-center gap-2"><div className="h-1.5 w-20 overflow-hidden rounded-full bg-surface2"><div className="h-full rounded-full bg-accent" style={{ width: `${Math.max(r.actions_30d ? 6 : 0, (r.actions_30d / maxActs) * 100)}%` }} /></div><span className="num text-sm">{r.actions_30d}</span></div></td>
+            <td className="text-right">{self ? <span className="text-xs text-muted">—</span> : <div className="relative inline-block text-left">
+              <button className="btn-ghost !h-8 !px-3 text-xs" aria-haspopup="menu" aria-expanded={menu === r.id} onClick={() => setMenu(menu === r.id ? null : r.id)}>Manage<ChevronDown size={13} /></button>
+              {menu === r.id && <><button className="fixed inset-0 z-10 cursor-default" aria-label="Close menu" onClick={() => setMenu(null)} />
+                <div role="menu" className="pop-in absolute right-0 top-full z-20 mt-1 w-60 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+                  {item('Change role', () => { setMenu(null); setErr(''); setDlg({ kind: 'edit', r, role: r.role, reason: '' }); }, UserCog)}{item('Set a password', () => open('setpw', r), LockKeyhole)}
+                  {r.totp_enabled ? item('Reset 2FA', () => open('reset2fa', r), KeyRound) : null}{item('Sign out everywhere', () => open('signout', r), LogOut)}
+                  <div className="my-1 border-t border-line" />{item(r.disabled_at ? 'Switch account on' : 'Switch account off', () => open(r.disabled_at ? 'enable' : 'disable', r), r.disabled_at ? CheckCircle2 : Ban, !r.disabled_at)}
+                  {item('Remove operator access', () => { setMenu(null); setErr(''); setDlg({ kind: 'revoke', r, reason: '' }); }, X, true)}</div></>}</div>}</td></tr>; })}</tbody></table>
+          {!shown.length && <div className="px-4 py-12 text-center text-sm text-muted">No operator matches{q ? ` “${q}”` : ''}.</div>}</div>}
+      </div></>}
 
-    <div className="pt-2"><h3 className="text-lg font-semibold">Agency roles</h3>
-      <p className="mt-0.5 max-w-3xl text-sm text-muted">These are the roles inside every customer agency, chosen by that agency's own admin. They never grant access to this console. Open a person under People to see where they work.</p></div>
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{AGENCY_ROLES.map((r) => { const c = roleCounts?.find((x: any) => x.role === r.key); return (
-      <div key={r.key} className="card glow-card" style={{ ['--hue' as any]: `var(--${r.tone})` }}>
-        <div className="flex items-center justify-between"><span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: `rgb(var(--${r.tone}) / .14)`, color: `rgb(var(--${r.tone}))` }}><Building2 size={11} />{r.name}</span><span className="text-2xl font-bold num">{c?.people ?? '—'}</span></div>
-        <p className="mt-2 text-xs leading-relaxed text-muted">{r.blurb}</p><p className="mt-2 text-[11px] text-muted">{c ? `across ${c.agencies} agenc${c.agencies === 1 ? 'y' : 'ies'}` : ' '}</p></div>); })}</div>
-    <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-3 text-sm font-semibold">What each agency role can do</div>
-      <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>Area</th>{AGENCY_ROLES.map((r) => <th key={r.key} className="text-center">{r.name}</th>)}</tr></thead>
-        <tbody>{AGENCY_MATRIX.map(([label, lv]) => <tr key={label}><td className="text-sm">{label}</td>{lv.map((l, i) => <td key={i} className={`text-center text-xs font-medium ${LEVEL[l][1]}`}>{l === 'full' ? <Check size={16} className="mx-auto" aria-label="Full access" /> : LEVEL[l][0]}</td>)}</tr>)}</tbody></table></div></div>
+    {tab === 'roles' && <>
+      <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-3 text-sm font-semibold">What each operator role can do</div>
+        <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>Capability</th>{OPERATOR_ROLES.map((r) => <th key={r.key} className="text-center">{r.name}</th>)}</tr></thead>
+          <tbody>{CAP_ROWS.map(([cap, label]) => <tr key={cap}><td className="text-sm">{label}</td>{OPERATOR_ROLES.map((r) => <td key={r.key} className="text-center">{r.caps.includes(cap) ? <Check size={16} className="mx-auto text-success" aria-label="Allowed" /> : <span className="text-muted" aria-label="Not allowed">—</span>}</td>)}</tr>)}</tbody></table></div></div>
 
-    {dlg && <Modal title={dlg.kind === 'add' ? 'Add operator' : dlg.kind === 'edit' ? `Change role: ${dlg.r.name}` : `Remove ${dlg.r.name}`} onClose={() => setDlg(null)}><Err e={err} />
-      {dlg.kind === 'add' && <Field label="Email of an existing account" hint="They must also turn on 2FA before the console opens for them."><input className="input" type="email" autoFocus value={dlg.email} onChange={(e) => setDlg({ ...dlg, email: e.target.value })} /></Field>}
+      <div className="pt-2"><h3 className="text-lg font-semibold">Agency roles</h3>
+        <p className="mt-0.5 max-w-3xl text-sm text-muted">The roles inside every customer agency, chosen by that agency's own admin. They never grant access to this console. Open a person under People to see where they work.</p></div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{AGENCY_ROLES.map((r) => { const c = roleCounts?.find((x: any) => x.role === r.key); return (
+        <div key={r.key} className="card glow-card" style={{ ['--hue' as any]: `var(--${r.tone})` }}>
+          <div className="flex items-center justify-between"><span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: `rgb(var(--${r.tone}) / .14)`, color: `rgb(var(--${r.tone}))` }}><Building2 size={11} />{r.name}</span><span className="text-2xl font-bold num">{c?.people ?? '—'}</span></div>
+          <p className="mt-2 text-xs leading-relaxed text-muted">{r.blurb}</p><p className="mt-2 text-[11px] text-muted">{c ? `across ${c.agencies} agenc${c.agencies === 1 ? 'y' : 'ies'}` : ' '}</p></div>); })}</div>
+      <div className="card !p-0 overflow-hidden"><div className="border-b border-line px-4 py-3 text-sm font-semibold">What each agency role can do</div>
+        <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>Area</th>{AGENCY_ROLES.map((r) => <th key={r.key} className="text-center">{r.name}</th>)}</tr></thead>
+          <tbody>{AGENCY_MATRIX.map(([label, lv]) => <tr key={label}><td className="text-sm">{label}</td>{lv.map((l, i) => <td key={i} className={`text-center text-xs font-medium ${LEVEL[l][1]}`}>{l === 'full' ? <Check size={16} className="mx-auto" aria-label="Full access" /> : LEVEL[l][0]}</td>)}</tr>)}</tbody></table></div></div></>}
+
+    {dlg && <Modal title={dlg.kind === 'add' ? 'Add an operator' : dlg.kind === 'edit' ? `Change role: ${dlg.r.name}` : `Remove ${dlg.r.name}`} onClose={() => setDlg(null)}><Err e={err} />
+      {dlg.kind === 'add' && <Field label="Who" hint="Pick someone who already has an account. They also need 2FA on before the console opens for them."><AccountPicker value={dlg.email} onChange={(v) => setDlg({ ...dlg, email: v })} picked={dlg.picked} onPick={(u) => setDlg({ ...dlg, picked: u, email: u?.email ?? '' })} /></Field>}
       {dlg.kind === 'revoke' ? <p className="mb-3 text-sm">{dlg.r.email} will no longer be able to open the platform console. Their account is not deleted.</p>
         : <Field label="Role"><div className="space-y-1.5">{OPERATOR_ROLES.map((r) => <label key={r.key} className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 text-sm ${dlg.role === r.key ? 'border-accent bg-accent/10' : 'border-line'}`}><input type="radio" className="mt-1" name="oprole" checked={dlg.role === r.key} onChange={() => setDlg({ ...dlg, role: r.key })} /><span><b>{r.name}</b><span className="block text-xs text-muted">{r.blurb}</span></span></label>)}</div></Field>}
       <Field label="Reason" hint="Kept in the operator audit log."><input className="input" value={dlg.reason} onChange={(e) => setDlg({ ...dlg, reason: e.target.value })} /></Field>
       <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setDlg(null)}>Cancel</button>
-        {dlg.kind === 'add' && <button className="btn" disabled={busy || !dlg.email.includes('@')} onClick={() => run(() => api('/platform/operators', 'POST', { email: dlg.email.trim(), role: dlg.role, reason: dlg.reason }), `${dlg.email} is now an operator.`)}><Plus size={15} />Add operator</button>}
+        {dlg.kind === 'add' && <button className="btn" disabled={busy || !dlg.picked} onClick={() => run(() => api('/platform/operators', 'POST', { email: dlg.picked.email, role: dlg.role, reason: dlg.reason }), `${dlg.picked.name} is now ${dlg.role === 'readonly' ? 'a read-only' : `a ${dlg.role}`} operator.`)}><Plus size={15} />Add operator</button>}
         {dlg.kind === 'edit' && <button className="btn" disabled={busy || dlg.role === dlg.r.role} onClick={() => run(() => api(`/platform/operators/${dlg.r.id}`, 'PUT', { role: dlg.role, reason: dlg.reason }), `${dlg.r.name} is now ${dlg.role}.`)}>Save role</button>}
         {dlg.kind === 'revoke' && <button className="btn !bg-danger" disabled={busy} onClick={() => run(() => api(`/platform/operators/${dlg.r.id}`, 'DELETE', { reason: dlg.reason }), `${dlg.r.name} is no longer an operator.`)}>Remove access</button>}</div></Modal>}
     {act && <ActionDialog act={act} onClose={() => setAct(null)} onDone={(m) => { setAct(null); setMsg(m); load(); }} />}
