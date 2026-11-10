@@ -10,6 +10,7 @@ import { PlatformOperators, PlatformUsers, rel } from './PlatformPeople';
 import { PlatformAudit } from './PlatformAudit';
 import { PlatformSecurity } from './PlatformSecurity';
 import { PlatformSystem } from './PlatformSystem';
+import { PlatformApprovals } from './PlatformApprovals';
 
 const day = (d: any) => (d ? String(d).replace('T', ' ').slice(0, 16) : '—');
 const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api', 'ai_assistant'];
@@ -160,7 +161,7 @@ export default function Platform() {
                     </button>
                   ))}
                 </div>
-                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <PlatformAudit me={me} />}{tab === 'security' && <PlatformSecurity onOpenUser={me.caps.includes('support') ? (id) => { setFocusUser(id); setTab('users'); } : undefined} />}{tab === 'system' && <PlatformSystem />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} focus={focusUser} onFocused={() => setFocusUser(null)} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
+                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <PlatformAudit me={me} />}{tab === 'security' && <PlatformSecurity onOpenUser={me.caps.includes('support') ? (id) => { setFocusUser(id); setTab('users'); } : undefined} />}{tab === 'system' && <PlatformSystem />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} focus={focusUser} onFocused={() => setFocusUser(null)} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <PlatformApprovals me={me} onChange={refreshPending} />}
               </OpCtx.Provider>}
           </div>
         </main>
@@ -859,18 +860,6 @@ function Plans() {
       <aside className="hidden lg:block"><div className="sticky top-0"><div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted">Live preview · what agencies see</div><PlanCard preview p={{ ...edit, price_monthly: edit.price_monthly === '' ? 0 : edit.price_monthly, features: edit.features ?? [] }} tier={Math.max(0, plans.findIndex((x: any) => x.id === edit.id))} /></div></aside></div>
       <div className="flex items-center justify-end gap-3 mt-2">{bad && <span className="text-xs text-warn mr-auto">{bad}</span>}<button className="btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn" disabled={!!bad || busy} onClick={save}>{busy ? 'Saving…' : edit.isNew ? 'Create plan' : 'Save changes'}</button></div></Modal>}
   </>;
-}
-
-function Approvals({ onChange }: { onChange(): void }) {
-  const { me, guarded } = useOp(); const [rows, setRows] = useState<any[]>([]); const [err, setErr] = useState('');
-  const load = () => api('/platform/approvals').then(setRows).catch((e) => setErr(e.message)); useEffect(() => { load(); }, []);
-  const run = async (fn: () => Promise<any>) => { try { await guarded(fn); setErr(''); } catch (e: any) { setErr(e.message); } load(); onChange(); };
-  return <><p className="text-sm text-muted mb-3">Suspensions need a second admin operator. You can't approve your own request; requests expire after 24 hours.</p><Err e={err} />
-    <Table rows={rows} empty="No approval requests" cols={[
-      { h: 'Agency', render: (r: any) => <><div className="font-medium">{r.agency_name}</div><div className="text-xs text-muted">suspend · requested by {r.requested_by_email}</div></> }, { h: 'Reason', render: (r: any) => <>{r.reason}{r.decision_note && <div className="text-xs text-muted">“{r.decision_note}” — {r.decided_by_email}</div>}</> },
-      { h: 'Status', render: (r: any) => <Pill s={r.status === 'approved' ? 'approved' : r.status === 'pending' ? 'pending' : r.status === 'rejected' ? 'rejected' : 'cancelled'} /> }, { h: 'Expires', render: (r: any) => <span className="text-xs num">{day(r.expires_at)}</span> },
-      { h: '', render: (r: any) => r.status !== 'pending' ? '' : r.requested_by_email === me.email ? <button className="btn-ghost" onClick={() => run(() => api(`/platform/approvals/${r.id}/cancel`, 'POST'))}>Cancel request</button> :
-        <div className="flex gap-1 justify-end"><button className="btn" onClick={() => confirm(`Approve suspending ${r.agency_name}? Their workspace becomes read-only immediately.`) && run(() => api(`/platform/approvals/${r.id}/approve`, 'POST', {}))}>Approve</button><button className="btn-ghost" onClick={() => run(() => api(`/platform/approvals/${r.id}/reject`, 'POST', {}))}>Reject</button></div> }]} /></>;
 }
 
 export function AgencyAccessEntry() {
