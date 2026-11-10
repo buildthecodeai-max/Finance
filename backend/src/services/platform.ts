@@ -8,7 +8,8 @@ import { aiStatus, aiUsedThisMonth } from './ai.js';
 import { deliver } from './portal.js';
 import { sendMail } from './email.js';
 import { authenticator } from 'otplib';
-import { decrypt } from '../crypto.js';
+import crypto from 'node:crypto';
+import { decrypt, sha256 } from '../crypto.js';
 import { changeMember, memberWorkload, removeMember } from './records.js';
 
 export type OperatorRole = 'readonly' | 'support' | 'billing' | 'admin';
@@ -29,8 +30,9 @@ export async function platformAuth(req: Request, _res: Response, next: NextFunct
     const h = req.headers.authorization; if (!h?.startsWith('Bearer ')) throw new HttpError(401, 'Missing token');
     let p: any; try { p = jwt.verify(h.slice(7), config.jwtSecret, { algorithms: ['HS256'] }); } catch { throw new HttpError(401, 'Invalid or expired token'); }
     if (p.sup) throw new HttpError(403, 'Support sessions cannot use the platform console');
-    const [[u]]: any = await pool.query('SELECT id, email, is_platform_admin, platform_role, totp_enabled FROM users WHERE id = ?', [Number(p.sub)]);
-    if (!u?.is_platform_admin || !u.platform_role) throw new HttpError(404, 'Not found');   // indistinguishable from a route that does not exist
+    const [[u]]: any = await pool.query('SELECT id, email, is_platform_admin, platform_role, totp_enabled, disabled_at FROM users WHERE id = ?', [Number(p.sub)]);
+    if (!u?.is_platform_admin || !u.platform_role) throw new HttpError(404, 'Not found');
+    if (u.disabled_at) throw new HttpError(401, 'This account has been disabled.');   // indistinguishable from a route that does not exist
     if (!u.totp_enabled && !config.skip2fa) throw Object.assign(new HttpError(403, 'Turn on two-factor authentication for your account before using the platform console.'), { code: 'platform_2fa_required' });
     req.platform = { userId: u.id, email: u.email, role: u.platform_role, caps: ROLE_CAPS[u.platform_role as OperatorRole] };
     next();
@@ -104,7 +106,13 @@ export async function deleteAgency(id: number): Promise<{ name: string; tables: 
   } catch (e) { await conn.rollback(); throw e; }
   finally { conn.release(); }
 }
-export async function listOperators() { const [r]: any = await pool.query('SELECT id, email, name, platform_role role, totp_enabled FROM users WHERE is_platform_admin = 1 ORDER BY platform_role, email'); return r; }
+export async function listOperators() {
+  const [r]: any = await pool.query(`SELECT u.id, u.email, u.name, u.platform_role role, u.totp_enabled, u.disabled_at, u.created_at,
+      (SELECT MAX(t.created_at) FROM refresh_tokens t WHERE t.user_id = u.id) last_seen,
+      (SELECT COUNT(*) FROM platform_audit_log a WHERE a.admin_user_id = u.id AND a.created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)) actions_30d
+    FROM users u WHERE u.is_platform_admin = 1 ORDER BY FIELD(u.platform_role, 'admin', 'billing', 'support', 'readonly'), u.email`);
+  return r;
+}
 
 /** The subscription fields worth showing in an audit before/after diff. */
 const subState = (s: any) => s && ({ status: s.status, plan_id: s.plan_id, billing_interval: s.billing_interval, trial_ends_at: s.trial_ends_at, platform_hold: !!s.platform_hold, is_manual: !!s.is_manual });
@@ -391,4 +399,92 @@ export async function removeAgencyUser(req: Request, agencyId: number, userId: n
   }
   await audit(req, 'agency_user_remove', agencyId, `${m.email} (${m.role}) removed; account ${account}`, o.reason, { before: { role: m.role, email: m.email }, after: { removed: true, account } });
   return { ...out, account };
+}
+
+
+/* ------------------------------------------------------------------ user directory (every account on the platform) */
+export const USER_FILTERS = ['all', 'operators', 'no2fa', 'disabled', 'multi', 'owners'] as const;
+const USER_SIZE = 25;
+
+/** Every account across every agency. Filters answer the questions operators actually ask: who has no 2FA, who is switched off, who works for several agencies. */
+export async function listUsers(q: { q?: string; filter?: string; page?: number }) {
+  const where: string[] = ['1 = 1'], p: any[] = [], page = Math.max(1, q.page ?? 1);
+  const s = (q.q ?? '').trim().replace(/[%_]/g, '');
+  if (s) { where.push('(u.name LIKE ? OR u.email LIKE ? OR EXISTS (SELECT 1 FROM memberships m JOIN agencies a ON a.id = m.agency_id WHERE m.user_id = u.id AND a.name LIKE ?))'); p.push(`%${s}%`, `%${s}%`, `%${s}%`); }
+  const f = q.filter ?? 'all';
+  if (f === 'operators') where.push('u.is_platform_admin = 1');
+  else if (f === 'no2fa') where.push('u.totp_enabled = 0');
+  else if (f === 'disabled') where.push('u.disabled_at IS NOT NULL');
+  else if (f === 'multi') where.push('(SELECT COUNT(*) FROM memberships m WHERE m.user_id = u.id) > 1');
+  else if (f === 'owners') where.push("EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id AND m.role = 'admin')");
+  const w = where.join(' AND ');
+  const [[tot]]: any = await pool.query(`SELECT COUNT(*) n FROM users u WHERE ${w}`, p);
+  const [rows]: any = await pool.query(`SELECT u.id, u.name, u.email, u.totp_enabled, u.is_platform_admin, u.platform_role, u.disabled_at, u.created_at,
+      (SELECT MAX(t.created_at) FROM refresh_tokens t WHERE t.user_id = u.id) last_seen FROM users u WHERE ${w} ORDER BY u.created_at DESC, u.id DESC LIMIT ? OFFSET ?`, [...p, USER_SIZE, (page - 1) * USER_SIZE]);
+  const ids = rows.map((r: any) => r.id);
+  const [ms]: any = ids.length ? await pool.query('SELECT m.user_id, m.agency_id, a.name agency_name, m.role FROM memberships m JOIN agencies a ON a.id = m.agency_id WHERE m.user_id IN (?) ORDER BY a.name', [ids]) : [[]];
+  const [[c]]: any = await pool.query('SELECT COUNT(*) users, SUM(totp_enabled = 0) no2fa, SUM(disabled_at IS NOT NULL) disabled, SUM(is_platform_admin = 1) operators FROM users');
+  return { rows: rows.map((r: any) => ({ ...r, memberships: ms.filter((m: any) => m.user_id === r.id) })), total: tot.n, page, page_size: USER_SIZE,
+    counts: { users: Number(c.users), no2fa: Number(c.no2fa ?? 0), disabled: Number(c.disabled ?? 0), operators: Number(c.operators ?? 0) } };
+}
+
+async function userOrThrow(id: number) {
+  const [[u]]: any = await pool.query('SELECT id, name, email, totp_enabled, is_platform_admin, platform_role, disabled_at, disabled_reason, created_at FROM users WHERE id = ?', [id]);
+  if (!u) throw new HttpError(404, 'User not found'); return u;
+}
+const revokeSessions = async (userId: number) => ((await pool.query('UPDATE refresh_tokens SET revoked = 1, revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP()) WHERE user_id = ? AND revoked = 0', [userId])) as any)[0].affectedRows as number;
+const notSelf = (req: Request, id: number, what: string) => { if (id === req.platform!.userId) throw new HttpError(409, `You cannot ${what} your own account. Ask another admin operator.`); };
+
+export async function userDetail(id: number) {
+  const u = await userOrThrow(id);
+  const [memberships]: any = await pool.query('SELECT m.agency_id, a.name agency_name, m.role, m.branch_id FROM memberships m JOIN agencies a ON a.id = m.agency_id WHERE m.user_id = ? ORDER BY a.name', [id]);
+  const [[seen]]: any = await pool.query('SELECT MAX(created_at) last_seen, SUM(revoked = 0 AND expires_at > UTC_TIMESTAMP()) live FROM refresh_tokens WHERE user_id = ?', [id]);
+  const [events]: any = await pool.query('SELECT event, detail, ip, created_at FROM security_events WHERE user_id = ? ORDER BY id DESC LIMIT 15', [id]);
+  const [[reset]]: any = await pool.query('SELECT COUNT(*) n FROM password_resets WHERE user_id = ? AND used_at IS NULL AND expires_at > UTC_TIMESTAMP()', [id]);
+  return { user: u, memberships, last_seen: seen.last_seen, live_sessions: Number(seen.live ?? 0), events, reset_pending: reset.n > 0 };
+}
+
+/** Clears 2FA for someone who lost their device, and signs them out. They must set it up again (operators cannot use the console until they do). */
+export async function resetUserTwoFactor(req: Request, id: number, reason: string) {
+  notSelf(req, id, 'reset 2FA on'); const u = await userOrThrow(id);
+  if (!u.totp_enabled) throw new HttpError(409, 'This user has not turned on 2FA.');
+  await pool.query('UPDATE users SET totp_enabled = 0, totp_secret_enc = NULL, totp_last_step = NULL WHERE id = ?', [id]);
+  const ended = await revokeSessions(id);
+  await audit(req, 'reset_user_2fa', null, `${u.email}: 2FA cleared, ${ended} session(s) ended`, reason, { before: { totp_enabled: true }, after: { totp_enabled: false } });
+  return { email: u.email, sessions_ended: ended };
+}
+
+export async function signOutUserEverywhere(req: Request, id: number, reason: string) {
+  const u = await userOrThrow(id); const ended = await revokeSessions(id);
+  await audit(req, 'sign_out_user', null, `${u.email}: ${ended} session(s) ended`, reason);
+  return { email: u.email, sessions_ended: ended };
+}
+
+/** Switches an account off (sign-in refused, sessions ended) or back on. Nothing is deleted. */
+export async function setUserDisabled(req: Request, id: number, disabled: boolean, reason: string) {
+  notSelf(req, id, disabled ? 'disable' : 'enable'); const u = await userOrThrow(id);
+  if (disabled && u.disabled_at) throw new HttpError(409, 'This account is already disabled.');
+  if (!disabled && !u.disabled_at) throw new HttpError(409, 'This account is not disabled.');
+  if (disabled && u.is_platform_admin && u.platform_role === 'admin') {
+    const [[n]]: any = await pool.query("SELECT COUNT(*) n FROM users WHERE is_platform_admin = 1 AND platform_role = 'admin' AND disabled_at IS NULL AND id <> ?", [id]);
+    if (!n.n) throw new HttpError(409, 'This is the last active admin operator. Make someone else an admin first.');
+  }
+  await pool.query('UPDATE users SET disabled_at = ?, disabled_reason = ? WHERE id = ?', [disabled ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null, disabled ? reason.slice(0, 300) : null, id]);
+  const ended = disabled ? await revokeSessions(id) : 0;
+  await audit(req, disabled ? 'disable_user' : 'enable_user', null, `${u.email}${disabled ? `: ${ended} session(s) ended` : ''}`, reason);
+  return { email: u.email, disabled, sessions_ended: ended };
+}
+
+/** Emails the user a one-time password reset link (same link the "forgot password" page sends). Without an email service in development, the link is returned so the operator can pass it on. */
+export async function sendUserPasswordReset(req: Request, id: number, reason: string) {
+  const u = await userOrThrow(id);
+  const [[recent]]: any = await pool.query('SELECT COUNT(*) n FROM password_resets WHERE user_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)', [id]);
+  if (recent.n >= 3) throw new HttpError(429, 'Three reset links were already sent in the last hour. Try again later.');
+  const token = crypto.randomBytes(32).toString('base64url');
+  await pool.query('UPDATE password_resets SET used_at = UTC_TIMESTAMP() WHERE user_id = ? AND used_at IS NULL', [id]);
+  await pool.query('INSERT INTO password_resets (user_id, token_hash, expires_at, ip) VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 MINUTE),?)', [id, sha256(token), req.ip ?? null]);
+  const link = `${config.appUrl}/reset-password/${token}`;
+  void sendMail(u.email, 'Reset your Travel CRM password', `<p>Hi ${String(u.name).replace(/</g, '&lt;')},</p><p>An administrator sent you a link to choose a new password: <a href="${link}">Choose a new password</a>. It works once and expires in 30 minutes.</p>`);
+  await audit(req, 'send_user_password_reset', null, u.email, reason);
+  return { email: u.email, expires_minutes: 30, ...(!config.isProd && !config.sendgridKey ? { link } : {}) };
 }

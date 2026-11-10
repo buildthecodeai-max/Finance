@@ -19,6 +19,16 @@ platformRouter.get('/operators', P.needs('suspend'), async (_req, res) => res.js
 platformRouter.post('/operators', P.needs('suspend'), async (req, res) => { const b = parse(Reason.extend({ email: z.string().email(), role: z.enum(['readonly', 'support', 'billing', 'admin']) }), req.body); res.status(201).json(await P.addOperator(req, b.email, b.role, b.reason)); });
 platformRouter.put('/operators/:id', P.needs('suspend'), async (req, res) => { const b = parse(Reason.extend({ role: z.enum(['readonly', 'support', 'billing', 'admin']) }), req.body); res.json(await P.setOperatorRole(req, idParam(req), b.role, b.reason)); });
 platformRouter.delete('/operators/:id', P.needs('suspend'), async (req, res) => { const b = parse(Reason, req.body ?? {}); res.json(await P.setOperatorRole(req, idParam(req), null, b.reason)); });
+// ---- user directory: every account on the platform. Reading needs 'support'; changing needs 'suspend'; every read of a person's detail and every change is audited.
+const Why = z.object({ reason: z.string().trim().min(3, 'Say why you are doing this.').max(300) });
+const UId = (req: any) => { const n = Number(req.params.id); if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Bad user id'); return n; };
+platformRouter.get('/users', P.needs('support'), async (req, res) => res.json(await P.listUsers(parse(z.object({ q: z.string().max(100).optional(), filter: z.enum(P.USER_FILTERS).optional(), page: z.coerce.number().int().min(1).optional() }), req.query))));
+platformRouter.get('/users/:id', P.needs('support'), async (req, res) => { const d = await P.userDetail(UId(req)); await P.audit(req, 'view_user', null, d.user.email); res.json(d); });
+platformRouter.post('/users/:id/reset-2fa', P.needs('suspend'), async (req, res) => res.json(await P.resetUserTwoFactor(req, UId(req), parse(Why, req.body).reason)));
+platformRouter.post('/users/:id/sign-out', P.needs('suspend'), async (req, res) => res.json(await P.signOutUserEverywhere(req, UId(req), parse(Why, req.body).reason)));
+platformRouter.post('/users/:id/disable', P.needs('suspend'), async (req, res) => res.json(await P.setUserDisabled(req, UId(req), true, parse(Why, req.body).reason)));
+platformRouter.post('/users/:id/enable', P.needs('suspend'), async (req, res) => res.json(await P.setUserDisabled(req, UId(req), false, parse(Why, req.body).reason)));
+platformRouter.post('/users/:id/password-reset', P.needs('suspend'), async (req, res) => res.json(await P.sendUserPasswordReset(req, UId(req), parse(Why, req.body).reason)));
 const UserId = (req: any) => { const n = Number(req.params.userId); if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Bad user id'); return n; };
 platformRouter.put('/agencies/:id/users/:userId', P.needs('suspend'), async (req, res) => { const b = parse(Reason.extend({ name: z.string().trim().min(1).max(100).optional(), email: z.string().email().optional(), role: z.enum(['admin', 'finance_manager', 'agent', 'viewer']).optional() }), req.body); const { reason, ...patch } = b; await P.editAgencyUser(req, idParam(req), UserId(req), patch, reason); res.json({ ok: true }); });
 platformRouter.get('/agencies/:id/users/:userId/workload', P.needs('suspend'), async (req, res) => res.json(await P.agencyUserWorkload(idParam(req), UserId(req))));

@@ -6,6 +6,7 @@ import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Avatar, Err, Field, Modal, Pill, Table } from '../components/ui';
 import { ThemeMenuButton } from '../components/ThemeToggle';
+import { PlatformOperators, PlatformUsers } from './PlatformPeople';
 
 const day = (d: any) => (d ? String(d).replace('T', ' ').slice(0, 16) : '—');
 const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api', 'ai_assistant'];
@@ -20,12 +21,12 @@ type Cap = 'read' | 'support' | 'billing' | 'suspend';
 interface Me { email: string; role: string; caps: Cap[] }
 const OpCtx = createContext<{ me: Me; guarded<T>(fn: () => Promise<T>): Promise<T> }>(null as any);
 const useOp = () => useContext(OpCtx);
-type Tab = 'dashboard' | 'overview' | 'agencies' | 'plans' | 'audit' | 'security' | 'system' | 'operators' | 'approvals';
+type Tab = 'dashboard' | 'overview' | 'agencies' | 'users' | 'plans' | 'audit' | 'security' | 'system' | 'operators' | 'approvals';
 
-const TAB_ICON: Record<string, any> = { dashboard: LayoutDashboard, overview: Activity, agencies: Building2, plans: Layers, audit: ScrollText, approvals: CheckSquare, operators: Users, security: ShieldAlert, system: Server };
+const TAB_ICON: Record<string, any> = { dashboard: LayoutDashboard, overview: Activity, agencies: Building2, users: Users, plans: Layers, audit: ScrollText, approvals: CheckSquare, operators: Users, security: ShieldAlert, system: Server };
 const TAB_HEAD: Record<string, [string, string]> = {
   dashboard: ['Dashboard', 'The whole platform at a glance: revenue, trials, agencies and what needs attention.'], overview: ['Overview', 'Fleet-wide usage and health.'],
-  agencies: ['Agencies', 'Every customer agency, its plan and status.'], plans: ['Plans', 'Prices, limits and features customers can choose from.'],
+  agencies: ['Agencies', 'Every customer agency, its plan and status.'], users: ['People', 'Every account on the platform: find anyone, see where they work, and reset, sign out or switch off an account.'], plans: ['Plans', 'Prices, limits and features customers can choose from.'],
   audit: ['Operator audit', 'Every operator action, kept as an append-only record.'], approvals: ['Approvals', 'Suspensions that need a second operator.'],
   operators: ['Operators', 'Who can use this console, and what they can do.'], security: ['Security events', 'Sign-in and access events across all agencies.'], system: ['System', 'Service health and background jobs.'],
 };
@@ -91,13 +92,13 @@ export default function Platform() {
 
   // Sidebar nav groups (desktop)
   const navGroups: { label: string; items: [Tab, string][] }[] = me ? [
-    { label: 'Main', items: [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies']] },
+    { label: 'Main', items: [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies'], ...(me.caps.includes('support') ? [['users', 'People']] as [Tab, string][] : [])] },
     { label: 'Operations', items: [['plans', 'Plans'], ['audit', 'Operator audit'], ...(me.caps.includes('suspend') ? [['approvals', 'Approvals'], ['operators', 'Operators']] as [Tab, string][] : [])] },
     { label: 'System', items: [['security', 'Security events'], ['system', 'System']] },
   ] : [];
 
   // Mobile flat tab list
-  const allTabs: [Tab, string][] = [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies'], ['plans', 'Plans'], ['audit', 'Operator audit'], ['security', 'Security events'], ['system', 'System'], ...(me?.caps.includes('suspend') ? [['approvals', 'Approvals'], ['operators', 'Operators']] as [Tab, string][] : [])];
+  const allTabs: [Tab, string][] = [['dashboard', 'Dashboard'], ['overview', 'Overview'], ['agencies', 'Agencies'], ...(me?.caps.includes('support') ? [['users', 'People']] as [Tab, string][] : []), ['plans', 'Plans'], ['audit', 'Operator audit'], ['security', 'Security events'], ['system', 'System'], ...(me?.caps.includes('suspend') ? [['approvals', 'Approvals'], ['operators', 'Operators']] as [Tab, string][] : [])];
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -156,7 +157,7 @@ export default function Platform() {
                     </button>
                   ))}
                 </div>
-                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <Operators />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
+                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
               </OpCtx.Provider>}
           </div>
         </main>
@@ -780,29 +781,6 @@ function Approvals({ onChange }: { onChange(): void }) {
       { h: 'Status', render: (r: any) => <Pill s={r.status === 'approved' ? 'approved' : r.status === 'pending' ? 'pending' : r.status === 'rejected' ? 'rejected' : 'cancelled'} /> }, { h: 'Expires', render: (r: any) => <span className="text-xs num">{day(r.expires_at)}</span> },
       { h: '', render: (r: any) => r.status !== 'pending' ? '' : r.requested_by_email === me.email ? <button className="btn-ghost" onClick={() => run(() => api(`/platform/approvals/${r.id}/cancel`, 'POST'))}>Cancel request</button> :
         <div className="flex gap-1 justify-end"><button className="btn" onClick={() => confirm(`Approve suspending ${r.agency_name}? Their workspace becomes read-only immediately.`) && run(() => api(`/platform/approvals/${r.id}/approve`, 'POST', {}))}>Approve</button><button className="btn-ghost" onClick={() => run(() => api(`/platform/approvals/${r.id}/reject`, 'POST', {}))}>Reject</button></div> }]} /></>;
-}
-
-const OP_ROLES: [string, string][] = [['readonly', 'Read-only: look at everything'], ['support', 'Support: read-only customer sessions'], ['billing', 'Billing: trials, plans, invoiced access'], ['admin', 'Admin: everything, incl. users and suspensions']];
-function Operators() {
-  const { me } = useOp(); const [rows, setRows] = useState<any[]>([]); const [dlg, setDlg] = useState<any>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false);
-  const load = () => api('/platform/operators').then(setRows); useEffect(() => { load(); }, []);
-  const run = async (fn: () => Promise<any>, ok: string) => { setBusy(true); try { await fn(); setDlg(null); setErr(''); setMsg(ok); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
-  return <>
-    <div className="flex flex-wrap items-center justify-between gap-2 mb-4"><p className="text-sm text-muted max-w-2xl">Operators can use this console. An admin operator can add one (the person needs an account first), change a role, or end their operator access. Their account and agency access stay as they are.</p>
-      <button className="btn" onClick={() => { setErr(''); setDlg({ kind: 'add', email: '', role: 'support', reason: '' }); }}>Add operator</button></div>
-    {msg && <div role="status" className="text-sm text-accent mb-3">{msg}</div>}
-    <Table rows={rows} cols={[{ h: 'Operator', render: (r: any) => <>{r.name}{r.email === me.email && <span className="ml-1.5 text-xs text-muted">(you)</span>}<div className="text-xs text-muted">{r.email}</div></> }, { h: 'Role', render: (r: any) => <span className="capitalize">{r.role}</span> }, { h: '2FA', render: (r: any) => (r.totp_enabled ? '✓' : <span className="text-danger">off</span>) },
-      { h: '', render: (r: any) => r.email === me.email ? '' : <div className="flex justify-end gap-1"><button className="btn-ghost !py-0.5 !px-2 text-xs" onClick={() => { setErr(''); setDlg({ kind: 'edit', r, role: r.role, reason: '' }); }}>Change role</button><button className="btn-ghost !py-0.5 !px-2 text-xs text-danger" onClick={() => { setErr(''); setDlg({ kind: 'revoke', r, reason: '' }); }}>Revoke</button></div> }]} />
-    {dlg && <Modal title={dlg.kind === 'add' ? 'Add operator' : dlg.kind === 'edit' ? `Change role: ${dlg.r.name}` : `Revoke ${dlg.r.name}`} onClose={() => setDlg(null)}><Err e={err} />
-      {dlg.kind === 'add' && <Field label="Email of an existing account" hint="They must also turn on 2FA before the console opens for them."><input className="input" type="email" value={dlg.email} onChange={(e) => setDlg({ ...dlg, email: e.target.value })} /></Field>}
-      {dlg.kind === 'revoke' ? <p className="text-sm mb-3">{dlg.r.email} will no longer be able to open the platform console. Their account is not deleted.</p>
-        : <Field label="Operator role"><div className="space-y-1.5">{OP_ROLES.map(([k, l]) => <label key={k} className="flex items-center gap-2 text-sm"><input type="radio" name="oprole" checked={dlg.role === k} onChange={() => setDlg({ ...dlg, role: k })} />{l}</label>)}</div></Field>}
-      <Field label="Reason" hint="Kept in the operator audit log."><input className="input" value={dlg.reason} onChange={(e) => setDlg({ ...dlg, reason: e.target.value })} /></Field>
-      <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={() => setDlg(null)}>Cancel</button>
-        {dlg.kind === 'add' && <button className="btn" disabled={busy || !dlg.email.includes('@')} onClick={() => run(() => api('/platform/operators', 'POST', { email: dlg.email.trim(), role: dlg.role, reason: dlg.reason }), `${dlg.email} is now an operator.`)}>Add operator</button>}
-        {dlg.kind === 'edit' && <button className="btn" disabled={busy || dlg.role === dlg.r.role} onClick={() => run(() => api(`/platform/operators/${dlg.r.id}`, 'PUT', { role: dlg.role, reason: dlg.reason }), `${dlg.r.name} is now ${dlg.role}.`)}>Save role</button>}
-        {dlg.kind === 'revoke' && <button className="btn !bg-danger" disabled={busy} onClick={() => run(() => api(`/platform/operators/${dlg.r.id}`, 'DELETE', { reason: dlg.reason }), `${dlg.r.name} is no longer an operator.`)}>Revoke access</button>}</div></Modal>}
-  </>;
 }
 
 function Audit() { const [rows, setRows] = useState<any[]>([]); useEffect(() => { api('/platform/audit').then(setRows); }, []);

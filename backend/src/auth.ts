@@ -42,7 +42,8 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     return next();
   }
   const [rows]: any = await pool.query(
-    'SELECT role, branch_id FROM memberships WHERE user_id = ? AND agency_id = ?', [userId, agencyId]);
+    'SELECT m.role, m.branch_id, u.disabled_at FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.user_id = ? AND m.agency_id = ?', [userId, agencyId]);
+  if (rows.length && rows[0].disabled_at) throw new HttpError(401, 'This account has been disabled. Contact support.');
   if (!rows.length) {
     await pool.query('INSERT INTO security_events (agency_id, user_id, ip, event, detail) VALUES (?,?,?,?,?)', [agencyId, userId, req.ip, 'agency_access_denied', `${req.method} ${req.originalUrl}`.slice(0, 500)]);
     throw new HttpError(403, 'No access to this agency');

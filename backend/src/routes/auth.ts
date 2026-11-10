@@ -72,6 +72,7 @@ authRouter.post('/login', async (req, res) => {
   // Always run bcrypt to keep timing uniform
   const ok = await bcrypt.compare(b.password, u?.password_hash ?? '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali');
   if (!u || !ok) return fail('Invalid credentials');
+  if (u.disabled_at) return void res.status(403).json({ error: 'This account has been disabled. Contact support.' });     // only said once the password is right
   if (u.totp_enabled && !config.skip2fa) {
     if (!b.totp) return void res.status(401).json({ error: 'TOTP required', totpRequired: true });   // password was right; not counted as a failure
     if (!(await verifyTotp(u.id, b.totp))) return fail('Invalid 2FA code');   // a code works once, even within its 30 s window
@@ -93,6 +94,8 @@ authRouter.post('/refresh', async (req, res) => {
     if (old) await pool.query('UPDATE refresh_tokens SET revoked = 1, revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP()) WHERE user_id = ? AND revoked = 0', [old.user_id]);
     throw new HttpError(401, 'Session expired');
   }
+  const [[dis]]: any = await pool.query('SELECT disabled_at FROM users WHERE id = ?', [rows[0].user_id]);
+  if (dis?.disabled_at) { await pool.query('UPDATE refresh_tokens SET revoked = 1, revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP()) WHERE user_id = ? AND revoked = 0', [rows[0].user_id]); throw new HttpError(401, 'Session expired'); }
   const [claimed]: any = await pool.query('UPDATE refresh_tokens SET revoked = 1, revoked_at = UTC_TIMESTAMP() WHERE id = ? AND revoked = 0', [rows[0].id]);
   if (claimed.affectedRows === 0) throw new HttpError(401, 'Session expired');
   await issueRefresh(res, rows[0].user_id);

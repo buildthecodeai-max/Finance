@@ -1,0 +1,97 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { authenticator } from 'otplib';
+import { PASSWORD, apiBase, boot, shutdown, sql } from './helpers.js';
+import { OperatorRole, setPlatformAdmin } from '../services/platform.js';
+
+let base: string; const rnd = () => Math.random().toString(36).slice(2, 7);
+const call = async (token: string | null, method: string, path: string, body?: unknown, cookie?: string) => {
+  const r = await fetch(`${base}/api${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...(cookie ? { cookie } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const t = await r.text(); let j: any; try { j = JSON.parse(t); } catch { j = t; } return { status: r.status, body: j, cookie: (r.headers.get('set-cookie') ?? '').split(';')[0] };
+};
+/** a person with their own agency and a real login */
+async function person(label = 'Pat') {
+  const email = `${label.toLowerCase()}-${rnd()}@users.test`, r = await call(null, 'POST', '/auth/register', { agencyName: `${label} Travel ${rnd()}`, name: label, email, password: PASSWORD });
+  return { email, token: r.body.accessToken as string, id: r.body.user.id as number, agencyId: r.body.agencies[0].id as number, cookie: r.cookie };
+}
+async function operator(role: OperatorRole = 'admin') {
+  const p = await person('Op'); await setPlatformAdmin(p.email, role);
+  const s = await call(p.token, 'POST', '/auth/2fa/setup', {}); await call(p.token, 'POST', '/auth/2fa/enable', { code: authenticator.generate(s.body.secret) }); return { ...p, secret: s.body.secret as string };
+}
+let op: Awaited<ReturnType<typeof operator>>;
+const P = (method: string, path: string, body?: unknown) => call(op.token, method, `/platform${path}`, body);
+beforeAll(async () => { await boot(); base = apiBase().replace(/\/api$/, ''); op = await operator('admin'); });
+afterAll(shutdown);
+
+describe('user directory', () => {
+  it('searches and filters every account, shows memberships, needs the support capability, and audits a look at one person', async () => {
+    const a = await person('Alice'); const b = await person('Bob');
+    const r = await P('GET', `/users?q=${encodeURIComponent(a.email)}`); expect(r.status).toBe(200);
+    expect(r.body.rows).toHaveLength(1); expect(r.body.rows[0]).toMatchObject({ email: a.email, totp_enabled: 0, disabled_at: null }); expect(r.body.rows[0].memberships[0]).toMatchObject({ agency_id: a.agencyId, role: 'admin' });
+    expect((await P('GET', `/users?q=${encodeURIComponent(`Bob Travel`)}`)).body.rows.some((x: any) => x.id === b.id)).toBe(true);          // finds people by their agency's name too
+    expect((await P('GET', '/users?filter=operators')).body.rows.every((x: any) => x.is_platform_admin)).toBe(true);
+    expect((await P('GET', '/users?filter=no2fa')).body.rows.every((x: any) => !x.totp_enabled)).toBe(true);
+    expect((await P('GET', '/users')).body.counts.users).toBeGreaterThan(2); expect((await P('GET', '/users?filter=bogus')).status).toBe(400);
+    const d = await P('GET', `/users/${a.id}`); expect(d.status).toBe(200); expect(d.body.user.email).toBe(a.email); expect(d.body.memberships).toHaveLength(1);
+    expect((await sql("SELECT COUNT(*) n FROM platform_audit_log WHERE action = 'view_user' AND detail = ?", [a.email]))[0].n).toBe(1);
+    const ro = await operator('readonly'); expect((await call(ro.token, 'GET', '/platform/users')).status).toBe(403);                         // read-only operators cannot browse people
+    expect((await call(a.token, 'GET', '/platform/users')).status).toBe(404);                                                                  // an ordinary admin cannot see the console exists
+    expect((await P('GET', '/users/999999')).status).toBe(404);
+  });
+});
+
+describe('switching an account off and on', () => {
+  it('refuses sign-in, ends live sessions and tokens at once, and restores access when switched back on', async () => {
+    const u = await person('Dana');
+    expect((await call(u.token, 'GET', '/clients', undefined)).status).toBe(400);                 // sanity: needs X-Agency-Id, token itself is fine
+    const withAgency = (t: string, a: number) => fetch(`${base}/api/clients`, { headers: { authorization: `Bearer ${t}`, 'x-agency-id': String(a) } }).then((x) => x.status);
+    expect(await withAgency(u.token, u.agencyId)).toBe(200);
+    expect((await P('POST', `/users/${u.id}/disable`, {})).status).toBe(400);                      // a reason is required
+    const off = await P('POST', `/users/${u.id}/disable`, { reason: 'Chargeback dispute' }); expect(off.status).toBe(200); expect(off.body.disabled).toBe(true);
+    expect(await withAgency(u.token, u.agencyId)).toBe(401);                                       // the token they already hold stops working immediately
+    const login = await call(null, 'POST', '/auth/login', { email: u.email, password: PASSWORD }); expect(login.status).toBe(403); expect(login.body.error).toMatch(/disabled/);
+    expect((await call(null, 'POST', '/auth/login', { email: u.email, password: 'wrong-password-123' })).status).toBe(401);          // a wrong password does not reveal the account is disabled
+    expect((await call(null, 'POST', '/auth/refresh', {}, u.cookie)).status).toBe(401);
+    expect((await P('POST', `/users/${u.id}/disable`, { reason: 'again please' })).status).toBe(409);
+    expect((await P('GET', `/users?filter=disabled`)).body.rows.some((x: any) => x.id === u.id)).toBe(true);
+    const on = await P('POST', `/users/${u.id}/enable`, { reason: 'Dispute resolved' }); expect(on.status).toBe(200);
+    expect((await call(null, 'POST', '/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
+    expect((await sql("SELECT action FROM platform_audit_log WHERE detail LIKE ? ORDER BY id", [`${u.email}%`])).map((r) => r.action)).toEqual(['disable_user', 'enable_user']);
+  });
+  it('never lets an operator switch themselves off', async () => {
+    expect((await P('POST', `/users/${op.id}/disable`, { reason: 'oops, myself' })).status).toBe(409);
+    expect((await P('POST', `/users/${op.id}/enable`, { reason: 'myself, enabling' })).status).toBe(409);
+  });
+  it('a disabled operator cannot open the console', async () => {
+    const o2 = await operator('support'); await sql('UPDATE users SET disabled_at = UTC_TIMESTAMP() WHERE id = ?', [o2.id]);
+    expect((await call(o2.token, 'GET', '/platform/me')).status).toBe(401);
+  });
+});
+
+describe('other account actions', () => {
+  it('resets 2FA (and signs them out), signs a user out everywhere, and cannot target yourself', async () => {
+    const u = await person('Eli'); const s = await call(u.token, 'POST', '/auth/2fa/setup', {}); await call(u.token, 'POST', '/auth/2fa/enable', { code: authenticator.generate(s.body.secret) });
+    expect((await call(null, 'POST', '/auth/login', { email: u.email, password: PASSWORD })).body.totpRequired).toBe(true);
+    expect((await P('POST', `/users/${u.id}/reset-2fa`, { reason: '' })).status).toBe(400);
+    const r = await P('POST', `/users/${u.id}/reset-2fa`, { reason: 'Lost phone, identity checked' }); expect(r.status).toBe(200);
+    expect((await call(null, 'POST', '/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);              // no code needed any more
+    expect((await P('POST', `/users/${u.id}/reset-2fa`, { reason: 'twice in a row' })).status).toBe(409);
+    expect((await P('POST', `/users/${op.id}/reset-2fa`, { reason: 'my own device' })).status).toBe(409);
+    const so = await P('POST', `/users/${u.id}/sign-out`, { reason: 'Shared computer' }); expect(so.status).toBe(200); expect(so.body.sessions_ended).toBeGreaterThan(0);
+    expect((await sql('SELECT COUNT(*) n FROM refresh_tokens WHERE user_id = ? AND revoked = 0', [u.id]))[0].n).toBe(0);
+    const d = await P('GET', `/users/${u.id}`); expect(d.body.live_sessions).toBe(0);
+  });
+  it('sends a one-time password link that really works, and only the newest link is valid', async () => {
+    const u = await person('Fay');
+    const a = await P('POST', `/users/${u.id}/password-reset`, { reason: 'Locked out' }); expect(a.status).toBe(200); expect(a.body.link).toMatch(/\/reset-password\//);      // no email service in tests, so the link is handed to the operator
+    const b = await P('POST', `/users/${u.id}/password-reset`, { reason: 'Locked out again' });
+    const tok = (l: string) => l.split('/reset-password/')[1];
+    expect((await call(null, 'POST', '/auth/reset', { token: tok(a.body.link), password: 'BrandNew#Pass2026' })).status).toBe(400);   // superseded
+    expect((await call(null, 'POST', '/auth/reset', { token: tok(b.body.link), password: 'BrandNew#Pass2026' })).status).toBe(200);
+    expect((await call(null, 'POST', '/auth/login', { email: u.email, password: 'BrandNew#Pass2026' })).status).toBe(200);
+    await P('POST', `/users/${u.id}/password-reset`, { reason: 'third link' }); expect((await P('POST', `/users/${u.id}/password-reset`, { reason: 'fourth link' })).status).toBe(429);
+  });
+  it('lists operators with 2FA, last seen and recent activity', async () => {
+    const r = await P('GET', '/operators'); const me = r.body.find((x: any) => x.id === op.id);
+    expect(me).toMatchObject({ email: op.email, role: 'admin', totp_enabled: 1, disabled_at: null }); expect(me.last_seen).toBeTruthy(); expect(typeof me.actions_30d).toBe('number');
+  });
+});

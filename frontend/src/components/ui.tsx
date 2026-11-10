@@ -52,7 +52,7 @@ function pageList(cur: number, pages: number): (number | null)[] {
 }
 
 /** Page controls under a table: which rows are showing, previous/next, numbered pages and how many rows per page (remembered across pages and visits). */
-export function Pager({ total, page, size, onPage, onSize, noun = 'results' }: { total: number; page: number; size: number; onPage(p: number): void; onSize(n: number): void; noun?: string }) {
+export function Pager({ total, page, size, onPage, onSize, noun = 'results' }: { total: number; page: number; size: number; onPage(p: number): void; onSize?(n: number): void; noun?: string }) {
   const pages = Math.max(1, Math.ceil(total / size)), from = total ? page * size + 1 : 0, to = Math.min(total, (page + 1) * size);
   const btn = 'h-8 min-w-8 px-2 rounded-lg border text-sm transition disabled:opacity-40 disabled:cursor-not-allowed';
   return (
@@ -64,8 +64,8 @@ export function Pager({ total, page, size, onPage, onSize, noun = 'results' }: {
           : <button key={n} type="button" aria-label={`Page ${n + 1}`} aria-current={n === page ? 'page' : undefined} onClick={() => onPage(n)} className={`${btn} num ${n === page ? 'border-accent bg-accent/15 text-accent font-medium' : 'border-line hover:bg-surface2'}`}>{n + 1}</button>)}
         <button type="button" className={`${btn} border-line hover:bg-surface2 inline-flex items-center`} disabled={page >= pages - 1} onClick={() => onPage(page + 1)} aria-label="Next page"><ChevronRight size={16} /></button>
       </div>
-      <label className="flex items-center gap-2 text-xs text-muted">Rows per page
-        <select className="input !h-8 !w-auto !py-0" value={size} onChange={(e) => onSize(Number(e.target.value))}>{PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+      {onSize && <label className="flex items-center gap-2 text-xs text-muted">Rows per page
+        <select className="input !h-8 !w-auto !py-0" value={size} onChange={(e) => onSize(Number(e.target.value))}>{PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}</select></label>}
     </nav>
   );
 }
