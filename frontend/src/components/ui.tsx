@@ -165,3 +165,11 @@ export function Popover({ trigger, children, align = 'right', width = 'w-56' }: 
 export const MenuBtn = ({ onClick, children, active }: { onClick(): void; children: ReactNode; active?: boolean }) => (
   <button onClick={onClick} className={`flex w-full items-center gap-2.5 px-2.5 py-2 text-sm rounded-lg text-left hover:bg-surface2 ${active ? 'text-accent' : ''}`}>{children}</button>
 );
+
+const TINTS = ['bg-accent/15 text-accent', 'bg-success/15 text-success', 'bg-warn/15 text-warn', 'bg-danger/10 text-danger', 'bg-surface2 text-fg'];
+/** Round badge with the client's initials; the colour is picked from the name so a client always looks the same. */
+export function Avatar({ name, size = 36 }: { name: string; size?: number }) {
+  const w = name.trim().split(/\s+/).filter(Boolean); const ini = ((w[0]?.[0] ?? '?') + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase();
+  const tint = TINTS[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % TINTS.length];
+  return <span aria-hidden="true" className={`grid shrink-0 place-items-center rounded-full font-semibold ${tint}`} style={{ width: size, height: size, fontSize: size * 0.38 }}>{ini}</span>;
+}

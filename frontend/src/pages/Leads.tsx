@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, CalendarClock, LayoutGrid, List, Mail, Phone, Plus, Search, StickyNote, Users, X } from 'lucide-react';
+import { ArrowRight, CalendarClock, Clock, Inbox, LayoutGrid, List, Mail, MapPin, Phone, Plus, Search, StickyNote, Trophy, Users, X, type LucideIcon } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
-import { Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
+import { Avatar, Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
 import { isoDate, today, useList, useOpenOnNew } from '../lookup';
 
 const STAGES = ['new', 'contacted', 'quoted', 'negotiating', 'won', 'lost'] as const;
@@ -12,6 +12,7 @@ const LABEL: Record<string, string> = { new: 'New', contacted: 'Contacted', quot
 const HINT: Record<string, string> = { new: 'Just came in', contacted: 'You have spoken to them', quoted: 'They have a quote', negotiating: 'Close to deciding' };
 const NEXT: Record<string, string> = { new: 'contacted', contacted: 'quoted', quoted: 'negotiating', negotiating: 'won' };
 const NEXT_LABEL: Record<string, string> = { new: 'Mark contacted', contacted: 'Quote sent', quoted: 'Negotiating', negotiating: 'Mark won' };
+const DOT: Record<string, string> = { new: 'bg-info', contacted: 'bg-accent', quoted: 'bg-warn', negotiating: 'bg-[#a78bfa]', won: 'bg-success', lost: 'bg-danger' };
 const EDGE: Record<string, string> = { new: 'border-l-info', contacted: 'border-l-accent', quoted: 'border-l-warn', negotiating: 'border-l-[#a78bfa]', won: 'border-l-success', lost: 'border-l-danger' };
 const SOURCES = ['Website', 'Phone call', 'Walk-in', 'Referral', 'Social media', 'WhatsApp', 'Repeat client', 'Other'];
 const LOST_REASONS = ['Price too high', 'Chose another agency', 'No response', 'Postponed the trip', 'No longer travelling', 'Other'];
@@ -219,19 +220,23 @@ export default function Leads() {
     catch (e: any) { setRows(before); setNote({ ok: false, text: e.message }); }
   };
   const byDue = (a: any, b: any) => (a.next_action_at ? d10(a.next_action_at) : '9999').localeCompare(b.next_action_at ? d10(b.next_action_at) : '9999') || String(b.updated_at).localeCompare(String(a.updated_at));
-  const stat = (key: string, title: string, value: string, sub: string, tone = '') => (
-    <button type="button" onClick={() => setTab(key)} className={`card text-left hover:bg-surface2/70 transition-colors ${tab === key ? 'ring-1 ring-accent' : ''}`}>
-      <div className="text-xs text-muted">{title}</div><div className={`text-xl font-semibold num mt-0.5 ${tone}`}>{value}</div><div className="text-[11px] sm:text-xs text-muted mt-0.5">{sub}</div></button>);
+  const stat = (key: string, title: string, value: string, sub: string, Icon: LucideIcon, tone = '') => {
+    const t = tone.includes('success') ? ['border-l-4 !border-l-success', 'bg-success/10 text-success'] : tone ? ['border-l-4 !border-l-warn', 'bg-warn/10 text-warn'] : ['', 'bg-accent/10 text-accent'];
+    return (<button type="button" aria-pressed={tab === key} onClick={() => setTab(key)} className={`card text-left hover:bg-surface2/70 transition-colors ${t[0]} ${tab === key ? 'ring-2 ring-accent' : ''}`}>
+      <div className="flex items-start justify-between gap-2"><div className="text-xs font-medium text-muted">{title}</div><span className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 ${t[1]}`}><Icon size={15} /></span></div>
+      <div className={`text-2xl font-semibold num mt-1 ${tone}`}>{value}</div><div className="text-[11px] sm:text-xs text-muted mt-0.5 truncate">{sub}</div></button>); };
   const nextBtn = (l: any) => write && NEXT[l.stage] && <button type="button" className="btn-ghost !px-2 !py-0.5 text-[11px] inline-flex items-center gap-1" onClick={(e) => { e.stopPropagation(); move(l, NEXT[l.stage]); }}>{NEXT_LABEL[l.stage]}<ArrowRight size={11} /></button>;
 
-  const card = (l: any, showStage = false) => { const fu = follow(l); return (
+  const card = (l: any, showStage = false) => { const fu = follow(l); const place = l.destination ?? l.enquiry_type; return (
     <div key={l.id} role="button" tabIndex={0} draggable={write} onDragStart={(e) => e.dataTransfer.setData('id', String(l.id))} onClick={() => setOpen(l.id)} onKeyDown={(e) => { if (e.key === 'Enter') setOpen(l.id); }}
-      className={`bg-bg border border-line border-l-4 ${EDGE[l.stage]} rounded-lg px-3 py-2.5 hover:bg-surface2/70 cursor-pointer focus-visible:ring-2 focus-visible:ring-accent outline-none`}>
-      <div className="flex items-start justify-between gap-2"><div className="text-sm font-medium truncate">{l.name}</div>{showStage ? <Pill s={l.stage} /> : ownerList.length > 1 && <span title={l.owner_name} className="text-[10px] h-5 w-5 rounded-full bg-surface2 text-muted grid place-items-center shrink-0">{initials(l.owner_name)}</span>}</div>
-      <div className="text-xs text-muted truncate">{trip(l) || 'No trip details yet'}</div>
-      {l.budget_max && <div className="text-xs text-muted num">up to {money(l.budget_max, l.currency ?? 'USD')}</div>}
+      className={`bg-surface border border-line border-l-4 ${EDGE[l.stage]} rounded-lg px-3 py-2.5 shadow-sm hover:shadow-md hover:bg-surface2/60 transition cursor-pointer focus-visible:ring-2 focus-visible:ring-accent outline-none`}>
+      <div className="flex items-start gap-2.5"><Avatar name={l.name} size={30} />
+        <div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><div className="text-sm font-semibold truncate">{l.name}</div>{showStage && <Pill s={l.stage} />}</div>
+          <div className="text-xs text-muted truncate flex items-center gap-1">{place && <MapPin size={11} className="shrink-0" />}{trip(l) || 'No trip details yet'}</div></div></div>
+      {l.budget_max && <div className="text-xs text-muted num mt-1.5">Budget up to <span className="text-fg font-medium">{money(l.budget_max, l.currency ?? 'USD')}</span></div>}
       {fu && <div className={`text-xs mt-1 ${fu.tone}`}>{fu.text}</div>}
-      <div className="text-[11px] text-muted mt-1">{l.quote_count > 0 ? `${plural(l.quote_count, 'quote')} · ` : ''}{l.last_contact_at ? `last spoke ${ago(l.last_contact_at)}` : 'not contacted yet'}</div>
+      <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-line/70 pt-1.5"><span className="text-[11px] text-muted">{l.quote_count > 0 ? `${plural(l.quote_count, 'quote')} · ` : ''}{l.last_contact_at ? `spoke ${ago(l.last_contact_at)}` : 'not contacted yet'}</span>
+        {!showStage && ownerList.length > 1 && l.owner_name && <span title={`Looked after by ${l.owner_name}`} className="text-[10px] h-5 w-5 rounded-full bg-surface2 text-muted grid place-items-center shrink-0">{initials(l.owner_name)}</span>}</div>
       {NEXT[l.stage] && write && <div className="mt-1.5 flex justify-end">{nextBtn(l)}</div>}
     </div>); };
 
@@ -242,10 +247,10 @@ export default function Leads() {
         {write && <button className="btn inline-flex items-center gap-1" onClick={() => setForm(blank())}><Plus size={16} />New lead</button>}</>}>
       {rows === null ? <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-20" />)}</div> : (
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
-          {stat('open', 'Open leads', String(openL.length), `${openL.filter((l) => l.stage === 'new').length} brand new${potential > 0 ? ` · about ${money(potential, [...curs][0] as string)} in budgets` : ''}`)}
-          {stat('followup', 'Follow-ups due', String(counts.followup), counts.followup ? `${overdue ? `${overdue} overdue · ` : ''}needs a call or message today` : 'Nothing due — nice', counts.followup ? 'text-warn' : '')}
-          {stat('quiet', 'Going quiet', String(counts.quiet), counts.quiet ? 'No contact for a week or more' : 'Everyone has been contacted recently', counts.quiet ? 'text-warn' : '')}
-          {stat('won', 'Won this month', String(wonMonth), winRate !== null ? `You win ${winRate}% of closed leads` : 'No closed leads yet', wonMonth ? 'text-success' : '')}</div>)}
+          {stat('open', 'Open leads', String(openL.length), `${openL.filter((l) => l.stage === 'new').length} brand new${potential > 0 ? ` · about ${money(potential, [...curs][0] as string)} in budgets` : ''}`, Inbox)}
+          {stat('followup', 'Follow-ups due', String(counts.followup), counts.followup ? `${overdue ? `${overdue} overdue · ` : ''}needs a call or message today` : 'Nothing due — nice', CalendarClock, counts.followup ? 'text-warn' : '')}
+          {stat('quiet', 'Going quiet', String(counts.quiet), counts.quiet ? 'No contact for a week or more' : 'Everyone has been contacted recently', Clock, counts.quiet ? 'text-warn' : '')}
+          {stat('won', 'Won this month', String(wonMonth), winRate !== null ? `You win ${winRate}% of closed leads` : 'No closed leads yet', Trophy, wonMonth ? 'text-success' : '')}</div>)}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-1 basis-full min-w-0" role="tablist" aria-label="Lead views">
@@ -261,7 +266,7 @@ export default function Leads() {
       ) : listView ? (<>
         <div className="sm:hidden space-y-2">{shown.map((l) => card(l, true))}{!shown.length && <div className="card text-center text-sm text-muted py-8">{q ? `No lead matches “${q}”.` : `Nothing in “${TABS.find((t) => t.key === tab)!.label}”.`}</div>}</div>
         <div className="hidden sm:block"><Table rows={shown} onRow={(l) => setOpen(l.id)} empty={q ? `No lead matches “${q}”.` : `Nothing in “${TABS.find((t) => t.key === tab)!.label}”.`} cols={[
-          { h: 'Lead', render: (l) => <><span className="font-medium">{l.name}</span><div className="text-xs text-muted">{[l.phone, l.email].filter(Boolean).join(' · ') || 'No contact details'}</div></> },
+          { h: 'Lead', render: (l) => <div className="flex items-center gap-3 min-w-0"><Avatar name={l.name} /><div className="min-w-0"><div className="font-medium truncate">{l.name}</div><div className="text-xs text-muted truncate">{[l.phone, l.email].filter(Boolean).join(' · ') || 'No contact details'}</div></div></div> },
           { h: 'Trip', render: (l) => <>{trip(l) || <span className="text-muted">—</span>}{l.budget_max && <div className="text-xs text-muted num">up to {money(l.budget_max, l.currency ?? 'USD')}</div>}</> },
           { h: 'Stage', render: (l) => <><Pill s={l.stage} />{l.quote_count > 0 && <div className="text-xs text-muted mt-0.5">{plural(l.quote_count, 'quote')}</div>}</> },
           { h: 'Next follow-up', render: (l) => { const fu = follow(l); return fu ? <span className={`text-xs ${fu.tone}`}>{fu.text}</span> : l.stage === 'lost' ? <span className="text-xs text-muted" title={l.lost_reason}>{l.lost_reason ?? 'Lost'}</span> : <span className="text-muted">—</span>; } },
@@ -272,8 +277,8 @@ export default function Leads() {
         <div><div className="flex gap-3 overflow-x-auto pb-2 items-start">
           {OPEN.map((s) => { const items = shown.filter((l) => l.stage === s).sort(byDue); return (
             <section key={s} aria-label={LABEL[s]} onDragOver={(e) => { e.preventDefault(); setDrag(s); }} onDragLeave={() => setDrag('')} onDrop={(e) => { e.preventDefault(); setDrag(''); const l = all.find((x) => x.id === Number(e.dataTransfer.getData('id'))); if (l) move(l, s); }}
-              className={`card !p-2 min-w-[14rem] flex-1 min-h-48 ${drag === s ? 'ring-2 ring-accent' : ''}`}>
-              <div className="px-1 mb-2"><div className="flex justify-between text-xs font-semibold uppercase tracking-wide text-muted"><span>{LABEL[s]}</span><span className="num">{items.length}</span></div><div className="text-[11px] text-muted">{HINT[s]}</div></div>
+              className={`card !p-2 min-w-[15rem] flex-1 min-h-48 bg-surface2/30 ${drag === s ? 'ring-2 ring-accent' : ''}`}>
+              <div className="px-1 mb-2"><div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted"><span className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${DOT[s]}`} />{LABEL[s]}</span><span className="num rounded-full bg-surface2 px-2 py-0.5 text-[11px] text-fg">{items.length}</span></div><div className="text-[11px] text-muted mt-0.5">{HINT[s]}</div></div>
               <div className="space-y-2">{items.map((l) => card(l))}{!items.length && <div className="text-xs text-muted text-center py-6 border border-dashed border-line rounded-lg">{write ? 'Drop a lead here' : 'Empty'}</div>}</div>
             </section>); })}
         </div>

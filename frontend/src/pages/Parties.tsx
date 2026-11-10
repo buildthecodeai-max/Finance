@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Archive, ArchiveRestore, FilePlus2, MailWarning, Mail, Pencil, Sparkles, Phone, Plus, Search, Trash2, Users, Wallet, X, type LucideIcon } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
-import { Err, Field, Modal, Page, Pill, Skeleton, Table } from '../components/ui';
+import { Avatar, Err, Field, Modal, Page, Pill, Skeleton, Table } from '../components/ui';
 import { useOpenOnNew } from '../lookup';
 import { SendSms } from '../components/SendSms';
 import { AiPanel } from '../components/AiAssistant';
@@ -50,13 +50,6 @@ function PartyForm({ kind, initial, onClose, onSaved, names = [] }: { kind: Kind
 
 /* ======================================================  CLIENTS  ====================================================== */
 const day = (d: any) => (d ? String(d).slice(0, 10) : '');
-const TINTS = ['bg-accent/15 text-accent', 'bg-success/15 text-success', 'bg-warn/15 text-warn', 'bg-danger/10 text-danger', 'bg-surface2 text-fg'];
-/** Round badge with the client's initials; the colour is picked from the name so a client always looks the same. */
-function Avatar({ name, size = 36 }: { name: string; size?: number }) {
-  const w = name.trim().split(/\s+/).filter(Boolean); const ini = ((w[0]?.[0] ?? '?') + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase();
-  const tint = TINTS[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % TINTS.length];
-  return <span aria-hidden="true" className={`grid shrink-0 place-items-center rounded-full font-semibold ${tint}`} style={{ width: size, height: size, fontSize: size * 0.38 }}>{ini}</span>;
-}
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const owes = (i: any) => (['draft', 'void', 'paid', 'credited'].includes(i.status) ? 0 : r2(i.total - (i.amount_credited ?? 0) - i.amount_paid));
 const sumBy = (rows: any[], f: (r: any) => number) => { const m: Record<string, number> = {}; for (const r of rows) { const v = f(r); if (v > 0.005) m[r.currency] = r2((m[r.currency] ?? 0) + v); } return m; };
