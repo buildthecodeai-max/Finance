@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, FilePlus2, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, FilePlus2, MailWarning, Mail, Pencil, Phone, Plus, Search, Trash2, Users, Wallet, X, type LucideIcon } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Page, Pill, Skeleton, Table } from '../components/ui';
@@ -49,6 +49,13 @@ function PartyForm({ kind, initial, onClose, onSaved, names = [] }: { kind: Kind
 
 /* ======================================================  CLIENTS  ====================================================== */
 const day = (d: any) => (d ? String(d).slice(0, 10) : '');
+const TINTS = ['bg-accent/15 text-accent', 'bg-success/15 text-success', 'bg-warn/15 text-warn', 'bg-danger/10 text-danger', 'bg-surface2 text-fg'];
+/** Round badge with the client's initials; the colour is picked from the name so a client always looks the same. */
+function Avatar({ name, size = 36 }: { name: string; size?: number }) {
+  const w = name.trim().split(/\s+/).filter(Boolean); const ini = ((w[0]?.[0] ?? '?') + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase();
+  const tint = TINTS[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % TINTS.length];
+  return <span aria-hidden="true" className={`grid shrink-0 place-items-center rounded-full font-semibold ${tint}`} style={{ width: size, height: size, fontSize: size * 0.38 }}>{ini}</span>;
+}
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const owes = (i: any) => (['draft', 'void', 'paid', 'credited'].includes(i.status) ? 0 : r2(i.total - (i.amount_credited ?? 0) - i.amount_paid));
 const sumBy = (rows: any[], f: (r: any) => number) => { const m: Record<string, number> = {}; for (const r of rows) { const v = f(r); if (v > 0.005) m[r.currency] = r2((m[r.currency] ?? 0) + v); } return m; };
@@ -73,7 +80,12 @@ function ClientDetail({ id, canManage, canEdit, startDelete, onClose, onChanged,
   const nTab = (t: string) => (t === 'Bookings' ? ` (${bks.length})` : t === 'Quotes' ? ` (${qts.length})` : t === 'Invoices' ? ` (${d.invoices.length})` : '');
 
   return (
-    <Modal title={d.name} wide onClose={onClose}><Err e={err} />
+    <Modal title="Client" wide onClose={onClose}><Err e={err} />
+      <div className="flex items-center gap-3 mb-4"><Avatar name={d.name} size={48} />
+        <div className="min-w-0"><div className="text-lg font-semibold leading-tight truncate">{d.name}</div>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
+            {d.email ? <a className="inline-flex items-center gap-1 hover:text-accent" href={`mailto:${d.email}`}><Mail size={13} />{d.email}</a> : <span className="inline-flex items-center gap-1 text-warn"><MailWarning size={13} />No email</span>}
+            {d.phone && <a className="inline-flex items-center gap-1 hover:text-accent" href={`tel:${d.phone}`}><Phone size={13} />{d.phone}</a>}</div></div></div>
       {archived && <div className="rounded-lg border border-line bg-surface2/60 text-sm px-3 py-2 mb-3">Archived on {day(d.archived_at)} — hidden from lists and pickers, all history is kept.</div>}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {!archived && canEdit && <><button className="btn inline-flex items-center gap-1" onClick={() => go(`/bookings?client=${id}`)}><Plus size={14} />New booking</button>
@@ -88,15 +100,13 @@ function ClientDetail({ id, canManage, canEdit, startDelete, onClose, onChanged,
           {canManage && <button className="btn-ghost text-danger inline-flex items-center gap-1" onClick={() => setConfirmDel(true)}><Trash2 size={14} />Delete</button>}</div></div>
 
       <div className="grid grid-cols-3 gap-3 mb-4">
-        <div className="card !p-3"><div className="text-xs text-muted">Owes you</div><div className={`font-semibold num ${Object.keys(owed).length ? 'text-warn' : ''}`}>{fmtMap(owed)}</div></div>
+        <div className={`card !p-3 ${Object.keys(owed).length ? 'border-l-4 !border-l-warn' : ''}`}><div className="text-xs text-muted">Owes you</div><div className={`font-semibold num ${Object.keys(owed).length ? 'text-warn' : ''}`}>{fmtMap(owed)}</div></div>
         <div className="card !p-3"><div className="text-xs text-muted">Invoiced in total</div><div className="font-semibold num">{fmtMap(billed)}</div></div>
         <div className="card !p-3"><div className="text-xs text-muted">Trips</div><div className="font-semibold num">{bks.length}</div></div></div>
 
       <div className="flex gap-1 border-b border-line mb-4 overflow-x-auto" role="tablist">{tabs.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`px-3 py-2 text-sm whitespace-nowrap ${tab === t ? 'text-accent border-b-2 border-accent font-medium' : 'text-muted hover:text-fg'}`}>{t}{nTab(t)}</button>)}</div>
 
       {tab === 'Overview' && <div className="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-        <div><span className="text-muted">Email </span>{d.email ? <a className="text-accent hover:underline" href={`mailto:${d.email}`}>{d.email}</a> : <span className="text-warn">Not added — quotes and invoices can’t be emailed</span>}</div>
-        <div><span className="text-muted">Phone </span>{d.phone ? <a className="text-accent hover:underline" href={`tel:${d.phone}`}>{d.phone}</a> : '—'}</div>
         <div><span className="text-muted">Pays in </span>{d.currency} · <b>{d.payment_terms_days}</b> day terms</div>
         <div><span className="text-muted">Invoices sent by </span><span className="capitalize">{d.billing_preference}</span></div>
         <div className="sm:col-span-2 whitespace-pre-wrap"><span className="text-muted">Address </span>{d.address || '—'}</div>
@@ -153,18 +163,19 @@ export function Clients() {
   }, [rows, tab, q, sort]);
   const owing = all.filter(CTABS[1].test); const biggest = [...owing].sort((a, b) => b.outstanding - a.outstanding)[0];
   const owedTotals = sumBy(owing, (r) => Number(r.outstanding));
-  const stat = (key: string | null, title: string, value: string, sub: string, tone = '') => (
-    <button type="button" disabled={!key} onClick={() => key && setTab(key)} className={`card text-left ${key ? 'hover:bg-surface2/70 transition-colors' : 'cursor-default'} ${key && tab === key ? 'ring-1 ring-accent' : ''}`}>
-      <div className="text-xs text-muted">{title}</div><div className={`text-xl font-semibold num mt-0.5 ${tone}`}>{value}</div><div className="text-xs text-muted mt-0.5">{sub}</div></button>);
+  const stat = (key: string, title: string, value: string, sub: string, Icon: LucideIcon, tone = '') => (
+    <button type="button" aria-pressed={tab === key} onClick={() => setTab(tab === key && key !== 'all' ? 'all' : key)} className={`card text-left hover:bg-surface2/70 transition-colors ${tab === key ? 'ring-2 ring-accent' : ''} ${tone ? 'border-l-4 !border-l-warn' : ''}`}>
+      <div className="flex items-start justify-between gap-2"><div className="text-xs font-medium text-muted">{title}</div><span className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 ${tone ? 'bg-warn/10 text-warn' : 'bg-accent/10 text-accent'}`}><Icon size={15} /></span></div>
+      <div className={`text-2xl font-semibold num mt-1 ${tone}`}>{value}</div><div className="text-xs text-muted mt-0.5 truncate">{sub}</div></button>);
 
   return (
     <Page title="Clients" description="The people and companies you sell to. Click a client to see their trips, quotes, invoices and payments in one place."
       actions={canEdit ? <button className="btn inline-flex items-center gap-1" onClick={() => setForm(blank('clients', agency?.base_currency))}><Plus size={16} />Add client</button> : undefined}>
       {!archived && (rows === null ? <div className="grid sm:grid-cols-3 gap-3 mb-4"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div> : (
         <div className="grid sm:grid-cols-3 gap-3 mb-4">
-          {stat('all', 'Clients', String(all.length), all.length ? 'Active clients' : 'None yet')}
-          {stat('owing', 'Owe you money', String(owing.length), owing.length ? `${fmtMap(owedTotals)} in total${biggest ? ` · most: ${biggest.name}` : ''}` : 'Everyone is paid up', owing.length ? 'text-warn' : '')}
-          {stat('noemail', 'No email address', String(counts.noemail), counts.noemail ? 'Quotes can’t be emailed to them' : 'Everyone can be emailed', counts.noemail ? 'text-warn' : '')}
+          {stat('all', 'Clients', String(all.length), all.length ? 'Active clients' : 'None yet', Users)}
+          {stat('owing', 'Owe you money', String(owing.length), owing.length ? `${fmtMap(owedTotals)} in total${biggest ? ` · most: ${biggest.name}` : ''}` : 'Everyone is paid up', Wallet, owing.length ? 'text-warn' : '')}
+          {stat('noemail', 'No email address', String(counts.noemail), counts.noemail ? 'Quotes can’t be emailed to them' : 'Everyone can be emailed', MailWarning, counts.noemail ? 'text-warn' : '')}
         </div>))}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -187,13 +198,13 @@ export function Clients() {
         <Table rows={list} onRow={(r) => { setAskDelete(false); setOpen(r.id); }}
           empty={all.length === 0 ? (archived ? 'No archived clients.' : canEdit ? 'No clients yet — click “Add client” to add your first one.' : 'No clients yet.') : q ? `No client matches “${q}”.` : `Nobody in “${CTABS.find((t) => t.key === tab)!.label}”.`}
           cols={[
-            { h: 'Client', render: (r) => <><span className="font-medium">{r.name}</span>{r.email ? <div className="text-xs text-muted">{r.email}</div> : <div className="text-xs text-warn">No email</div>}</> },
-            { h: 'Phone', render: (r) => r.phone ?? <span className="text-muted">—</span> },
+            { h: 'Client', render: (r) => <div className="flex items-center gap-3 min-w-0"><Avatar name={r.name} /><div className="min-w-0"><div className="font-medium truncate">{r.name}</div>{r.email ? <div className="text-xs text-muted truncate">{r.email}</div> : <div className="text-xs text-warn">No email</div>}</div></div> },
+            { h: 'Phone', render: (r) => (r.phone ? <span className="whitespace-nowrap">{r.phone}</span> : <span className="text-muted">—</span>) },
             { h: 'Pays within', render: (r) => <span className="num">{r.payment_terms_days} days</span> },
             { h: 'Owes you', right: true, render: (r) => (Number(r.outstanding) > 0.005 ? <b className="text-warn">{money(r.outstanding, r.currency)}</b> : <span className="text-muted">—</span>) },
             { h: '', render: (r) => <div className="flex gap-1 justify-end whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-              {!archived && canEdit && <button className="btn-ghost" onClick={() => nav(`/bookings?client=${r.id}`)}>New booking</button>}
-              {!archived && canEdit && <button className="btn-ghost" onClick={() => nav(`/quotes/new?client=${r.id}`)}>New quote</button>}
+              {!archived && canEdit && <button className="btn-ghost inline-flex items-center gap-1" title="New booking for this client" onClick={() => nav(`/bookings?client=${r.id}`)}><Plus size={13} />Booking</button>}
+              {!archived && canEdit && <button className="btn-ghost inline-flex items-center gap-1" title="New quote for this client" onClick={() => nav(`/quotes/new?client=${r.id}`)}><Plus size={13} />Quote</button>}
               {archived && manage && <button className="btn-ghost inline-flex items-center gap-1" onClick={() => api(`/clients/${r.id}/restore`, 'POST').then(() => { setNote(`${r.name} was restored.`); load(); }).catch((e) => setErr(e.message))}><ArchiveRestore size={14} />Restore</button>}</div> }]} />
       )}
       {rows && !archived && <p className="text-xs text-muted mt-2">{list.length} of {all.length} client{all.length === 1 ? '' : 's'}</p>}
