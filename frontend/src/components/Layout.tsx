@@ -1,6 +1,6 @@
 import { AiButton } from './AiAssistant';
 import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Banknote, BarChart3, BookOpen, Briefcase, Building2, CalendarClock, ClipboardCheck, Calculator as CalcIcon, Check, ChevronDown, ChevronRight, ChevronsLeft, ChevronsUpDown,
   Coins, CreditCard, HelpCircle, FileMinus, FileSignature, FileText, HandCoins, LineChart, Truck, LayoutDashboard, Library, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Percent, Plane, Plus, ScrollText, Search, Settings, MoonStar, ShieldCheck, Stamp, Sun, Target, Ticket, TrendingUp, Undo2, Users, Wallet, X,
@@ -68,6 +68,8 @@ const GROUPS: { title: string; module: string | string[] | null; items: Item[] }
 const FLAT = GROUPS.flatMap((g) => g.items.flatMap((i) => (i.children ? i.children.map((c) => ({ ...c, group: i.label })) : [{ ...i, group: g.title }])));
 const findItem = (p: string) => FLAT.find((i) => i.to === p);
 const labelFor = (p: string) => findItem(p)?.label ?? (p.startsWith('/umrah/') ? 'Umrah group' : p.startsWith('/bookings/') ? 'Booking' : p.startsWith('/quotes/') ? 'Quote' : undefined);
+/** For a record page (/bookings/12) the list it belongs to, so the breadcrumb can link back to it. */
+const parentFor = (p: string): { to: string; label: string } | null => (/^\/bookings\/[^/]+/.test(p) ? { to: '/bookings', label: 'Bookings' } : /^\/quotes\/[^/]+/.test(p) ? { to: '/quotes', label: 'Quotes' } : /^\/umrah\/[^/]+/.test(p) ? { to: '/umrah', label: 'Umrah groups' } : null);
 const groupFor = (p: string) => findItem(p)?.group ?? (p.startsWith('/bookings/') ? 'Bookings' : p.startsWith('/quotes/') ? 'Sales' : p.startsWith('/umrah/') ? 'Bookings' : '');
 
 /* ---------- theme switch ---------- */
@@ -214,7 +216,7 @@ export default function Layout() {
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('tf-sidebar') === '1'; } catch { return false; } });
   const [mobile, setMobile] = useState(false); const [calc, setCalc] = useState(false);
   useEffect(() => { try { localStorage.setItem('tf-sidebar', collapsed ? '1' : '0'); } catch { /* ignore */ } }, [collapsed]);
-  useEffect(() => { setMobile(false); }, [path]);
+  useEffect(() => { setMobile(false); window.scrollTo({ top: 0 }); }, [path]);       // a new page always starts at the top
   const initials = (user?.name ?? '?').split(' ').map((s: string) => s[0]).slice(0, 2).join('').toUpperCase();
   const g = groupFor(path), l = labelFor(path);
   const canCreate = agency?.role !== 'viewer';
@@ -233,7 +235,9 @@ export default function Layout() {
         <header className="sticky top-0 z-30 h-14 flex items-center gap-3 px-4 md:px-8 bg-bg/80 backdrop-blur border-b border-line">
           <button className="btn-icon lg:hidden -ml-2" onClick={() => setMobile(true)} aria-label="Open menu"><MenuIcon size={20} /></button>
           <nav aria-label="Breadcrumb" className="hidden md:flex items-center gap-1.5 text-sm text-muted min-w-0 shrink-0">
-            {g && <><span>{g}</span><ChevronRight size={14} /></>}<span className="text-fg font-medium truncate">{l ?? 'Travel CRM'}</span></nav>
+            {g && g !== parentFor(path)?.label && <><span>{g}</span><ChevronRight size={14} /></>}
+            {parentFor(path) ? <><Link to={parentFor(path)!.to} className="hover:text-fg hover:underline">{parentFor(path)!.label}</Link><ChevronRight size={14} /><span className="text-fg font-medium truncate">{l ?? 'Details'}</span></>
+              : <span className="text-fg font-medium truncate" aria-current="page">{l ?? 'Travel CRM'}</span>}</nav>
           <div className="flex-1 flex justify-center md:justify-end lg:justify-center px-0 md:px-4"><GlobalSearch /></div>
           <div className="flex items-center gap-1">
             {canCreate && (

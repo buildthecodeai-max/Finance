@@ -191,7 +191,7 @@ export function Clients() {
       <Err e={form ? '' : err} />
       {archived && <p className="text-sm text-muted mb-3">Archived clients are hidden from lists and pickers. Their history is kept.{manage ? ' Open one to restore it.' : ''}</p>}
       {rows === null ? <Skeleton className="h-64" /> : (
-        <Table rows={list} onRow={(r) => { setAskDelete(false); setOpen(r.id); }}
+        <Table rows={list} noun="clients" onRow={(r) => { setAskDelete(false); setOpen(r.id); }}
           empty={all.length === 0 ? (archived ? 'No archived clients.' : canEdit ? 'No clients yet — click “Add client” to add your first one.' : 'No clients yet.') : q ? `No client matches “${q}”.` : `Nobody in “${CTABS.find((t) => t.key === tab)!.label}”.`}
           cols={[
             { h: 'Client', render: (r) => <div className="flex items-center gap-3 min-w-0"><Avatar name={r.name} /><div className="min-w-0"><div className="font-medium truncate">{r.name}</div>{r.email ? <div className="text-xs text-muted truncate">{r.email}</div> : <div className="text-xs text-warn">No email</div>}</div></div> },
@@ -203,7 +203,7 @@ export function Clients() {
               {!archived && canEdit && <button className="btn-ghost inline-flex items-center gap-1" title="New quote for this client" onClick={() => nav(`/quotes/new?client=${r.id}`)}><Plus size={13} />Quote</button>}
               {archived && manage && <button className="btn-ghost inline-flex items-center gap-1" onClick={() => api(`/clients/${r.id}/restore`, 'POST').then(() => { setNote(`${r.name} was restored.`); load(); }).catch((e) => setErr(e.message))}><ArchiveRestore size={14} />Restore</button>}</div> }]} />
       )}
-      {rows && !archived && <p className="text-xs text-muted mt-2">{list.length} of {all.length} client{all.length === 1 ? '' : 's'}</p>}
+      {rows && !archived && list.length < all.length && list.length <= 10 && <p className="text-xs text-muted mt-2">{list.length} of {all.length} client{all.length === 1 ? '' : 's'}</p>}
       {open && <ClientDetail key={`${open}-${askDelete}`} id={open} names={all.map((r) => r.name)} canManage={manage} canEdit={canEdit} startDelete={askDelete} onClose={() => setOpen(null)} onChanged={(m) => { if (m) setNote(m); load(); }} />}
       {form && <PartyForm kind="clients" initial={form} names={all.map((r) => r.name)} onClose={() => setForm(null)} onSaved={(id) => { setForm(null); setNote('Client added.'); load(); if (id) setOpen(id); }} />}
     </Page>

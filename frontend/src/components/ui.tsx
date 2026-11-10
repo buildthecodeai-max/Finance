@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useId, useRef, useState } from 'react';
-import { AlertCircle, ChevronDown, Inbox, Plus, Save, Trash2, X } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, Inbox, Plus, Save, Trash2, X } from 'lucide-react';
 import { n2 } from '../api';
 
 /* ---------- Status pill: one tone per meaning, real status text ---------- */
@@ -41,21 +41,59 @@ export const EmptyState = ({ title = 'Nothing here yet', hint }: { title?: strin
 );
 
 export interface Col<T> { h: string; render: (r: T) => ReactNode; right?: boolean }
-export function Table<T extends { id?: number }>({ rows, cols, onRow, empty }: { rows: T[]; cols: Col<T>[]; onRow?: (r: T) => void; empty?: string }) {
+
+const PAGE_SIZES = [10, 25, 50, 100];
+const readPageSize = () => { try { const n = Number(localStorage.getItem('tf-page-size')); return PAGE_SIZES.includes(n) ? n : 25; } catch { return 25; } };
+/** Page numbers to show: always the first and last, and the pages around the current one, with gaps as null. */
+function pageList(cur: number, pages: number): (number | null)[] {
+  const keep = new Set([0, pages - 1, cur - 1, cur, cur + 1].filter((n) => n >= 0 && n < pages)); const out: (number | null)[] = []; let prev = -1;
+  for (const n of [...keep].sort((a, b) => a - b)) { if (n - prev > 1) out.push(null); out.push(n); prev = n; }
+  return out;
+}
+
+/** Page controls under a table: which rows are showing, previous/next, numbered pages and how many rows per page (remembered across pages and visits). */
+export function Pager({ total, page, size, onPage, onSize, noun = 'results' }: { total: number; page: number; size: number; onPage(p: number): void; onSize(n: number): void; noun?: string }) {
+  const pages = Math.max(1, Math.ceil(total / size)), from = total ? page * size + 1 : 0, to = Math.min(total, (page + 1) * size);
+  const btn = 'h-8 min-w-8 px-2 rounded-lg border text-sm transition disabled:opacity-40 disabled:cursor-not-allowed';
+  return (
+    <nav aria-label="Pagination" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line px-3 py-2 text-sm">
+      <div className="text-muted num" role="status" aria-live="polite">Showing <b className="text-fg">{from}–{to}</b> of {total.toLocaleString()} {noun}</div>
+      <div className="flex items-center gap-1">
+        <button type="button" className={`${btn} border-line hover:bg-surface2 inline-flex items-center`} disabled={page === 0} onClick={() => onPage(page - 1)} aria-label="Previous page"><ChevronLeft size={16} /></button>
+        {pageList(page, pages).map((n, i) => n === null ? <span key={`gap${i}`} className="px-1 text-muted" aria-hidden>…</span>
+          : <button key={n} type="button" aria-label={`Page ${n + 1}`} aria-current={n === page ? 'page' : undefined} onClick={() => onPage(n)} className={`${btn} num ${n === page ? 'border-accent bg-accent/15 text-accent font-medium' : 'border-line hover:bg-surface2'}`}>{n + 1}</button>)}
+        <button type="button" className={`${btn} border-line hover:bg-surface2 inline-flex items-center`} disabled={page >= pages - 1} onClick={() => onPage(page + 1)} aria-label="Next page"><ChevronRight size={16} /></button>
+      </div>
+      <label className="flex items-center gap-2 text-xs text-muted">Rows per page
+        <select className="input !h-8 !w-auto !py-0" value={size} onChange={(e) => onSize(Number(e.target.value))}>{PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+    </nav>
+  );
+}
+
+/** Every table pages itself: 25 rows at a time by default, controls appear once there is more than a page. Pass `paginate={false}` to show every row. */
+export function Table<T extends { id?: number }>({ rows, cols, onRow, empty, paginate = true, noun }: { rows: T[]; cols: Col<T>[]; onRow?: (r: T) => void; empty?: string; paginate?: boolean; noun?: string }) {
+  const [size, setSize] = useState(readPageSize), [page, setPage] = useState(0); const box = useRef<HTMLDivElement>(null);
+  const pages = Math.max(1, Math.ceil(rows.length / size)), cur = Math.min(page, pages - 1);
+  const first = rows[0]?.id;
+  useEffect(() => { setPage(0); }, [rows.length, first]);                 // a new search or filter starts again from page 1
+  const go = (p: number) => { setPage(p); box.current?.scrollTo({ top: 0 }); };
+  const chooseSize = (n: number) => { setSize(n); setPage(0); try { localStorage.setItem('tf-page-size', String(n)); } catch { /* ignore */ } };
+  const shown = paginate ? rows.slice(cur * size, (cur + 1) * size) : rows;
   return (
     <div className="card p-0 overflow-hidden">
-      <div className="overflow-auto max-h-[calc(100vh-14rem)]">
+      <div ref={box} className="overflow-auto max-h-[calc(100vh-14rem)]">
         <table className="w-full border-separate border-spacing-0">
           <thead className="sticky top-0 z-10"><tr>{cols.map((c, i) => <th key={`${c.h}${i}`} className={`${c.right ? '!text-right' : ''} bg-surface2`}>{c.h}</th>)}</tr></thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={r.id ?? i} onClick={() => onRow?.(r)} onKeyDown={(e) => onRow && e.key === 'Enter' && onRow(r)} tabIndex={onRow ? 0 : undefined} className={onRow ? 'cursor-pointer hover:bg-surface2/70 focus-visible:bg-surface2/70' : 'hover:bg-surface2/40'}>
+            {shown.map((r, i) => (
+              <tr key={r.id ?? `${cur}-${i}`} onClick={() => onRow?.(r)} onKeyDown={(e) => onRow && e.key === 'Enter' && onRow(r)} tabIndex={onRow ? 0 : undefined} className={onRow ? 'cursor-pointer hover:bg-surface2/70 focus-visible:bg-surface2/70' : 'hover:bg-surface2/40'}>
                 {cols.map((c, j) => <td key={`${c.h}${j}`} className={c.right ? 'text-right num' : ''}>{c.render(r)}</td>)}
               </tr>))}
           </tbody>
         </table>
         {!rows.length && <EmptyState title={empty ?? 'Nothing here yet'} />}
       </div>
+      {paginate && rows.length > PAGE_SIZES[0] && <Pager total={rows.length} page={cur} size={size} onPage={go} onSize={chooseSize} noun={noun} />}
     </div>
   );
 }
