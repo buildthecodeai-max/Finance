@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
-import { Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
+import { Avatar, Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
 import { ClientPick } from '../components/ClientPick';
 import { SendSms } from '../components/SendSms';
 import { viewPdf } from '../components/PdfViewer';
 import { isoDate, today, useList, useOpenOnNew } from '../lookup';
-import { AlertTriangle, Archive, ArchiveRestore, CheckCircle2, FilePlus2, Pencil, Plus, Search, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, CalendarClock, CheckCircle2, FilePlus2, MapPin, Pencil, Plane, Plus, Search, TicketCheck, X, type LucideIcon } from 'lucide-react';
 
 const STATUSES = ['enquiry', 'quoted', 'awaiting_client', 'confirmed', 'in_service', 'travel_completed', 'closed', 'on_hold', 'cancelled', 'refunded', 'lost'];
 const LABEL: Record<string, string> = { enquiry: 'Enquiry', quoted: 'Quoted', awaiting_client: 'Awaiting client', confirmed: 'Confirmed', in_service: 'Travelling', travel_completed: 'Trip completed', closed: 'Closed', on_hold: 'On hold', cancelled: 'Cancelled', refunded: 'Refunded', lost: 'Lost' };
@@ -121,18 +121,19 @@ export function BookingList() {
     catch (e: any) { setErr(e.message); }
   };
   const bad = form ? dateRangeError(form.travel_start, form.travel_end) : '';
-  const stat = (key: string | null, title: string, value: string, sub: string, tone = '') => (
-    <button type="button" disabled={!key} onClick={() => key && setTab(key)} className={`card text-left ${key ? 'hover:bg-surface2/70 transition-colors' : 'cursor-default'} ${key && tab === key ? 'ring-1 ring-accent' : ''}`}>
-      <div className="text-xs text-muted">{title}</div><div className={`text-xl font-semibold num mt-0.5 ${tone}`}>{value}</div><div className="text-xs text-muted mt-0.5">{sub}</div></button>);
+  const stat = (key: string, title: string, value: string, sub: string, Icon: LucideIcon, tone = '') => (
+    <button type="button" aria-pressed={tab === key} onClick={() => setTab(key)} className={`card text-left hover:bg-surface2/70 transition-colors ${tone ? 'border-l-4 !border-l-warn' : ''} ${tab === key ? 'ring-2 ring-accent' : ''}`}>
+      <div className="flex items-start justify-between gap-2"><div className="text-xs font-medium text-muted">{title}</div><span className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 ${tone ? 'bg-warn/10 text-warn' : 'bg-accent/10 text-accent'}`}><Icon size={15} /></span></div>
+      <div className={`text-2xl font-semibold num mt-1 ${tone}`}>{value}</div><div className="text-xs text-muted mt-0.5 truncate">{sub}</div></button>);
 
   return (
     <Page title="Bookings" description="Every trip you are selling, from first enquiry to the day the client gets home. Click a booking to see everything about it."
       actions={editor ? <button className="btn inline-flex items-center gap-1" onClick={() => setForm(blank())}><Plus size={16} />New booking</button> : undefined}>
       {!archived && (rows === null ? <div className="grid sm:grid-cols-3 gap-3 mb-4"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div> : (
         <div className="grid sm:grid-cols-3 gap-3 mb-4">
-          {stat('open', 'Enquiries & quotes', String(openList.length), sameCur && openList.length ? `${money(openValue, openList[0].currency)} of potential sales` : openList.length ? 'waiting for the client' : 'None waiting')}
-          {stat('soon', 'Departing in 30 days', String(departing.length), departing.length ? `Next: ${departing[0].client_name}, ${when(departing[0].travel_start, departing[0].travel_end).text}` : 'No departures soon', departing.length ? 'text-warn' : '')}
-          {stat('travelling', 'Travelling now', String(travelling.length), travelling.length ? 'Check in on these clients' : 'Nobody is away')}
+          {stat('open', 'Enquiries & quotes', String(openList.length), sameCur && openList.length ? `${money(openValue, openList[0].currency)} of potential sales` : openList.length ? 'waiting for the client' : 'None waiting', TicketCheck)}
+          {stat('soon', 'Departing in 30 days', String(departing.length), departing.length ? `Next: ${departing[0].client_name}, ${when(departing[0].travel_start, departing[0].travel_end).text}` : 'No departures soon', CalendarClock, departing.length ? 'text-warn' : '')}
+          {stat('travelling', 'Travelling now', String(travelling.length), travelling.length ? 'Check in on these clients' : 'Nobody is away', Plane)}
         </div>))}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -152,16 +153,16 @@ export function BookingList() {
       {!form && <Err e={err} />}
       {archived && <p className="text-sm text-muted mb-3">Deleted bookings are hidden from lists and reports but nothing is lost.{writer ? ' Restore one to bring it back.' : ' Ask finance or an admin to restore one.'}</p>}
       {rows === null ? <Skeleton className="h-64" /> : (
-        <Table rows={shown} onRow={(r) => nav(`/bookings/${r.id}`)}
+        <Table rows={shown} noun="bookings" onRow={(r) => nav(`/bookings/${r.id}`)}
           empty={all.length === 0 ? (archived ? 'No deleted bookings.' : q ? `No booking matches “${q}”.` : editor ? 'No bookings yet — click “New booking” to start your first one.' : 'No bookings yet.') : `Nothing in “${TABS.find((t) => t.key === tab)!.label}”${q ? ` matching “${q}”` : ''}.`}
           cols={[
-            { h: 'Booking', render: (r) => <><span className="num font-medium">{r.reference}</span>{r.destination && <div className="text-xs text-muted">{r.destination}</div>}</> },
-            { h: 'Client', render: (r) => r.client_name },
+            { h: 'Booking', render: (r) => <><span className="num font-semibold">{r.reference}</span>{r.destination && <div className="text-xs text-muted flex items-center gap-1"><MapPin size={11} className="shrink-0" />{r.destination}</div>}</> },
+            { h: 'Client', render: (r) => <div className="flex items-center gap-2.5 min-w-0"><Avatar name={r.client_name ?? '?'} size={28} /><span className="truncate">{r.client_name}</span></div> },
             { h: 'Travel', render: (r) => { const w = when(r.travel_start, r.travel_end); return r.travel_start ? <><span className="num whitespace-nowrap">{day(r.travel_start)}{r.travel_end ? ` → ${day(r.travel_end).slice(5)}` : ''}</span>{!archived && !TERMINAL.includes(r.status) && w.text && <div className={`text-xs ${whenTone[w.tone]}`}>{w.text}</div>}</> : <span className="text-muted">No dates yet</span>; } },
             { h: 'Status', render: (r) => <Pill s={r.status} /> },
-            { h: 'Agent', render: (r) => r.agent_name ?? <span className="text-muted">Unassigned</span> },
+            { h: 'Agent', render: (r) => (r.agent_name ? <span className="whitespace-nowrap">{r.agent_name}</span> : <span className="text-xs text-warn">Unassigned</span>) },
             { h: 'Selling', right: true, render: (r) => (r.selling_net > 0 ? money(r.selling_net, r.currency) : <span className="text-muted">Nothing added</span>) },
-            { h: 'Margin', right: true, render: (r) => margin(r.selling_net, r.cost) },
+            { h: 'Margin', right: true, render: (r) => { const m = r.selling_net > 0 ? ((r.selling_net - r.cost) / r.selling_net) * 100 : null; return <span className={m === null ? 'text-muted' : m < 0 ? 'text-danger font-medium' : ''}>{margin(r.selling_net, r.cost)}</span>; } },
             { h: '', render: (r) => <div className="whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>{archived
               ? (writer && <button className="btn-ghost inline-flex items-center gap-1" onClick={async () => { try { await api(`/bookings/${r.id}/restore`, 'POST', {}); setNote(`${r.reference} was restored.`); load(); } catch (x: any) { setErr(x.message); } }}><ArchiveRestore size={14} /> Restore</button>)
               : (editor && <button className="btn-ghost text-danger" title="Delete booking" aria-label={`Delete ${r.reference}`} onClick={() => setDel(r)}><Archive size={14} /></button>)}</div> }]} />
