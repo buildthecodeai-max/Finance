@@ -49,7 +49,7 @@ describe('overview and directory', () => {
     const found = (await P('GET', `/agencies?q=${encodeURIComponent(name)}`)).body; expect(found.rows).toHaveLength(1); expect(found.rows[0]).toMatchObject({ id: C.agencyId, status: 'active', plan_code: 'growth', seats: 1 });
     expect((await P('GET', '/agencies?status=active&plan=growth')).body.rows.some((r: any) => r.id === C.agencyId)).toBe(true); expect((await P('GET', '/agencies?plan=starter&q=' + encodeURIComponent(name))).body.rows).toHaveLength(0);
     const d = (await P('GET', `/agencies/${C.agencyId}`)); expect(d.body.members).toHaveLength(1); expect(JSON.stringify(d.body)).not.toMatch(/password|hash|totp_secret/i); expect(d.body.usage).toMatchObject({ seats: 1 });
-    expect((await P('GET', '/audit')).body.some((e: any) => e.action === 'view_agency' && e.agency_id === C.agencyId && e.admin_email === op.email)).toBe(true);
+    expect((await P('GET', '/audit?size=1000')).body.rows.some((e: any) => e.action === 'view_agency' && e.agency_id === C.agencyId && e.admin_email === op.email)).toBe(true);
     expect((await P('GET', '/agencies/999999')).status).toBe(404);
   });
 });
@@ -71,7 +71,7 @@ describe('actions on an agency', () => {
     expect((await sub(X)).status).toBe('suspended');                                                                                                         // paying does not lift an operator hold
     expect((await P('POST', `/agencies/${id}/reactivate`, { reason: 'Investigation closed, no fraud' })).status).toBe(200); expect((await sub(X)).status).toBe('active'); expect((await X.post('/clients', { name: 'Ok', currency: 'USD' })).status).toBe(201);
     expect((await P('POST', `/agencies/${id}/reactivate`, { reason: 'again again' })).status).toBe(409);
-    const actions = (await P('GET', '/audit')).body.filter((a: any) => a.agency_id === id).map((a: any) => a.action); for (const a of ['extend_trial', 'set_plan', 'grant_manual', 'suspend', 'reactivate']) expect(actions).toContain(a);
+    const actions = (await P('GET', '/audit?size=1000')).body.rows.filter((a: any) => a.agency_id === id).map((a: any) => a.action); for (const a of ['extend_trial', 'set_plan', 'grant_manual', 'suspend', 'reactivate']) expect(actions).toContain(a);
     expect((await sql("SELECT COUNT(*) n FROM billing_events WHERE agency_id = ? AND kind IN ('platform_suspended','platform_reactivated','trial_extended')", [id]))[0].n).toBe(3);
     expect((await X.get('/admin/security-events')).body.some((e: any) => e.event === 'platform_suspended')).toBe(true);                                       // the customer can see it too
   });
@@ -138,7 +138,7 @@ describe('plan management', () => {
     const u = await P('PUT', `/plans/${id}`, { ...body, max_seats: 9, features: ['portal', 'automation'] }); expect(u.status).toBe(200); expect(u.body.agencies_affected).toBe(1);
     expect((await T1.get('/billing/subscription')).body.limits.seats).toBe(9); expect((await T1.get('/automation/rules')).status).toBe(200);
     const plan = (await P('GET', '/plans')).body.find((p: any) => p.code === code); expect(plan).toMatchObject({ agencies: 1, max_seats: 9 }); expect((await call(A.token, 'GET', '/platform/plans')).status).toBe(404);
-    expect((await P('GET', '/audit')).body.find((a: any) => a.action === 'plan_update' && /max_seats: 2 → 9/.test(a.detail))).toBeTruthy();
+    expect((await P('GET', '/audit?size=1000')).body.rows.find((a: any) => a.action === 'plan_update' && /max_seats: 2 → 9/.test(a.detail))).toBeTruthy();
     expect((await P('GET', '/security-events')).status).toBe(200); expect((await P('GET', '/system')).body.health.ok).toBe(true);
     await sql('UPDATE plans SET active = 0 WHERE id = ?', [id]);   // keep the shared plan list clean for other test files
   });
@@ -159,7 +159,7 @@ describe('operator roles', () => {
     expect(results.billing).toMatchObject({ read: 200, detail: 200, trial: 200, plan: 200, support: 403, suspend: 403, operators: 403 });
     expect(results.admin).toMatchObject({ read: 200, detail: 200, trial: 200, plan: 200, support: 201, suspend: 202, operators: 200 });
     const ro = await operator({ role: 'readonly' }); await call(ro.token, 'POST', `/platform/agencies/${id}/suspend`, { reason: 'probing around' });
-    const denied = (await P('GET', '/audit')).body.find((a: any) => a.action === 'permission_denied' && a.admin_email === ro.email); expect(denied.detail).toMatch(/suspend.*role readonly/);
+    const denied = (await P('GET', '/audit?size=1000')).body.rows.find((a: any) => a.action === 'permission_denied' && a.admin_email === ro.email); expect(denied.detail).toMatch(/suspend.*role readonly/);
     const body = (await call(ro.token, 'POST', `/platform/agencies/${id}/suspend`, { reason: 'probing around' })).body; expect(body.code).toBe('platform_role_forbidden');
     expect((await call(ro.token, 'GET', '/platform/me')).body).toMatchObject({ role: 'readonly', caps: ['read'] });
     expect((await P('GET', '/operators')).body.map((x: any) => x.role)).toContain('readonly');
@@ -192,7 +192,7 @@ describe('two-person approval for suspensions', () => {
     const ok = await call(op2.token, 'POST', `/platform/approvals/${req.body.approval_id}/approve`, { note: 'Evidence reviewed' }); expect(ok.status).toBe(200);
     expect(await sub(X)).toMatchObject({ status: 'suspended', platform_hold: 1 }); expect((await X.post('/clients', { name: 'Blocked', currency: 'USD' })).status).toBe(402);
     expect((await call(op2.token, 'POST', `/platform/approvals/${req.body.approval_id}/approve`, {})).status).toBe(409);                                       // already decided
-    const trail = (await P('GET', '/audit')).body.filter((a: any) => a.agency_id === id); const actions = trail.map((a: any) => a.action); for (const a of ['suspend_requested', 'suspend_approved', 'suspend']) expect(actions).toContain(a);
+    const trail = (await P('GET', '/audit?size=1000')).body.rows.filter((a: any) => a.agency_id === id); const actions = trail.map((a: any) => a.action); for (const a of ['suspend_requested', 'suspend_approved', 'suspend']) expect(actions).toContain(a);
     expect(trail.find((a: any) => a.action === 'suspend_approved').detail).toContain(`requested by ${op.email}, approved by ${op2.email}`);
     expect((await P('GET', '/overview')).body).toHaveProperty('pending_approvals');
   });
@@ -227,7 +227,7 @@ describe('two-person approval for suspensions', () => {
     expect((await P('PUT', `/plans/${id}`, { ...body, features: ['A > B > C'] })).status).toBe(400);
     const u = await P('PUT', `/plans/${id}`, { ...body, currency: 'eur', features: ['portal', 'Reports'] }); expect(u.status).toBe(200);
     expect((await P('GET', '/plans')).body.find((p: any) => p.code === code)).toMatchObject({ currency: 'EUR', features: ['portal', 'Reports'] });
-    expect((await P('GET', '/audit')).body.find((a: any) => a.action === 'plan_update' && /currency: USD → EUR/.test(a.detail))).toBeTruthy();
+    expect((await P('GET', '/audit?size=1000')).body.rows.find((a: any) => a.action === 'plan_update' && /currency: USD → EUR/.test(a.detail))).toBeTruthy();
     await sql('UPDATE plans SET active = 0 WHERE id = ?', [id]);
   });
 });
@@ -247,7 +247,7 @@ describe('managing operators and agency users from the console', () => {
     expect((await call(target.token, 'PUT', `/platform/operators/${peer.body.user.id}`, { role: 'admin' })).status).toBe(403);   // billing role cannot manage operators
     expect((await P('DELETE', `/operators/${target.id}`, { reason: 'left the company' })).status).toBe(200);
     expect((await call(target.token, 'GET', '/platform/overview')).status).toBe(404);                           // revoked at once
-    expect((await P('GET', '/audit')).body.find((a: any) => a.action === 'operator_revoked' && a.detail.includes(target.email))).toBeTruthy();
+    expect((await P('GET', '/audit?size=1000')).body.rows.find((a: any) => a.action === 'operator_revoked' && a.detail.includes(target.email))).toBeTruthy();
   });
 
   it('edits, re-roles and removes people inside an agency, keeping at least one admin', async () => {
@@ -269,7 +269,7 @@ describe('managing operators and agency users from the console', () => {
     const kept = await P('DELETE', `/agencies/${X.agencyId}/users/${fin.userId}`); expect(kept.status).toBe(200); expect(kept.body.account).toBe('kept');
     expect((await sql('SELECT id FROM users WHERE id = ?', [fin.userId]))).toHaveLength(1);
     expect(lone).toBeTruthy();
-    expect((await P('GET', '/audit')).body.find((a: any) => a.action === 'agency_user_remove')).toBeTruthy();
+    expect((await P('GET', '/audit?size=1000')).body.rows.find((a: any) => a.action === 'agency_user_remove')).toBeTruthy();
     expect((await call(A.token, 'PUT', `/platform/agencies/${X.agencyId}/users/${X.userId}`, { role: 'agent' })).status).toBe(404);   // agency admins cannot use the console
   });
 });

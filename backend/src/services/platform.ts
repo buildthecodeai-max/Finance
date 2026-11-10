@@ -495,3 +495,37 @@ export async function agencyRoleCounts() {
   const [r]: any = await pool.query('SELECT role, COUNT(*) people, COUNT(DISTINCT agency_id) agencies FROM memberships GROUP BY role');
   return ['admin', 'finance_manager', 'agent', 'viewer'].map((k) => { const x = r.find((y: any) => y.role === k); return { role: k, people: Number(x?.people ?? 0), agencies: Number(x?.agencies ?? 0) }; });
 }
+
+/* ------------------------------------------------------------------ operator audit log: search, filter, summarise */
+/** Groups of audit actions, so the console can show "what kind of thing is this" and filter by it. Anything not listed counts as "other". */
+export const AUDIT_CATEGORIES: Record<string, string[]> = {
+  views: ['view_agency', 'view_user'],
+  access: ['workspace_access', 'support_session_start', 'support_session_revoke', 'step_up_ok', 'step_up_failed', 'permission_denied'],
+  billing: ['set_plan', 'extend_trial', 'grant_manual', 'plan_create', 'plan_update', 'set_ai_access', 'edit_agency', 'agency_create'],
+  people: ['operator_added', 'operator_role_changed', 'operator_revoked', 'operator_granted_cli', 'operator_role_set_cli', 'operator_revoked_cli', 'disable_user', 'enable_user', 'reset_user_2fa', 'sign_out_user', 'send_user_password_reset', 'agency_user_edit', 'agency_user_remove'],
+  critical: ['suspend', 'suspend_requested', 'suspend_approved', 'suspend_rejected', 'suspend_cancelled', 'reactivate', 'delete_agency'],
+};
+const categoryOf = (action: string) => Object.entries(AUDIT_CATEGORIES).find(([, a]) => a.includes(action))?.[0] ?? 'other';
+
+export async function listAudit(q: { q?: string; category?: string; operator?: string; from?: string; to?: string; page?: number; size?: number }) {
+  const where: string[] = ['1 = 1'], p: any[] = []; const size = Math.min(1000, Math.max(1, q.size ?? 25)), page = Math.max(1, q.page ?? 1);
+  const s = (q.q ?? '').trim().replace(/[%_]/g, '');
+  if (s) { where.push('(a.action LIKE ? OR a.detail LIKE ? OR a.reason LIKE ? OR ag.name LIKE ? OR u.email LIKE ?)'); p.push(...Array(5).fill(`%${s}%`)); }
+  if (q.operator) { where.push('u.email = ?'); p.push(q.operator); }
+  if (q.from) { where.push('a.created_at >= ?'); p.push(`${q.from} 00:00:00`); }
+  if (q.to) { where.push('a.created_at < DATE_ADD(?, INTERVAL 1 DAY)'); p.push(q.to); }
+  const base = `FROM platform_audit_log a JOIN users u ON u.id = a.admin_user_id LEFT JOIN agencies ag ON ag.id = a.agency_id`;
+  const [byAction]: any = await pool.query(`SELECT a.action, COUNT(*) n ${base} WHERE ${where.join(' AND ')} GROUP BY a.action`, p);   // tiles ignore the category chosen, so they can be used to switch between categories
+  const summary: Record<string, number> = { all: 0, views: 0, access: 0, billing: 0, people: 0, critical: 0, other: 0 };
+  for (const r of byAction) { const c = categoryOf(r.action); summary[c] += Number(r.n); summary.all += Number(r.n); }
+  if (q.category && q.category !== 'all') {
+    const known = AUDIT_CATEGORIES[q.category];
+    if (known) { where.push(`a.action IN (${known.map(() => '?').join(',')})`); p.push(...known); }
+    else if (q.category === 'other') { const all = Object.values(AUDIT_CATEGORIES).flat(); where.push(`a.action NOT IN (${all.map(() => '?').join(',')})`); p.push(...all); }
+  }
+  const w = where.join(' AND ');
+  const [[tot]]: any = await pool.query(`SELECT COUNT(*) n ${base} WHERE ${w}`, p);
+  const [rows]: any = await pool.query(`SELECT a.id, a.action, a.agency_id, ag.name agency_name, a.detail, a.reason, a.ip, a.user_agent, a.created_at, a.actor_role, a.before_json, a.after_json, u.email admin_email, u.name admin_name ${base} WHERE ${w} ORDER BY a.id DESC LIMIT ? OFFSET ?`, [...p, size, (page - 1) * size]);
+  const [ops]: any = await pool.query('SELECT DISTINCT u.email FROM platform_audit_log a JOIN users u ON u.id = a.admin_user_id ORDER BY u.email');
+  return { rows: rows.map((r: any) => ({ ...r, category: categoryOf(r.action) })), total: tot.n, page, page_size: size, summary, operators: ops.map((o: any) => o.email) };
+}

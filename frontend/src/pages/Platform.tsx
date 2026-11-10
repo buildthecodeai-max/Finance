@@ -7,6 +7,7 @@ import { useAuth } from '../auth';
 import { Avatar, Err, Field, Modal, Pager, Pill, Skeleton, Table } from '../components/ui';
 import { ThemeMenuButton } from '../components/ThemeToggle';
 import { PlatformOperators, PlatformUsers, rel } from './PlatformPeople';
+import { PlatformAudit } from './PlatformAudit';
 
 const day = (d: any) => (d ? String(d).replace('T', ' ').slice(0, 16) : '—');
 const FEATURES = ['portal', 'accounting_export', 'automation', 'scheduled_reports', 'integrations', 'api', 'ai_assistant'];
@@ -157,7 +158,7 @@ export default function Platform() {
                     </button>
                   ))}
                 </div>
-                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
+                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <PlatformAudit me={me} />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
               </OpCtx.Provider>}
           </div>
         </main>
@@ -870,8 +871,6 @@ function Approvals({ onChange }: { onChange(): void }) {
         <div className="flex gap-1 justify-end"><button className="btn" onClick={() => confirm(`Approve suspending ${r.agency_name}? Their workspace becomes read-only immediately.`) && run(() => api(`/platform/approvals/${r.id}/approve`, 'POST', {}))}>Approve</button><button className="btn-ghost" onClick={() => run(() => api(`/platform/approvals/${r.id}/reject`, 'POST', {}))}>Reject</button></div> }]} /></>;
 }
 
-function Audit() { const [rows, setRows] = useState<any[]>([]); useEffect(() => { api('/platform/audit').then(setRows); }, []);
-  return <Table rows={rows} empty="No operator actions yet" cols={[{ h: 'When', render: (a: any) => <span className="text-xs num">{day(a.created_at)}</span> }, { h: 'Operator', render: (a: any) => <>{a.admin_email}{a.actor_role && <div className="text-xs text-muted capitalize">{a.actor_role}</div>}</> }, { h: 'Action', render: (a: any) => a.action.replace(/_/g, ' ') }, { h: 'Agency', render: (a: any) => a.agency_name ?? '—' }, { h: 'Detail / reason', render: (a: any) => <>{a.detail}{a.reason && <div className="text-xs text-muted">“{a.reason}”</div>}{(a.before_json || a.after_json) && <details className="text-xs text-muted mt-1"><summary className="cursor-pointer">Before / after</summary><pre className="num whitespace-pre-wrap break-all mt-1">{JSON.stringify({ before: a.before_json, after: a.after_json }, null, 1)}</pre></details>}</> }]} />; }
 function SecurityEvents() { const [rows, setRows] = useState<any[]>([]); useEffect(() => { api('/platform/security-events').then(setRows); }, []);
   return <Table rows={rows} empty="No events" cols={[{ h: 'When', render: (a: any) => <span className="text-xs num">{day(a.created_at)}</span> }, { h: 'Agency', render: (a: any) => a.agency_name ?? '—' }, { h: 'Event', render: (a: any) => a.event.replace(/_/g, ' ') }, { h: 'Detail', render: (a: any) => a.detail }, { h: 'IP', render: (a: any) => <span className="text-xs num">{a.ip}</span> }]} />; }
 function System() { const [s, setS] = useState<any>(null); useEffect(() => { api('/platform/system').then(setS); }, []);

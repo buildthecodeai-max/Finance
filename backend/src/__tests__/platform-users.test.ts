@@ -100,3 +100,19 @@ describe('other account actions', () => {
     expect(me).toMatchObject({ email: op.email, role: 'admin', totp_enabled: 1, disabled_at: null }); expect(me.last_seen).toBeTruthy(); expect(typeof me.actions_30d).toBe('number');
   });
 });
+
+describe('audit log search', () => {
+  it('filters by category, operator, text and dates, counts each category, and pages', async () => {
+    const u = await person('Gus'); await P('GET', `/users/${u.id}`); await P('POST', `/users/${u.id}/sign-out`, { reason: 'audit search test' });
+    const all = await P('GET', '/audit'); expect(all.status).toBe(200); expect(all.body.page_size).toBe(25); expect(all.body.operators).toContain(op.email);
+    const sm = all.body.summary; expect(sm.all).toBe(sm.views + sm.access + sm.billing + sm.people + sm.critical + sm.other); expect(sm.views).toBeGreaterThan(0); expect(sm.people).toBeGreaterThan(0);
+    const people = await P('GET', '/audit?category=people&size=1000'); expect(people.body.rows.length).toBeGreaterThan(0); expect(people.body.rows.every((r: any) => r.category === 'people')).toBe(true);
+    expect(people.body.summary.all).toBe(sm.all);                                                           // the category tiles do not shrink when one is chosen
+    const hit = await P('GET', `/audit?q=${encodeURIComponent('audit search test')}`); expect(hit.body.rows).toHaveLength(1); expect(hit.body.rows[0]).toMatchObject({ action: 'sign_out_user', admin_email: op.email, category: 'people' });
+    expect((await P('GET', `/audit?operator=${encodeURIComponent('nobody@x.test')}`)).body.total).toBe(0);
+    const today = (await sql("SELECT DATE_FORMAT(created_at, '%Y-%m-%d') d FROM platform_audit_log WHERE reason = 'audit search test' LIMIT 1"))[0].d;     // the database's own day, whatever its time zone expect((await P('GET', `/audit?from=${today}&to=${today}&q=${encodeURIComponent('audit search test')}`)).body.total).toBe(1);
+    expect((await P('GET', '/audit?from=2000-01-01&to=2000-01-02')).body.total).toBe(0); expect((await P('GET', '/audit?from=bad')).status).toBe(400);
+    const paged = await P('GET', '/audit?size=2&page=2'); expect(paged.body.rows.length).toBeLessThanOrEqual(2); expect(paged.body.page).toBe(2);
+    const ro = await operator('readonly'); expect((await call(ro.token, 'GET', '/platform/audit')).status).toBe(200);              // reading the audit log is open to every operator role
+  });
+});
