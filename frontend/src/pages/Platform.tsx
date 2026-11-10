@@ -1,9 +1,10 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { Activity, AlertTriangle, Building2, ScrollText, Server, CheckSquare, Clock, DollarSign, Layers, LayoutDashboard, Plane, Search, Settings, ShieldAlert, Users } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowRight, Building2, ScrollText, Server, CheckSquare, Clock, CornerDownLeft, DollarSign, Layers, LayoutDashboard, LogOut, Plane, Plus, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
-import { Err, Field, Modal, Pill, Table } from '../components/ui';
+import { Avatar, Err, Field, Modal, Pill, Table } from '../components/ui';
 import { ThemeMenuButton } from '../components/ThemeToggle';
 
 const day = (d: any) => (d ? String(d).replace('T', ' ').slice(0, 16) : '—');
@@ -29,11 +30,57 @@ const TAB_HEAD: Record<string, [string, string]> = {
   operators: ['Operators', 'Who can use this console, and what they can do.'], security: ['Security events', 'Sign-in and access events across all agencies.'], system: ['System', 'Service health and background jobs.'],
 };
 
+
+/* ------------------------------------------------------------------ command palette (⌘K) ------------------------------------------------------------------ */
+type PaletteItem = { id: string; label: string; hint: string; icon: any; run(): void };
+/** Jump to any section, or type two letters to find an agency. Arrow keys move, Enter opens, Esc closes. */
+function Palette({ tabs, onTab, onAgency, onClose }: { tabs: [Tab, string][]; onTab(t: Tab): void; onAgency(id: number): void; onClose(): void }) {
+  const [q, setQ] = useState(''); const [ag, setAg] = useState<any[]>([]); const [sel, setSel] = useState(0); const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (q.trim().length < 2) { setAg([]); return; }
+    let live = true; const h = setTimeout(() => api(`/platform/agencies?q=${encodeURIComponent(q.trim())}`).then((r) => live && setAg(r.rows.slice(0, 6))).catch(() => live && setAg([])), 200);
+    return () => { live = false; clearTimeout(h); };
+  }, [q]);
+  const s = q.trim().toLowerCase();
+  const items: PaletteItem[] = [
+    ...ag.map((a) => ({ id: `a${a.id}`, label: a.name, hint: `Agency #${a.id} · ${a.plan_name ?? 'no plan'} · ${a.status ?? 'cancelled'}`, icon: Building2, run: () => onAgency(a.id) })),
+    ...tabs.filter(([, l]) => !s || l.toLowerCase().includes(s)).map(([k, l]) => ({ id: k, label: l, hint: TAB_HEAD[k][1], icon: TAB_ICON[k], run: () => onTab(k) })),
+  ];
+  useEffect(() => { setSel(0); }, [q, ag.length]);
+  useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }); }, [sel]);
+  const key = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSel((i) => Math.min(items.length - 1, i + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((i) => Math.max(0, i - 1)); }
+    else if (e.key === 'Enter' && items[sel]) { e.preventDefault(); items[sel].run(); onClose(); }
+    else if (e.key === 'Escape') onClose();
+  };
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/55 p-4 pt-[12vh] backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div role="dialog" aria-label="Command palette" className="pop-in w-full max-w-xl overflow-hidden rounded-2xl border border-line bg-surface shadow-pop" onKeyDown={key}>
+        <div className="flex items-center gap-3 border-b border-line px-4"><Search size={16} className="shrink-0 text-muted" />
+          <input autoFocus className="h-12 w-full bg-transparent text-sm outline-none focus-visible:!ring-0 focus-visible:!ring-offset-0 placeholder:text-muted" placeholder="Jump to a section, or search agencies…" aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+          <kbd className="kbd">esc</kbd></div>
+        <div ref={list} role="listbox" className="max-h-80 overflow-auto p-2">
+          {!items.length && <div className="px-3 py-8 text-center text-sm text-muted">{q.trim().length < 2 ? 'Nothing matches.' : 'No section or agency matches.'}</div>}
+          {items.map((it, i) => { const I = it.icon; return (
+            <button key={it.id} role="option" aria-selected={i === sel} onMouseEnter={() => setSel(i)} onClick={() => { it.run(); onClose(); }}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${i === sel ? 'bg-accent/12 bg-accent/10' : ''}`}>
+              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${i === sel ? 'bg-accent text-accent-ink' : 'bg-surface2 text-muted'}`}><I size={15} /></span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{it.label}</span><span className="block truncate text-xs text-muted">{it.hint}</span></span>
+              {i === sel && <CornerDownLeft size={14} className="shrink-0 text-muted" />}</button>); })}
+        </div>
+        <div className="flex items-center gap-4 border-t border-line bg-surface2/50 px-4 py-2 text-[11px] text-muted"><span><kbd className="kbd">↑</kbd> <kbd className="kbd">↓</kbd> move</span><span><kbd className="kbd">↵</kbd> open</span><span className="ml-auto">Type 2+ letters to search agencies</span></div>
+      </div>
+    </div>, document.body);
+}
+
 /** Operator-only console: fleet overview, agencies, plans, audit. Every change asks for a reason and is written to an append-only log. */
 export default function Platform() {
   const { user, ready, logout } = useAuth(); const nav = useNavigate();
   const [tab, setTab] = useState<Tab>('dashboard'); const [need2fa, setNeed2fa] = useState(false);
   const [me, setMe] = useState<Me | null>(null); const [pending, setPending] = useState(0);
+  const [palette, setPalette] = useState(false); const [focus, setFocus] = useState<number | null>(null);
+  useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
   useEffect(() => { if (tab) refreshPending(); }, [tab, me]);
   const refreshPending = () => { if (me?.caps.includes('suspend')) api('/platform/approvals?status=pending').then((r) => setPending(r.length)).catch(() => {}); };
   useEffect(() => { if (user?.is_platform_admin) api('/platform/me').then(setMe).catch((e) => e.data?.code === 'platform_2fa_required' ? setNeed2fa(true) : null); }, [user]);
@@ -56,13 +103,11 @@ export default function Platform() {
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-line bg-surface/80 backdrop-blur px-4 md:px-8 h-14 flex items-center justify-between shrink-0 sticky top-0 z-30">
         <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-accent text-accent-ink grid place-items-center shrink-0"><Plane size={17} strokeWidth={2.2} /></div>
-          <span className="text-sm font-semibold">Platform console</span>
-          <span className="text-xs text-muted hidden sm:inline">· {user.email}</span>
-          {me && <span className="pill bg-surface2 text-muted capitalize">{me.role}</span>}
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-accent to-info text-accent-ink grid place-items-center shrink-0 shadow-sm"><Plane size={17} strokeWidth={2.2} /></div>
+          <span className="text-sm font-semibold tracking-tight">Travel CRM <span className="text-muted font-normal">· Platform</span></span>
         </div>
         <div className="flex items-center gap-3">
-          {me && !need2fa && <div className="hidden lg:flex items-center gap-2 bg-surface2 border border-line rounded-lg px-3 h-8 text-xs text-muted cursor-default"><Search size={12} className="shrink-0" /><span>Search agencies…</span><kbd className="kbd ml-1">⌘K</kbd></div>}
+          {me && !need2fa && <button type="button" onClick={() => setPalette(true)} aria-label="Open command palette" className="hidden lg:flex items-center gap-2 bg-surface2 border border-line rounded-lg pl-3 pr-1.5 h-8 w-64 text-xs text-muted hover:border-accent/50 hover:text-fg transition"><Search size={12} className="shrink-0" /><span className="flex-1 text-left">Search agencies or jump to…</span><kbd className="kbd">⌘K</kbd></button>}
           <div className="flex items-center gap-1.5 text-[11px] text-muted"><div className="live-dot" /><span className="hidden sm:inline">Live</span></div>
           <button className="btn-ghost" onClick={() => nav('/')}>Workspace</button><ThemeMenuButton /><button className="btn-ghost" onClick={async () => { await logout(); nav('/login'); }}>Sign out</button>
         </div>
@@ -71,13 +116,13 @@ export default function Platform() {
       <div className="flex flex-1 min-h-0">
         {/* Sidebar (desktop) */}
         {me && !need2fa && (
-          <nav className="w-60 shrink-0 bg-surface border-r border-line py-5 px-3 hidden md:flex flex-col overflow-y-auto">
+          <nav className="w-60 shrink-0 bg-surface border-r border-line py-5 px-3 hidden md:flex flex-col overflow-y-auto sticky top-14 self-start h-[calc(100vh-3.5rem)]">
             {navGroups.map((group) => (
               <div key={group.label} className="mb-4">
                 <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{group.label}</div>
                 {group.items.map(([k, l]) => (
                   <button key={k} role="tab" aria-selected={tab === k}
-                    className={`w-full text-left flex items-center justify-between rounded-lg px-3 py-2 text-sm mb-0.5 transition-colors ${tab === k ? 'bg-accent/10 text-accent font-medium' : 'text-muted hover:bg-surface2 hover:text-fg'}`}
+                    className={`w-full text-left flex items-center justify-between rounded-lg px-3 py-2 text-sm mb-0.5 transition-colors ${tab === k ? 'nav-active text-accent font-medium' : 'text-muted hover:bg-surface2 hover:text-fg'}`}
                     onClick={() => setTab(k)}>
                     <span className="flex items-center gap-2.5">{(() => { const I = TAB_ICON[k]; return <I size={16} className="shrink-0" />; })()}{l}</span>
                     {k === 'approvals' && pending > 0 && (
@@ -87,6 +132,12 @@ export default function Platform() {
                 ))}
               </div>
             ))}
+            <div className="mt-auto rounded-xl border border-line bg-surface2/60 p-3">
+              <div className="flex items-center gap-2.5"><Avatar name={user.name ?? user.email} size={34} />
+                <div className="min-w-0"><div className="truncate text-sm font-medium">{user.name ?? 'Operator'}</div><div className="truncate text-[11px] text-muted">{user.email}</div></div></div>
+              <div className="mt-2.5 flex items-center justify-between"><span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium capitalize text-accent"><ShieldCheck size={11} />{me.role}</span>
+                <button className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-fg" onClick={async () => { await logout(); nav('/login'); }}><LogOut size={12} />Sign out</button></div>
+            </div>
           </nav>
         )}
 
@@ -97,7 +148,7 @@ export default function Platform() {
               : !me ? <div className="skeleton h-40" />
               : <OpCtx.Provider value={{ me, guarded }}>
                 {/* Mobile tab strip */}
-                <div className="hidden md:block mb-6"><h1 className="text-2xl font-semibold">{TAB_HEAD[tab][0]}</h1><p className="text-sm text-muted mt-0.5">{TAB_HEAD[tab][1]}</p></div>
+                <div className={`${tab === 'dashboard' ? 'hidden' : 'hidden md:block'} mb-6`}><h1 className="text-2xl font-semibold">{TAB_HEAD[tab][0]}</h1><p className="text-sm text-muted mt-0.5">{TAB_HEAD[tab][1]}</p></div>
                 <div className="flex md:hidden gap-2 mb-5 overflow-x-auto pb-1" role="tablist">
                   {allTabs.map(([k, l]) => (
                     <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'btn' : 'btn-ghost'} onClick={() => setTab(k)}>
@@ -105,7 +156,7 @@ export default function Platform() {
                     </button>
                   ))}
                 </div>
-                {tab === 'dashboard' && <Dashboard onNavigate={setTab} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <Operators />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
+                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <Audit />}{tab === 'security' && <SecurityEvents />}{tab === 'system' && <System />}{tab === 'operators' && <Operators />}{tab === 'approvals' && <Approvals onChange={refreshPending} />}
               </OpCtx.Provider>}
           </div>
         </main>
@@ -136,6 +187,7 @@ export default function Platform() {
           ))}
         </nav>
       )}
+      {palette && me && <Palette tabs={allTabs} onTab={setTab} onAgency={(id) => { if (tab !== 'dashboard' && tab !== 'agencies') setTab('agencies'); setFocus(id); }} onClose={() => setPalette(false)} />}
     </div>
   );
 }
@@ -185,7 +237,7 @@ function NewAgencyModal({ plans, onClose, onDone }: { plans: any[]; onClose(): v
     <div className="flex justify-end mt-2"><button className="btn" disabled={busy || !valid} onClick={submit}>Create agency</button></div>
   </Modal>;
 }
-function Agencies() {
+function Agencies({ focus, onFocused }: { focus?: number | null; onFocused?(): void }) {
   const [res, setRes] = useState<any>({ rows: [], total: 0 }); const [q, setQ] = useState(''); const [status, setStatus] = useState(''); const [page, setPage] = useState(1);
   const { me } = useOp(); const [notice, setNotice] = useState(''); const [detail, setDetail] = useState<any>(null); const [act, setAct] = useState<Act | null>(null); const [err, setErr] = useState('');
   const [newAgency, setNewAgency] = useState(false); const [plans, setPlans] = useState<any[]>([]);
@@ -193,6 +245,7 @@ function Agencies() {
   useEffect(() => { load(); }, [page, status]);
   useEffect(() => { if (me.caps.includes('billing')) api('/platform/plans').then(setPlans); }, []);
   const open = async (id: number) => { try { setDetail(await api(`/platform/agencies/${id}`)); } catch (e: any) { setErr(e.message); } };
+  useEffect(() => { if (focus) { open(focus); onFocused?.(); } }, [focus]);
   return <>
     <Err e={err} />
     <form className="flex flex-wrap gap-2 mb-3" onSubmit={(e) => { e.preventDefault(); setPage(1); load(); }}>
@@ -202,7 +255,7 @@ function Agencies() {
     </form>
     {newAgency && <NewAgencyModal plans={plans} onClose={() => setNewAgency(false)} onDone={(msg) => { setNewAgency(false); setNotice(msg); load(); }} />}
     <Table rows={res.rows} onRow={(r: any) => open(r.id)} empty="No agencies match" cols={[
-      { h: 'Agency', render: (r: any) => <><div className="font-medium">{r.name}</div><div className="text-xs text-muted num">#{r.id} · created {String(r.created_at).slice(0, 10)}</div></> }, { h: 'Plan', render: (r: any) => r.plan_name ?? '—' },
+      { h: 'Agency', render: (r: any) => <div className="flex items-center gap-3 min-w-0"><Avatar name={r.name} size={34} /><div className="min-w-0"><div className="font-medium truncate">{r.name}</div><div className="text-xs text-muted num">#{r.id} · created {String(r.created_at).slice(0, 10)}</div></div></div> }, { h: 'Plan', render: (r: any) => r.plan_name ?? '—' },
       { h: 'Status', render: (r: any) => <><Pill s={r.status ?? 'cancelled'} />{!!r.platform_hold && <span className="text-xs text-danger ml-2">hold</span>}{!!r.is_manual && <span className="text-xs text-muted ml-2">invoiced</span>}</> },
       { h: 'Seats', right: true, render: (r: any) => r.seats }, { h: 'Last active', render: (r: any) => <span className="text-xs num">{day(r.last_active)}</span> }]} />
     <div className="flex items-center justify-between mt-3 text-sm text-muted"><span>{res.total} agencies</span><div className="flex gap-2"><button className="btn-ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button><button className="btn-ghost" disabled={page * res.page_size >= res.total} onClick={() => setPage(page + 1)}>Next</button></div></div>
@@ -351,60 +404,72 @@ function useCountUp(target: number | undefined, duration = 750) {
   return val;
 }
 
-function KpiCard({ label, icon: Icon, rawValue, formattedValue, sub, alert = false, glow, trend, trendDir = 'flat', sparkline = false, index }: {
+const HUE: Record<string, string> = { accent: 'accent', success: 'success', info: 'info', warn: 'warn', danger: 'danger' };
+function KpiCard({ label, icon: Icon, rawValue, formattedValue, sub, alert = false, hue = 'accent', trend, trendDir = 'flat', index }: {
   label: string; icon: any; rawValue?: number; formattedValue?: string; sub?: string;
-  alert?: boolean; glow?: 'accent' | 'success';
-  trend?: string; trendDir?: 'up' | 'down' | 'flat';
-  sparkline?: boolean; index: number;
+  alert?: boolean; hue?: keyof typeof HUE; trend?: string; trendDir?: 'up' | 'down' | 'flat'; index: number;
 }) {
   const counted = useCountUp(rawValue);
   const isLoading = rawValue == null && formattedValue == null;
   const display = formattedValue ?? (rawValue != null ? counted.toLocaleString() : null);
-
+  const h = alert ? 'warn' : hue;
   return (
-    <div
-      className={`card relative overflow-hidden transition-all hover:-translate-y-0.5 kpi-enter ${
-        alert ? 'border-l-4 !border-l-warn border-warn/30 bg-warn/5' : ''
-      }`}
-      style={{ animationDelay: `${index * 55}ms` }}
-    >
-      <div className={`flex items-center gap-1.5 text-xs font-medium mb-1.5 relative z-10 ${alert ? 'text-warn' : 'text-muted'}`}>
-        <Icon size={12} />{label}
+    <div className={`card glow-card kpi-enter overflow-hidden ${alert ? 'border-warn/40' : ''}`} style={{ animationDelay: `${index * 55}ms`, ['--hue' as any]: `var(--${h})` }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className={`text-xs font-medium ${alert ? 'text-warn' : 'text-muted'}`}>{label}</div>
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl" style={{ background: `rgb(var(--${h}) / 0.14)`, color: `rgb(var(--${h}))` }}><Icon size={16} /></span>
       </div>
-      <div className={`text-3xl font-bold num tracking-tight relative z-10 ${
-        alert ? 'text-warn' : glow === 'accent' ? 'text-accent' : glow === 'success' ? 'text-success' : ''
-      }`}>
+      <div className="relative z-10 mt-2 text-3xl font-bold num tracking-tight" style={alert || hue !== 'accent' ? { color: alert ? `rgb(var(--warn))` : undefined } : { color: 'rgb(var(--accent))' }}>
         {isLoading ? <span className="block h-8 w-20 skeleton rounded" /> : display}
       </div>
-      {trend != null ? (
-        <div className={`flex items-center gap-1 text-[11px] font-medium mt-1 relative z-10 ${
-          trendDir === 'up' ? 'text-success' : trendDir === 'down' ? 'text-danger' : 'text-muted'
-        }`}>
-          <span>{trendDir === 'up' ? '↑' : trendDir === 'down' ? '↓' : '→'}</span>
-          <span>{trend}</span>
-        </div>
-      ) : (
-        <div className="text-[11px] text-muted mt-0.5 relative z-10">{sub}</div>
-      )}
-      {sparkline && !isLoading && (
-        <svg className="mt-2 w-full relative z-10" viewBox="0 0 120 28" fill="none" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <linearGradient id={`spk${index}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgb(var(--accent))" stopOpacity="0.2" />
-              <stop offset="100%" stopColor="rgb(var(--accent))" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          <path d="M0 24 C30 24 50 20 70 17 C90 14 105 12 120 11" stroke="rgb(var(--accent))" strokeWidth="1.5" opacity="0.5" />
-          <path d="M0 24 C30 24 50 20 70 17 C90 14 105 12 120 11 L120 28 L0 28 Z" fill={`url(#spk${index})`} />
-          <circle cx="120" cy="11" r="2.5" fill="rgb(var(--accent))" />
-        </svg>
-      )}
+      <div className={`relative z-10 mt-1 flex items-center gap-1 text-[11px] font-medium ${trendDir === 'up' ? 'text-success' : trendDir === 'down' ? 'text-danger' : 'text-muted'}`}>
+        {trend != null ? <><span>{trendDir === 'up' ? '↑' : trendDir === 'down' ? '↓' : '→'}</span><span>{trend}</span></> : <span className="font-normal">{sub}</span>}
+      </div>
     </div>
   );
 }
 
+/** The banner at the top of the dashboard: a greeting, the state of the platform, the headline number and a plan mix donut — all real figures. */
+function Hero({ o, alerts, onNavigate, onNew, canNew, pending }: { o: any; alerts: string[]; onNavigate(t: Tab): void; onNew(): void; canNew: boolean; pending: number }) {
+  const { user } = useAuth(); const hour = new Date().getHours(); const first = String(user?.name ?? 'there').split(' ')[0];
+  const mrr = useCountUp(o ? Math.round(o.mrr + o.manual_mrr) : undefined);
+  const plans: { name: string; n: number }[] = o?.by_plan ?? []; const total = plans.reduce((s, p) => s + p.n, 0);
+  const COL = ['accent', 'info', 'warn', 'success', 'danger'];
+  let acc = 0;
+  return (
+    <section className="hero-mesh rounded-2xl border border-line p-5 md:p-7 kpi-enter" aria-label="Platform summary">
+      <div className="flex flex-wrap items-start justify-between gap-6">
+        <div className="min-w-0 max-w-xl">
+          <div className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium backdrop-blur ${!o ? 'border-line text-muted' : alerts.length ? 'border-warn/40 bg-warn/10 text-warn' : 'border-success/40 bg-success/10 text-success'}`}>
+            {!o ? 'Loading…' : alerts.length ? <><AlertTriangle size={12} />{alerts.length} thing{alerts.length === 1 ? '' : 's'} need{alerts.length === 1 ? 's' : ''} attention</> : <><span className="live-dot" />All clear</>}
+          </div>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight md:text-3xl">{hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}, {first}</h2>
+          <p className="mt-1 text-sm text-muted">{o ? <>{o.agencies} agenc{o.agencies === 1 ? 'y' : 'ies'} on the platform{o.new_30d ? <>, <b className="text-fg">{o.new_30d}</b> joined this month</> : ''}.</> : 'Gathering the latest numbers…'}</p>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {canNew && <button className="btn" onClick={onNew}><Plus size={16} />New agency</button>}
+            <button className="btn-ghost" onClick={() => onNavigate('approvals')}><ShieldCheck size={15} />Approvals{pending > 0 && <span className="ml-0.5 grid h-4 min-w-[1rem] place-items-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{pending}</span>}</button>
+            <button className="btn-ghost" onClick={() => onNavigate('plans')}><Sparkles size={15} />Plans &amp; AI access</button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-6 md:gap-8">
+          <div><div className="text-xs font-medium uppercase tracking-wider text-muted">Monthly recurring revenue</div>
+            <div className="mt-1 text-4xl font-extrabold num tracking-tight md:text-5xl" style={{ background: 'linear-gradient(90deg, rgb(var(--accent)), rgb(var(--info)))', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>{o ? money(mrr) : '—'}</div>
+            <div className="mt-1 text-xs text-muted">{o ? <>{money(o.mrr)} card · {money(o.manual_mrr)} invoiced · {money((o.mrr + o.manual_mrr) * 12)} a year</> : ' '}</div></div>
+          <div className="flex items-center gap-4" aria-label="Agencies by plan">
+            <svg viewBox="0 0 42 42" className="h-24 w-24 -rotate-90" role="img" aria-label={`${total} agencies across ${plans.length} plans`}>
+              <circle cx="21" cy="21" r="15.915" fill="none" stroke="rgb(var(--line))" strokeWidth="5" />
+              {total > 0 && plans.map((p, i) => { const len = (p.n / total) * 100, off = acc; acc += len; return <circle key={p.name} className="donut-seg" cx="21" cy="21" r="15.915" fill="none" stroke={`rgb(var(--${COL[i % COL.length]}))`} strokeWidth="5" strokeDasharray={`${Math.max(0, len - 1)} ${100 - Math.max(0, len - 1)}`} strokeDashoffset={-off} />; })}
+            </svg>
+            <ul className="space-y-1 text-xs">{plans.slice(0, 4).map((p, i) => <li key={p.name} className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: `rgb(var(--${COL[i % COL.length]}))` }} /><span className="text-muted">{p.name}</span><b className="num">{p.n}</b></li>)}</ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ Dashboard ------------------------------------------------------------------ */
-function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
+function Dashboard({ onNavigate, focus, onFocused }: { onNavigate(t: Tab): void; focus?: number | null; onFocused?(): void }) {
   const { me } = useOp();
   const [o, setO] = useState<any>(null);
   const [res, setRes] = useState<any>({ rows: [], total: 0, page_size: 25 });
@@ -433,14 +498,15 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
   }, [o]);
 
   const open = async (id: number) => { try { setDetail(await api(`/platform/agencies/${id}`)); } catch (e: any) { setErr(e.message); } };
+  useEffect(() => { if (focus) { open(focus); onFocused?.(); } }, [focus]);
 
   const kpis = [
-    { icon: Building2, label: 'Total agencies', rawValue: o?.agencies, sub: '', glow: 'accent' as const, trend: o ? `${o.new_30d} new this month` : undefined, trendDir: 'up' as const },
-    { icon: DollarSign, label: 'MRR', formattedValue: o ? money(o.mrr) : undefined, sub: '', sparkline: true, trend: o ? `${money(o.arr)} ARR` : undefined, trendDir: 'flat' as const },
-    { icon: DollarSign, label: 'Invoiced MRR', formattedValue: o ? money(o.manual_mrr) : undefined, sub: '', trend: o ? 'manual billing' : undefined, trendDir: 'flat' as const },
-    { icon: Clock, label: 'Trials expiring', rawValue: o?.trials_ending_7d, sub: 'within 7 days', alert: !!(o?.trials_ending_7d), trend: o ? 'within 7 days' : undefined, trendDir: o?.trials_ending_7d ? 'down' as const : 'flat' as const },
-    { icon: Users, label: 'Support sessions', rawValue: o?.active_support_sessions, sub: '', trend: o ? 'live now' : undefined, trendDir: 'flat' as const },
-    { icon: ShieldAlert, label: 'Operator holds', rawValue: o?.platform_holds, sub: '', alert: !!(o?.platform_holds || o?.pending_approvals), trend: o ? (o.pending_approvals ? `${o.pending_approvals} pending approval` : 'no holds') : undefined, trendDir: o?.platform_holds ? 'down' as const : 'flat' as const },
+    { icon: Building2, label: 'Total agencies', rawValue: o?.agencies, sub: '', hue: 'accent' as const, trend: o ? `${o.new_30d} new this month` : undefined, trendDir: 'up' as const },
+    { icon: DollarSign, label: 'MRR', formattedValue: o ? money(o.mrr) : undefined, sub: '', hue: 'success' as const, trend: o ? `${money(o.arr)} ARR` : undefined, trendDir: 'flat' as const },
+    { icon: DollarSign, label: 'Invoiced MRR', formattedValue: o ? money(o.manual_mrr) : undefined, sub: '', hue: 'info' as const, trend: o ? 'manual billing' : undefined, trendDir: 'flat' as const },
+    { icon: Clock, label: 'Trials expiring', rawValue: o?.trials_ending_7d, sub: 'within 7 days', hue: 'warn' as const, alert: !!(o?.trials_ending_7d), trend: o ? 'within 7 days' : undefined, trendDir: o?.trials_ending_7d ? 'down' as const : 'flat' as const },
+    { icon: Users, label: 'Support sessions', rawValue: o?.active_support_sessions, sub: '', hue: 'info' as const, trend: o ? 'live now' : undefined, trendDir: 'flat' as const },
+    { icon: ShieldAlert, label: 'Operator holds', rawValue: o?.platform_holds, sub: '', hue: 'danger' as const, alert: !!(o?.platform_holds || o?.pending_approvals), trend: o ? (o.pending_approvals ? `${o.pending_approvals} pending approval` : 'no holds') : undefined, trendDir: o?.platform_holds ? 'down' as const : 'flat' as const },
   ];
 
   const alerts: string[] = o ? [
@@ -453,6 +519,7 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
 
   return (
     <div className="space-y-5">
+      <Hero o={o} alerts={alerts} onNavigate={onNavigate} onNew={() => setNewAgency(true)} canNew={me.caps.includes('billing')} pending={o?.pending_approvals ?? 0} />
       {/* KPI strip */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {kpis.map((k, i) => <KpiCard key={k.label} index={i} {...k} />)}
@@ -488,7 +555,7 @@ function Dashboard({ onNavigate }: { onNavigate(t: Tab): void }) {
         <Err e={err} />
         <Table rows={res.rows} onRow={(r: any) => open(r.id)} empty="No agencies match"
           cols={[
-            { h: 'Agency', render: (r: any) => <><div className="font-medium">{r.name}</div><div className="text-xs text-muted num">#{r.id} · {String(r.created_at).slice(0, 10)}</div></> },
+            { h: 'Agency', render: (r: any) => <div className="flex items-center gap-3 min-w-0"><Avatar name={r.name} size={34} /><div className="min-w-0"><div className="font-medium truncate">{r.name}</div><div className="text-xs text-muted num">#{r.id} · {String(r.created_at).slice(0, 10)}</div></div></div> },
             { h: 'Plan', render: (r: any) => <span className="text-sm">{r.plan_name ?? '—'}</span> },
             { h: 'Status', render: (r: any) => <><Pill s={r.status ?? 'cancelled'} />{!!r.platform_hold && <span className="text-xs text-danger ml-1.5">hold</span>}</> },
             { h: 'Seats', right: true, render: (r: any) => r.seats },

@@ -59,3 +59,28 @@
 @keyframes live-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgb(var(--success) / 0.5); } 70% { box-shadow: 0 0 0 7px rgb(var(--success) / 0); } }
 .kpi-enter { animation: kpi-fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 9999px; background: rgb(var(--success)); animation: live-pulse 2.5s ease-in-out infinite; flex-shrink: 0; }
+
+/* Platform console: hero banner, glow cards, command palette (all colours come from the theme tokens, so both themes work) */
+.hero-mesh {
+  position: relative; overflow: hidden; isolation: isolate;
+  background:
+    radial-gradient(60rem 30rem at 0% -20%, rgb(var(--accent) / 0.28), transparent 60%),
+    radial-gradient(40rem 26rem at 100% 0%, rgb(var(--info) / 0.22), transparent 60%),
+    radial-gradient(34rem 22rem at 60% 130%, rgb(var(--success) / 0.14), transparent 60%),
+    rgb(var(--surface));
+}
+.hero-mesh::before {                                   /* faint grid, fades out toward the bottom */
+  content: ''; position: absolute; inset: 0; z-index: -1; opacity: .5;
+  background-image: linear-gradient(rgb(var(--line) / .55) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--line) / .55) 1px, transparent 1px);
+  background-size: 34px 34px; -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 85%); mask-image: linear-gradient(to bottom, #000 0%, transparent 85%);
+}
+.glow-card { position: relative; transition: transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s, border-color .2s; }
+.glow-card:hover { transform: translateY(-2px); border-color: rgb(var(--hue, var(--accent)) / .55); box-shadow: 0 10px 30px -12px rgb(var(--hue, var(--accent)) / .55); }
+.glow-card::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity .2s;
+  background: radial-gradient(18rem 8rem at 100% 0%, rgb(var(--hue, var(--accent)) / .12), transparent 70%); }
+.glow-card:hover::after { opacity: 1; }
+.nav-active { background: linear-gradient(90deg, rgb(var(--accent) / .16), rgb(var(--accent) / .03)); box-shadow: inset 2px 0 0 rgb(var(--accent)); }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+.pop-in { animation: pop-in .16s cubic-bezier(.16,1,.3,1) both; }
+@keyframes donut-draw { from { stroke-dasharray: 0 100; } }
+.donut-seg { animation: donut-draw .9s cubic-bezier(.16,1,.3,1) both; }
