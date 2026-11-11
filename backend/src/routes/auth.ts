@@ -29,7 +29,7 @@ async function issueRefresh(res: any, userId: number) {
 }
 
 async function session(userId: number) {
-  const [[user]]: any = await pool.query('SELECT id, email, name, totp_enabled, is_platform_admin FROM users WHERE id = ?', [userId]);
+  const [[user]]: any = await pool.query('SELECT id, email, name, totp_enabled, totp_required, is_platform_admin FROM users WHERE id = ?', [userId]);
   const [agencies]: any = await pool.query(
     `SELECT a.id, a.name, a.base_currency, a.tax_label, m.role FROM memberships m JOIN agencies a ON a.id = m.agency_id WHERE m.user_id = ?`, [userId]);
   return { accessToken: signAccess(userId), user, agencies };

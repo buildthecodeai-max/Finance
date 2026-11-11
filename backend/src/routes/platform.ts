@@ -27,6 +27,8 @@ platformRouter.get('/agency-roles', P.needs('support'), async (_req, res) => res
 platformRouter.get('/users', P.needs('support'), async (req, res) => res.json(await P.listUsers(parse(z.object({ q: z.string().max(100).optional(), filter: z.enum(P.USER_FILTERS).optional(), page: z.coerce.number().int().min(1).optional() }), req.query))));
 platformRouter.get('/users/:id', P.needs('support'), async (req, res) => { const d = await P.userDetail(UId(req)); await P.audit(req, 'view_user', null, d.user.email); res.json(d); });
 platformRouter.post('/users/:id/reset-2fa', P.needs('suspend'), async (req, res) => res.json(await P.resetUserTwoFactor(req, UId(req), parse(Why, req.body).reason)));
+platformRouter.post('/users/:id/require-2fa', P.needs('suspend'), async (req, res) => res.json(await P.setUserTwoFactor(req, UId(req), true, parse(Why, req.body).reason)));
+platformRouter.post('/users/:id/turn-off-2fa', P.needs('suspend'), async (req, res) => res.json(await P.setUserTwoFactor(req, UId(req), false, parse(Why, req.body).reason)));
 platformRouter.post('/users/:id/sign-out', P.needs('suspend'), async (req, res) => res.json(await P.signOutUserEverywhere(req, UId(req), parse(Why, req.body).reason)));
 platformRouter.post('/users/:id/disable', P.needs('suspend'), async (req, res) => res.json(await P.setUserDisabled(req, UId(req), true, parse(Why, req.body).reason)));
 platformRouter.post('/users/:id/enable', P.needs('suspend'), async (req, res) => res.json(await P.setUserDisabled(req, UId(req), false, parse(Why, req.body).reason)));

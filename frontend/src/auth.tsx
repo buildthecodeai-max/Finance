@@ -6,6 +6,8 @@ interface Ctx {
   user: any; agencies: AgencyRef[]; agency: AgencyRef | null; ready: boolean; support: boolean;
   supportLogin(token: string, agency: { id: number; name: string; base_currency: string; tax_label?: string }): void;
   workspaceLogin(accessToken: string, user: any, agency: { id: number; name: string; base_currency: string; tax_label?: string }): void;
+  /** Re-reads the signed-in person from the server (for example after an administrator changed their 2FA requirement). */
+  reloadUser(): Promise<void>;
   login(email: string, password: string, totp?: string): Promise<void>; logout(): Promise<void>; switchAgency(id: number): void;
   can(...roles: AgencyRef['role'][]): boolean;
   /** Super admin (platform operator): may open any agency's workspace from the sidebar. */
@@ -27,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(r.accessToken, pick?.id ?? null); setAid(pick?.id ?? null); setS({ user: r.user, agencies: r.agencies });
   };
   useEffect(() => { refresh().then((r) => r && apply(r)).finally(() => setReady(true)); }, []);
+  useEffect(() => { const h = () => { refresh().then((r) => r && apply(r)).catch(() => {}); }; window.addEventListener('tf:2fa-required', h); return () => window.removeEventListener('tf:2fa-required', h); }, []);   // the server said a 2FA requirement now applies
 
   const agency = s?.agencies.find((a) => a.id === aid) ?? null;
   // The operator's own token lives only in the refresh cookie, so every call below fetches it fresh and never disturbs the session in use.
@@ -46,6 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supportLogin(token, a) { setSession(token, a.id); setAid(a.id); setSupport(true); setS({ user: { id: 0, name: 'Support (read-only)', email: '' }, agencies: [{ id: a.id, name: a.name, base_currency: a.base_currency, tax_label: a.tax_label ?? 'Tax', role: 'viewer' }] }); },
     /** Platform admin full workspace access: signs in as the agency's admin. Held in memory only; a reload ends it. */
     workspaceLogin(accessToken, user, a) { current.current = a.id; setInAgency(true); setSession(accessToken, a.id); setAid(a.id); setSupport(false); setS({ user, agencies: [{ id: a.id, name: a.name, base_currency: a.base_currency, tax_label: a.tax_label ?? 'Tax', role: 'admin' }] }); },
+    async reloadUser() { const r = await refresh(); if (r) apply(r); },
     async login(email, password, totp) { apply(await api('/auth/login', 'POST', { email, password, totp })); },
     async logout() { await api('/auth/logout', 'POST'); setSession(null, null); setS(null); setSupport(false); },
     switchAgency(id) { localStorage.setItem('agency', String(id)); setSession(null, id); setAid(id); location.reload(); },

@@ -1,4 +1,6 @@
 import { AiButton } from './AiAssistant';
+import TwoFactorSetup from './TwoFactorSetup';
+import { NotificationBell } from './Notifications';
 import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -209,7 +211,7 @@ function SidebarBody({ collapsed, onNavigate, onCollapse, allowedModules }: { co
 
 export default function Layout() {
   const { user, agency, logout } = useAuth();
-  const [bill, setBill] = useState<any>(null); const { support, inAgency, leaveAgency } = useAuth();
+  const [bill, setBill] = useState<any>(null); const { support, inAgency, leaveAgency, reloadUser } = useAuth();
   useEffect(() => { if (agency) api('/billing/subscription').then(setBill).catch(() => setBill(null)); }, [agency?.id, useLocation().pathname]);   // refreshed on navigation so the banner clears after paying
   const role = agency?.role ?? 'viewer';
   const loc = useLocation(); const nav = useNavigate(); const path = loc.pathname;
@@ -220,6 +222,8 @@ export default function Layout() {
   const initials = (user?.name ?? '?').split(' ').map((s: string) => s[0]).slice(0, 2).join('').toUpperCase();
   const g = groupFor(path), l = labelFor(path);
   const canCreate = agency?.role !== 'viewer';
+
+  if (user?.totp_required && !user?.totp_enabled && !support && !inAgency) return <TwoFactorSetup name={String(user.name ?? '').split(' ')[0]} onDone={() => { reloadUser().then(() => location.reload()); }} onLogout={async () => { await logout(); nav('/login'); }} />;
 
   return (
     <div className="min-h-screen">

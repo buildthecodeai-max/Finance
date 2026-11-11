@@ -189,3 +189,25 @@ describe('AI key from the console', () => {
     await P('DELETE', '/settings/ai', { reason: 'cleanup' }); dropAiKeyCache(); expect((await st()).reason).toBe('not_configured'); vi.restoreAllMocks();
   });
 });
+
+describe('turning 2FA on and off for a person', () => {
+  it('requiring it blocks the app until they set it up; turning it off clears it; both audited and guarded', async () => {
+    const u = await person('Gina'); const api = (path: string) => fetch(`${base}/api${path}`, { headers: { authorization: `Bearer ${u.token}`, 'x-agency-id': String(u.agencyId) } }).then((r) => r.json().catch(() => ({})).then((j) => ({ status: r.status, body: j })));
+    expect((await api('/clients')).status).toBe(200);
+    expect((await P('POST', `/users/${u.id}/require-2fa`, {})).status).toBe(400);                                              // a reason is needed
+    expect((await P('POST', `/users/${u.id}/require-2fa`, { reason: 'Handles client passports' })).status).toBe(200);
+    expect((await P('POST', `/users/${u.id}/require-2fa`, { reason: 'again please' })).status).toBe(409);
+    const blocked = await api('/clients'); expect(blocked.status).toBe(403); expect(blocked.body.code).toBe('two_factor_required');       // cannot use the app until it is set up
+    const me = await call(null, 'POST', '/auth/login', { email: u.email, password: PASSWORD }); expect(me.status).toBe(200); expect(me.body.user).toMatchObject({ totp_required: 1, totp_enabled: 0 });   // they can still sign in, to set it up
+    const t = me.body.accessToken; const setup = await call(t, 'POST', '/auth/2fa/setup', {}); expect(setup.status).toBe(200); await call(t, 'POST', '/auth/2fa/enable', { code: authenticator.generate(setup.body.secret) });
+    expect((await api('/clients')).status).toBe(200);                                                                          // set up: the app opens again
+    expect((await P('POST', `/users/${u.id}/require-2fa`, { reason: 'already on' })).status).toBe(409);
+    const off = await P('POST', `/users/${u.id}/turn-off-2fa`, { reason: 'Moved to single sign-on' }); expect(off.status).toBe(200);
+    const row = (await sql('SELECT totp_enabled, totp_required FROM users WHERE id = ?', [u.id]))[0]; expect(row).toMatchObject({ totp_enabled: 0, totp_required: 0 });
+    expect((await call(null, 'POST', '/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);              // no code needed any more
+    expect((await P('POST', `/users/${u.id}/turn-off-2fa`, { reason: 'nothing to turn off' })).status).toBe(409);
+    expect((await P('POST', `/users/${op.id}/require-2fa`, { reason: 'myself' })).status).toBe(409);
+    expect((await sql("SELECT action FROM platform_audit_log WHERE detail LIKE ? AND action IN ('require_user_2fa','turn_off_user_2fa') ORDER BY id", [`${u.email}%`])).map((r) => r.action)).toEqual(['require_user_2fa', 'turn_off_user_2fa']);
+    const sup = await operator('support'); expect((await call(sup.token, 'POST', `/platform/users/${u.id}/require-2fa`, { reason: 'not allowed' })).status).toBe(403);
+  });
+});

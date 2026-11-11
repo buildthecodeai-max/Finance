@@ -112,7 +112,7 @@ export async function deleteAgency(id: number): Promise<{ name: string; tables: 
   finally { conn.release(); }
 }
 export async function listOperators() {
-  const [r]: any = await pool.query(`SELECT u.id, u.email, u.name, u.platform_role role, u.totp_enabled, u.disabled_at, u.created_at,
+  const [r]: any = await pool.query(`SELECT u.id, u.email, u.name, u.platform_role role, u.totp_enabled, u.totp_required, u.disabled_at, u.created_at,
       (SELECT MAX(t.created_at) FROM refresh_tokens t WHERE t.user_id = u.id) last_seen,
       (SELECT COUNT(*) FROM platform_audit_log a WHERE a.admin_user_id = u.id AND a.created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)) actions_30d
     FROM users u WHERE u.is_platform_admin = 1 ORDER BY FIELD(u.platform_role, 'admin', 'billing', 'support', 'readonly'), u.email`);
@@ -173,7 +173,7 @@ export async function listAgencies(q: { q?: string; status?: string; plan?: stri
 
 export async function agencyDetail(id: number) {
   const a = await agencyOrThrow(id), s = await getSub(id);
-  const [members]: any = await pool.query('SELECT m.user_id, m.role, u.name, u.email, u.totp_enabled FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.agency_id = ? ORDER BY m.role, u.name', [id]);
+  const [members]: any = await pool.query('SELECT m.user_id, m.role, u.name, u.email, u.totp_enabled, u.totp_required FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.agency_id = ? ORDER BY m.role, u.name', [id]);
   const [events]: any = await pool.query('SELECT kind, detail, created_at FROM billing_events WHERE agency_id = ? ORDER BY id DESC LIMIT 30', [id]);
   const [secEv]: any = await pool.query('SELECT event, detail, ip, created_at FROM security_events WHERE agency_id = ? ORDER BY id DESC LIMIT 30', [id]);
   const [sessions]: any = await pool.query(`SELECT ss.id, ss.reason, ss.expires_at, ss.revoked_at, ss.created_at, u.email admin_email FROM support_sessions ss JOIN users u ON u.id = ss.admin_user_id WHERE ss.agency_id = ? ORDER BY ss.id DESC LIMIT 10`, [id]);
@@ -432,7 +432,7 @@ export async function listUsers(q: { q?: string; filter?: string; page?: number 
   else if (f === 'owners') where.push("EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id AND m.role = 'admin')");
   const w = where.join(' AND ');
   const [[tot]]: any = await pool.query(`SELECT COUNT(*) n FROM users u WHERE ${w}`, p);
-  const [rows]: any = await pool.query(`SELECT u.id, u.name, u.email, u.totp_enabled, u.is_platform_admin, u.platform_role, u.disabled_at, u.created_at,
+  const [rows]: any = await pool.query(`SELECT u.id, u.name, u.email, u.totp_enabled, u.totp_required, u.is_platform_admin, u.platform_role, u.disabled_at, u.created_at,
       (SELECT MAX(t.created_at) FROM refresh_tokens t WHERE t.user_id = u.id) last_seen FROM users u WHERE ${w} ORDER BY u.created_at DESC, u.id DESC LIMIT ? OFFSET ?`, [...p, USER_SIZE, (page - 1) * USER_SIZE]);
   const ids = rows.map((r: any) => r.id);
   const [ms]: any = ids.length ? await pool.query('SELECT m.user_id, m.agency_id, a.name agency_name, m.role FROM memberships m JOIN agencies a ON a.id = m.agency_id WHERE m.user_id IN (?) ORDER BY a.name', [ids]) : [[]];
@@ -442,7 +442,7 @@ export async function listUsers(q: { q?: string; filter?: string; page?: number 
 }
 
 async function userOrThrow(id: number) {
-  const [[u]]: any = await pool.query('SELECT id, name, email, totp_enabled, is_platform_admin, platform_role, disabled_at, disabled_reason, created_at FROM users WHERE id = ?', [id]);
+  const [[u]]: any = await pool.query('SELECT id, name, email, totp_enabled, totp_required, is_platform_admin, platform_role, disabled_at, disabled_reason, created_at FROM users WHERE id = ?', [id]);
   if (!u) throw new HttpError(404, 'User not found'); return u;
 }
 const revokeSessions = async (userId: number) => ((await pool.query('UPDATE refresh_tokens SET revoked = 1, revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP()) WHERE user_id = ? AND revoked = 0', [userId])) as any)[0].affectedRows as number;
@@ -649,4 +649,22 @@ export async function removeAiKey(req: Request, reasonIn: unknown) {
   if (!r.affectedRows) throw new HttpError(409, 'Nothing was saved in the console.');
   dropAiKeyCache(); await audit(req, 'remove_ai_key', null, 'AI settings removed from the console', reason);
   return aiKeyInfo();
+}
+
+
+/** Turns two-factor sign-in on or off for a person. "On" requires it: they carry on until their next request, then must set up an authenticator before anything else works. "Off" removes their authenticator and the requirement, and signs them out. */
+export async function setUserTwoFactor(req: Request, id: number, on: boolean, reason: string) {
+  notSelf(req, id, on ? 'require 2FA for' : 'turn off 2FA for'); const u = await userOrThrow(id);
+  if (on) {
+    if (u.totp_enabled) throw new HttpError(409, 'This person already uses two-factor sign-in.');
+    if (u.totp_required) throw new HttpError(409, 'Two-factor sign-in is already required for this person. They have not set it up yet.');
+    await pool.query('UPDATE users SET totp_required = 1 WHERE id = ?', [id]);
+    await audit(req, 'require_user_2fa', null, `${u.email}: 2FA now required`, reason, { before: { totp_required: false }, after: { totp_required: true } });
+    return { email: u.email, required: true, sessions_ended: 0 };
+  }
+  if (!u.totp_enabled && !u.totp_required) throw new HttpError(409, 'Two-factor sign-in is not on for this person.');
+  await pool.query('UPDATE users SET totp_enabled = 0, totp_secret_enc = NULL, totp_last_step = NULL, totp_required = 0 WHERE id = ?', [id]);
+  const ended = await revokeSessions(id);
+  await audit(req, 'turn_off_user_2fa', null, `${u.email}: 2FA turned off, ${ended} session(s) ended`, reason, { before: { totp_enabled: !!u.totp_enabled, totp_required: !!u.totp_required }, after: { totp_enabled: false, totp_required: false } });
+  return { email: u.email, required: false, sessions_ended: ended };
 }

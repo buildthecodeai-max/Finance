@@ -40,6 +40,7 @@ export async function api<T = any>(path: string, method = 'GET', body?: unknown,
   }
   const ct = r.headers.get('content-type') ?? '';
   const data = ct.includes('json') ? await r.json() : await r.text();
+  if (!r.ok && r.status === 403 && data?.code === 'two_factor_required') window.dispatchEvent(new Event('tf:2fa-required'));
   if (!r.ok) throw Object.assign(new Error(data?.error ?? 'Request failed'), { status: r.status, data });
   return data as T;
 }
