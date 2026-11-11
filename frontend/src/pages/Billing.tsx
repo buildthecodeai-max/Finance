@@ -82,16 +82,15 @@ export default function Billing() {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-medium uppercase tracking-wider text-muted">Your plan</span><Pill s={s.status} /></div>
             <h2 className="mt-1 text-3xl font-extrabold tracking-tight">{s.plan.name}</h2>
-            <p className="mt-1 text-sm capitalize text-muted">Billed {s.interval}{s.plan.support_level ? ` · ${s.plan.support_level} support` : ''}{myPrice !== null && mine ? ` · ${money(myPrice, mine.currency)} per ${s.interval === 'yearly' ? 'year' : 'month'}` : ''}</p>
-            {periodPct !== null && (trialLeft !== null || s.current_period_end) && <div className="mt-4 max-w-md">
-              <div className="mb-1 flex items-center justify-between text-xs"><span className="flex items-center gap-1.5 font-medium">{trialLeft !== null ? <><Sparkles size={13} className="text-accent" />Free trial</> : <><CalendarClock size={13} className="text-muted" />{s.cancel_at_period_end ? 'Access ends' : s.manual ? 'Paid until' : 'Next renewal'}</>}</span>
+            <p className="mt-1 text-sm text-muted">{s.plan.description || (s.status === 'trialing' ? 'You are on a free trial of this plan.' : 'Your current subscription.')}</p>
+            {periodPct !== null && (trialLeft !== null || s.current_period_end) && <div className="mt-4 w-full max-w-md sm:w-[28rem]">
+              <div className="mb-1 flex items-center justify-between gap-3 text-xs"><span className="flex items-center gap-1.5 font-medium">{trialLeft !== null ? <><Sparkles size={13} className="text-accent" />Free trial</> : <><CalendarClock size={13} className="text-muted" />{s.cancel_at_period_end ? 'Access ends' : s.manual ? 'Paid until' : 'Next renewal'}</>}</span>
                 <span className={`num ${trialLeft !== null && trialLeft <= 3 ? 'font-medium text-warn' : 'text-muted'}`}>{trialLeft !== null ? `${plural(trialLeft, 'day')} left · ends ${day(s.trial_ends_at)}` : `${day(s.current_period_end)}${renewLeft !== null ? ` · in ${plural(renewLeft, 'day')}` : ''}`}</span></div>
               <div className="h-2 overflow-hidden rounded-full bg-surface2/80"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${periodPct}%`, background: trialLeft !== null && trialLeft <= 3 ? 'rgb(var(--warn))' : 'rgb(var(--accent))' }} /></div>
               {trialLeft !== null && <p className="mt-1.5 text-xs text-muted">Choose a plan below to keep going without interruption.</p>}</div>}
             {s.pending_plan && <p className="mt-3 text-sm"><span className="text-muted">Switching to</span> <b>{s.pending_plan.name}</b> <span className="text-muted">at your next renewal.</span></p>}
           </div>
           <div className="flex flex-col items-start gap-2 sm:items-end">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface/70 px-3 py-1 text-xs backdrop-blur"><CreditCard size={13} className="text-muted" />{s.has_payment_method ? 'Payment method on file' : s.manual && s.status === 'active' ? 'Paid by payment, no automatic renewal' : 'No payment method yet'}</span>
             {admin && <div className="flex flex-wrap gap-2 sm:justify-end">
               {s.has_payment_method && <button className="btn-ghost" disabled={!!busy} onClick={() => go('portal', () => redirect('/billing/portal'))}><ExternalLink size={14} />Payment method &amp; invoices</button>}
               {s.cancel_at_period_end && <button className="btn" disabled={!!busy} onClick={() => go('resume', () => api('/billing/resume', 'POST'), 'Cancellation withdrawn.')}>Keep my subscription</button>}
@@ -99,9 +98,17 @@ export default function Billing() {
               {subscribed && !s.cancel_at_period_end && <button className="btn-ghost text-danger" disabled={!!busy} onClick={() => setAskCancel(true)}>Cancel subscription</button>}</div>}
           </div>
         </div>
+        <dl className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line/70 lg:grid-cols-4">{([
+          ['Price', myPrice !== null && mine ? `${money(myPrice, mine.currency)} / ${s.interval === 'yearly' ? 'year' : 'month'}` : s.status === 'trialing' ? 'Free during trial' : '—'],
+          ['Billing cycle', s.interval === 'yearly' ? 'Yearly' : 'Monthly'],
+          ['Support', s.plan.support_level ? `${String(s.plan.support_level).replace(/^./, (c) => c.toUpperCase())} support` : 'Standard'],
+          ['Payment', s.has_payment_method ? 'Card on file' : s.manual && s.status === 'active' ? 'Paid, no auto-renewal' : 'None added yet'],
+        ] as [string, string][]).map(([l, v]) => <div key={l} className="bg-surface/80 px-4 py-3 backdrop-blur"><dt className="text-[11px] font-medium uppercase tracking-wider text-muted">{l}</dt><dd className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold num">{l === 'Payment' && <CreditCard size={13} className="text-muted" />}{v}</dd></div>)}</dl>
       </section>
 
-      <div className="mb-3"><h2 className="text-lg font-semibold">Usage</h2><p className="text-sm text-muted">What your agency is using against this plan’s limits.</p></div>
+      <nav aria-label="On this page" className="-mt-2 mb-6 flex flex-wrap gap-2 text-sm">{[['usage', 'Usage'], ['plans', 'Plans'], ...(can('admin', 'finance_manager') ? [['history', 'Payment history']] : [])].map(([id, l]) => <a key={id} href={`#${id}`} className="rounded-full border border-line bg-surface px-3 py-1 text-muted transition hover:text-fg" onClick={(e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>{l}</a>)}</nav>
+
+      <div id="usage" className="mb-3 scroll-mt-20"><h2 className="text-lg font-semibold">Usage</h2><p className="text-sm text-muted">What your agency is using against this plan’s limits.</p></div>
       <div className={`mb-5 grid gap-3 sm:grid-cols-2 ${ai?.available || features.includes('ai_assistant') ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
         <Meter label="Team members" used={d.usage.seats} limit={d.limits.seats} icon={Users} /><Meter label="Branches" used={d.usage.branches} limit={d.limits.branches} icon={Building2} />
         <Meter label="Bookings this month" used={d.usage.bookings} limit={d.limits.bookings} icon={CalendarDays} />
@@ -114,7 +121,7 @@ export default function Billing() {
             <span>{FEATURE_LABEL[f] ?? f}{!on && <span className="text-[11px]"> · not on this plan</span>}{on && subs.length > 0 && <span className="block text-xs text-muted">{subs.join(' · ')}</span>}</span></li>; })}</ul>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold">Choose a plan</h2><p className="text-sm text-muted">Change plan at any time. Upgrades apply straight away; downgrades start at your next renewal.</p></div>
+      <div id="plans" className="mb-4 flex scroll-mt-20 flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold">Choose a plan</h2><p className="text-sm text-muted">Change plan at any time. Upgrades apply straight away; downgrades start at your next renewal.</p></div>
         <div className="inline-flex rounded-lg border border-line bg-surface2 p-0.5 text-sm" role="group" aria-label="Billing interval">{(['monthly', 'yearly'] as const).map((i) => <button key={i} aria-pressed={interval === i} className={`h-8 rounded-md px-3.5 capitalize transition ${interval === i ? 'bg-surface font-medium text-fg shadow-sm' : 'text-muted hover:text-fg'}`} onClick={() => setInterval_(i)}>{i}{i === 'yearly' && saving > 0 && <span className="ml-1.5 text-[11px] font-semibold text-accent">Save {saving}%</span>}</button>)}</div></div>
       <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{plans.map((p, idx) => {
         const current = p.code === s.plan.code, cta = rank(p.code) > rank(s.plan.code) ? 'Upgrade' : 'Switch', top = p.features.filter((f: string) => !f.includes(' > ')), hue = TIER_HUE[idx % TIER_HUE.length], recommended = nextUp === p.code;
@@ -137,20 +144,21 @@ export default function Billing() {
             <p className="mt-2 text-[11px] text-muted">One payment, no automatic renewal. Paying early adds time to your plan.</p></div>}
         </article>; })}</div>
 
-      {plans.length > 1 && <div className="card mb-8 !p-0 overflow-hidden"><div className="border-b border-line px-4 py-3 text-sm font-semibold">Compare plans</div>
-        <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>&nbsp;</th>{plans.map((p) => <th key={p.code} className={`text-center ${p.code === s.plan.code ? '!text-accent' : ''}`}>{p.name}</th>)}</tr></thead><tbody>
+      {plans.length > 1 && <details className="card group mb-8 !p-0 overflow-hidden"><summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold">Compare plans side by side<span className="text-xs font-normal text-muted group-open:hidden">Show</span><span className="hidden text-xs font-normal text-muted group-open:inline">Hide</span></summary>
+        <div className="overflow-x-auto border-t border-line"><table className="w-full border-separate border-spacing-0"><thead><tr><th>&nbsp;</th>{plans.map((p) => <th key={p.code} className={`text-center ${p.code === s.plan.code ? '!text-accent' : ''}`}>{p.name}</th>)}</tr></thead><tbody>
           {([['Price', (p: any) => money(price(p), p.currency)], ['Team members', (p: any) => p.max_seats ?? '∞'], ['Branches', (p: any) => p.max_branches ?? '∞'], ['Bookings / month', (p: any) => p.max_bookings_month ?? '∞']] as [string, (p: any) => any][]).map(([l, f]) => <tr key={l}><td className="text-sm text-muted">{l}</td>{plans.map((p) => <td key={p.code} className="text-center text-sm font-medium num">{f(p)}</td>)}</tr>)}
           {Object.keys(FEATURE_LABEL).map((f) => <tr key={f}><td className="text-sm">{FEATURE_LABEL[f]}</td>{plans.map((p) => <td key={p.code} className="text-center">{p.features.includes(f) ? <Check size={16} className="mx-auto text-success" aria-label="Included" /> : <span className="text-muted" aria-label="Not included">—</span>}</td>)}</tr>)}
-        </tbody></table></div></div>}
+        </tbody></table></div></details>}
 
-      {can('admin', 'finance_manager') && <section aria-label="Invoices">
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold">Invoices</h2><p className="text-sm text-muted">Your payment history for this subscription.</p></div>
+      {can('admin', 'finance_manager') && <div id="history" className="mb-1 scroll-mt-20"><h2 className="text-lg font-semibold">Payment history</h2><p className="text-sm text-muted">Every charge for this subscription, with receipts where available.</p></div>}
+      {can('admin', 'finance_manager') && <section aria-label="Invoices" className="mt-3">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3"><h3 className="text-sm font-semibold">Card invoices</h3>
           {paid.length > 0 && <div className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-2"><span className="grid h-8 w-8 place-items-center rounded-lg bg-success/10 text-success"><Receipt size={16} /></span><div><div className="text-[11px] text-muted">Paid to date · {plural(paid.length, 'invoice')}</div><div className="text-base font-bold num">{money(paidTotal, paid[0].currency)}</div></div></div>}</div>
-        <Table rows={invoices} noun="invoices" empty="No invoices yet" cols={[{ h: 'Date', render: (i) => <span className="num">{day(i.paid_at ?? i.created_at)}</span> }, { h: 'Number', render: (i) => <span className="font-medium">{i.number ?? '—'}</span> }, { h: 'Amount', right: true, render: (i) => <span className="num font-medium">{money(i.amount, i.currency)}</span> },
+        <Table rows={invoices} noun="invoices" empty="No card invoices yet" cols={[{ h: 'Date', render: (i) => <span className="num">{day(i.paid_at ?? i.created_at)}</span> }, { h: 'Number', render: (i) => <span className="font-medium">{i.number ?? '—'}</span> }, { h: 'Amount', right: true, render: (i) => <span className="num font-medium">{money(i.amount, i.currency)}</span> },
           { h: 'Status', render: (i) => <Pill s={i.status === 'paid' ? 'paid' : i.status === 'failed' ? 'void' : 'pending'} /> }, { h: '', render: (i) => i.hosted_url && <a className="btn-ghost" href={i.hosted_url} target="_blank" rel="noopener noreferrer">View</a> }]} /></section>}
 
-      {can('admin', 'finance_manager') && rupee.length > 0 && <section aria-label="Rupee payments" className="mt-8">
-        <div className="mb-3"><h2 className="text-lg font-semibold">Rupee payments</h2><p className="text-sm text-muted">Payments made with JazzCash or Easypaisa. Keep the reference if you ever need to contact support.</p></div>
+      {can('admin', 'finance_manager') && rupee.length > 0 && <section aria-label="Rupee payments" className="mt-6">
+        <div className="mb-3"><h3 className="text-sm font-semibold">Rupee payments</h3><p className="text-xs text-muted">Made with JazzCash or Easypaisa. Keep the reference if you ever need to contact support.</p></div>
         <Table rows={rupee} noun="payments" empty="No payments yet" cols={[{ h: 'Date', render: (r) => <span className="num">{day(r.paid_at ?? r.created_at)}</span> }, { h: 'Reference', render: (r) => <span className="font-medium num">{r.txn_ref}</span> }, { h: 'Method', render: (r) => <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: WALLET[r.provider]?.dot }} aria-hidden />{WALLET[r.provider]?.label ?? r.provider}</span> },
           { h: 'Plan', render: (r) => <span className="capitalize">{r.plan_name} · {r.billing_interval}</span> }, { h: 'Amount', right: true, render: (r) => <span className="num font-medium">{pkr(r.amount_pkr)}</span> },
           { h: 'Status', render: (r) => <span title={r.gateway_message ?? undefined}><Pill s={r.status === 'paid' ? 'paid' : r.status === 'failed' ? 'void' : 'pending'} /></span> }]} /></section>}
