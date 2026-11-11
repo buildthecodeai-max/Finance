@@ -1,21 +1,21 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Banknote, Briefcase, Check, ChevronRight, CircleCheck, HandCoins, Plus, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, Banknote, Bell, Briefcase, CalendarClock, Check, ChevronRight, CircleCheck, FileText, HandCoins, PieChart as PieIcon, Plus, ShoppingBag, Timer, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { recordPath } from '../lookup';
-import { Page, Pill, Skeleton, Table } from '../components/ui';
+import { Avatar, Page, Pill, Skeleton, Table } from '../components/ui';
 import { useChartColors } from '../theme';
 
-function Kpi({ label, hint, value, trend, cur, icon, to, lowerIsBetter }: { label: string; hint: string; value: number; trend: number[]; cur: string; icon: ReactNode; to: string; lowerIsBetter?: boolean }) {
+function Kpi({ label, hint, value, trend, cur, icon, to, lowerIsBetter, hue = 'accent' }: { label: string; hint: string; value: number; trend: number[]; cur: string; icon: ReactNode; to: string; lowerIsBetter?: boolean; hue?: string }) {
   const c = useChartColors(); const id = `g-${label.replace(/\W/g, '')}`; const nav = useNavigate();
   const last = trend[trend.length - 1], prev = trend[trend.length - 2], delta = trend.length > 1 && prev ? Math.round(((last - prev) / Math.abs(prev)) * 100) : null;
   return (
-    <button type="button" onClick={() => nav(to)} title={`${hint} — click for details`} className="card !p-0 overflow-hidden text-left hover:bg-surface2/60 transition-colors">
+    <button type="button" onClick={() => nav(to)} title={`${hint} — click for details`} className="card glow-card !p-0 overflow-hidden text-left" style={{ ['--hue' as any]: `var(--${hue})` }}>
       <div className="p-4 pb-2 flex items-start justify-between">
-        <div><div className="text-xs font-medium text-muted">{label}</div><div className="num text-xl sm:text-[26px] font-semibold tracking-tight mt-1">{money(value, cur)}</div><div className="text-[11px] text-muted mt-0.5">{hint}</div>{delta !== null && <div className={`mt-1.5 inline-flex items-center gap-1 text-xs font-medium ${delta === 0 ? 'text-muted' : (delta > 0) !== !!lowerIsBetter ? 'text-success' : 'text-danger'}`}>{delta > 0 ? <TrendingUp size={13} /> : delta < 0 ? <TrendingDown size={13} /> : null}{delta > 0 ? '+' : ''}{delta}% <span className="font-normal text-muted">vs last month</span></div>}</div>
-        <div className="hidden sm:grid h-9 w-9 rounded-lg bg-accent/10 text-accent place-items-center">{icon}</div>
+        <div><div className="text-xs font-medium text-muted">{label}</div><div className="num text-xl sm:text-[28px] font-bold tracking-tight mt-1">{money(value, cur)}</div><div className="text-[11px] text-muted mt-0.5">{hint}</div>{delta !== null && <div className={`mt-1.5 inline-flex items-center gap-1 text-xs font-medium ${delta === 0 ? 'text-muted' : (delta > 0) !== !!lowerIsBetter ? 'text-success' : 'text-danger'}`}>{delta > 0 ? <TrendingUp size={13} /> : delta < 0 ? <TrendingDown size={13} /> : null}{delta > 0 ? '+' : ''}{delta}% <span className="font-normal text-muted">vs last month</span></div>}</div>
+        <div className="hidden sm:grid h-10 w-10 rounded-xl place-items-center" style={{ background: `rgb(var(--${hue}) / .14)`, color: `rgb(var(--${hue}))` }}>{icon}</div>
       </div>
       <div className="h-14" aria-hidden>{trend.length > 1 && (
         <ResponsiveContainer><AreaChart data={trend.map((v, i) => ({ i, v }))} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
@@ -25,8 +25,8 @@ function Kpi({ label, hint, value, trend, cur, icon, to, lowerIsBetter }: { labe
   );
 }
 
-const ChartCard = ({ title, sub, children }: { title: string; sub?: string; children: ReactNode }) => (
-  <div className="card"><div className="mb-3"><h3 className="font-semibold">{title}</h3>{sub && <p className="text-xs text-muted">{sub}</p>}</div><div className="h-52">{children}</div></div>
+const ChartCard = ({ title, sub, children, icon: Icon }: { title: string; sub?: string; children: ReactNode; icon?: any }) => (
+  <div className="card"><div className="mb-3 flex items-start gap-2.5">{Icon && <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent"><Icon size={15} /></span>}<div><h3 className="font-semibold leading-tight">{title}</h3>{sub && <p className="text-xs text-muted">{sub}</p>}</div></div><div className="h-52">{children}</div></div>
 );
 
 const ago = (t: string) => { const m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : m < 10080 ? `${Math.round(m / 1440)} d ago` : new Date(t).toLocaleDateString(); };
@@ -36,7 +36,9 @@ export default function Dashboard() {
   const [d, setD] = useState<any>(null); const [err, setErr] = useState(''); const [soon, setSoon] = useState<any[]>([]);
   useEffect(() => { setD(null); api('/dashboard').then(setD).catch((e) => setErr(e.message)); api('/ops/deadlines?days=14').then(setSoon).catch(() => {}); }, [agency?.id]);
   const hour = new Date().getHours(), greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const head = { title: `${greet}, ${(user?.name ?? '').split(' ')[0]}`, description: `${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · ${agency?.name ?? ''} · money shown in ${agency?.base_currency ?? ''}` };
+  const first = (user?.name ?? '').split(' ')[0]; const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const [unread, setUnread] = useState<number | null>(null); useEffect(() => { api('/notifications/count').then((r) => setUnread(r.unread)).catch(() => setUnread(null)); }, [agency?.id]);
+  const head = { title: 'Dashboard' };
   if (err) return <Page title="Dashboard"><div className="card text-danger text-sm">{err}</div></Page>;
   if (!d) return (
     <Page {...head}><div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-32" />)}</div>
@@ -62,21 +64,36 @@ export default function Dashboard() {
   const newbie = steps.some(([, done]) => !done) && cn.invoices === 0;
   const actions: [string, string][] = [['New quote', '/quotes/new'], ['New booking', '/bookings?new=1'], ['New client', '/clients?new=1'], ...(can('admin', 'finance_manager') ? [['Record payment', '/payments?new=1'] as [string, string]] : [])];
   const axis = { stroke: c.text, fontSize: 11, tickLine: false, axisLine: false } as const;
+  const urgent = todo.filter((x) => x.tone !== 'info').reduce((t, x) => t + x.n, 0);
   return (
-    <Page {...head} actions={editor ? <>{actions.map(([l, to], i) => <button key={l} className={i === 0 ? 'btn inline-flex items-center gap-1' : 'btn-ghost inline-flex items-center gap-1'} onClick={() => nav(to)}><Plus size={14} />{l}</button>)}</> : undefined}>
+    <Page {...head}>
+      <section className="hero-mesh mb-5 rounded-2xl border border-line p-5 md:p-6" aria-label="Today">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-xs font-medium uppercase tracking-wider text-muted">{today}</div>
+            <h2 className="mt-1 text-2xl font-bold tracking-tight md:text-3xl">{greet}, {first}</h2>
+            <p className="mt-1 text-sm text-muted">{urgent ? <><b className="text-fg">{urgent}</b> thing{urgent === 1 ? '' : 's'} need{urgent === 1 ? 's' : ''} you today.</> : 'Nothing urgent today. Nice and calm.'} <span className="hidden sm:inline">· {agency?.name} · money in {agency?.base_currency}</span></p>
+            {editor && <div className="mt-4 flex flex-wrap gap-2">{actions.map(([l, to], i) => <button key={l} className={i === 0 ? 'btn' : 'btn-ghost'} onClick={() => nav(to)}><Plus size={14} />{l}</button>)}</div>}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="flex items-center gap-3 rounded-xl border border-line bg-surface/70 px-4 py-3 text-left backdrop-blur transition hover:border-accent/50" onClick={() => nav('/notifications')}><span className="grid h-9 w-9 place-items-center rounded-lg bg-accent/12 bg-accent/10 text-accent"><Bell size={17} /></span><span><span className="block text-xl font-bold num leading-tight">{unread ?? '—'}</span><span className="block text-[11px] text-muted">unread notifications</span></span></button>
+            <button className="flex items-center gap-3 rounded-xl border border-line bg-surface/70 px-4 py-3 text-left backdrop-blur transition hover:border-accent/50" onClick={() => nav('/operations')}><span className="grid h-9 w-9 place-items-center rounded-lg bg-info/10 text-info"><CalendarClock size={17} /></span><span><span className="block text-xl font-bold num leading-tight">{soon.filter((x) => !['overdue_task'].includes(x.kind)).length}</span><span className="block text-[11px] text-muted">coming up in 14 days</span></span></button>
+          </div>
+        </div>
+      </section>
       {newbie && editor && <div className="card mb-4"><h3 className="font-semibold mb-1">Getting started</h3><p className="text-xs text-muted mb-3">Four steps to your first sale. Each one opens the right screen.</p>
         <ol className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">{steps.map(([l, done, to], i) => <li key={l}><button onClick={() => nav(to)} className={`w-full text-left rounded-lg border px-3 py-2 text-sm flex items-center gap-2 ${done ? 'border-success/40 bg-success/10 text-success' : 'border-line hover:bg-surface2'}`}><span className={`h-5 w-5 rounded-full grid place-items-center text-[11px] shrink-0 ${done ? 'bg-success text-white' : 'bg-surface2 text-muted'}`}>{done ? <Check size={12} /> : i + 1}</span>{l}</button></li>)}</ol></div>}
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-1.5">
-        <Kpi label="Revenue" hint="Invoiced, before tax" value={k.revenue.value} trend={k.revenue.trend} cur={cur} icon={<Banknote size={18} />} to="/invoices" />
-        <Kpi label="Trips sold" hint="Total value of invoices" value={k.bookings.value} trend={k.bookings.trend} cur={cur} icon={<Briefcase size={18} />} to="/bookings" />
-        <Kpi label="Owed to you" hint="Unpaid client invoices" value={k.outstandingAr.value} trend={k.outstandingAr.trend} cur={cur} icon={<Wallet size={18} />} to="/invoices?tab=unpaid" lowerIsBetter />
-        <Kpi label="Commission earned" hint="After deductions" value={k.netCommission.value} trend={k.netCommission.trend} cur={cur} icon={<HandCoins size={18} />} to="/commissions" />
+        <Kpi label="Revenue" hint="Invoiced, before tax" value={k.revenue.value} trend={k.revenue.trend} cur={cur} icon={<Banknote size={18} />} to="/invoices" hue="success" />
+        <Kpi label="Trips sold" hint="Total value of invoices" value={k.bookings.value} trend={k.bookings.trend} cur={cur} icon={<Briefcase size={18} />} to="/bookings" hue="info" />
+        <Kpi label="Owed to you" hint="Unpaid client invoices" value={k.outstandingAr.value} trend={k.outstandingAr.trend} cur={cur} icon={<Wallet size={18} />} to="/invoices?tab=unpaid" lowerIsBetter hue="warn" />
+        <Kpi label="Commission earned" hint="After deductions" value={k.netCommission.value} trend={k.netCommission.trend} cur={cur} icon={<HandCoins size={18} />} to="/commissions" hue="accent" />
       </div>
       <p className="text-xs text-muted mb-6">Totals cover the last 12 months, except “Owed to you”, which is everything unpaid today.</p>
       <div className="grid lg:grid-cols-3 gap-4 mb-4">
         <div className="card lg:col-span-2"><h3 className="font-semibold mb-2 flex items-center gap-2">{todo.length ? <><AlertTriangle size={16} className="text-warn" />Needs your attention</> : <><CircleCheck size={16} className="text-success" />You're all caught up</>}</h3>
-          {todo.length ? <ul className="divide-y divide-line/60">{todo.map((x) => <li key={x.to + x.text}><button onClick={() => nav(x.to)} className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface2/50 rounded"><span className={`num text-lg font-semibold w-8 text-right ${TONE[x.tone]}`}>{x.n}</span><span className="text-sm flex-1">{x.text}</span><ChevronRight size={15} className="text-muted" /></button></li>)}</ul>
+          {todo.length ? <ul className="divide-y divide-line/60">{todo.map((x) => <li key={x.to + x.text}><button onClick={() => nav(x.to)} className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface2/50 rounded"><span className={`grid h-7 min-w-[1.75rem] place-items-center rounded-lg bg-surface2 px-1.5 num text-sm font-bold ${TONE[x.tone]}`}>{x.n}</span><span className="text-sm flex-1">{x.text}</span><ChevronRight size={15} className="text-muted" /></button></li>)}</ul>
             : <p className="text-sm text-muted">No overdue invoices, late visas or waiting quotes. New things that need you will show up here.</p>}</div>
         <div className="card"><h3 className="font-semibold mb-2">Coming up · next 14 days</h3>
           {soon.length ? <ul className="space-y-2 max-h-56 overflow-auto">{soon.filter((x) => !['overdue_task'].includes(x.kind)).slice(0, 8).map((x, i) => <li key={i}><button className="text-left w-full text-sm hover:bg-surface2/50 rounded px-1 -mx-1" onClick={() => nav(recordPath(x.ref_type, x.ref_id) ?? '/operations')}><span className="num text-xs text-muted mr-2">{String(x.date).slice(5, 10)}</span>{x.title}</button></li>)}</ul>
@@ -84,26 +101,26 @@ export default function Dashboard() {
           {soon.length > 0 && <button className="text-xs text-accent underline mt-2" onClick={() => nav('/operations')}>See everything on Operations</button>}</div></div>
 
       <div className="grid lg:grid-cols-3 gap-4 mb-4">
-        <ChartCard title="Who is late paying" sub="Unpaid invoices by how many days past their due date">
+        <ChartCard icon={Timer} title="Who is late paying" sub="Unpaid invoices by how many days past their due date">
           <ResponsiveContainer><BarChart data={aging} margin={{ top: 8, right: 0, left: 0, bottom: 0 }}><CartesianGrid vertical={false} stroke={c.grid} strokeDasharray="3 3" /><XAxis dataKey="name" {...axis} /><YAxis hide /><Tooltip {...tip} />
             <Bar dataKey="v" radius={[6, 6, 0, 0]} maxBarSize={48}>{aging.map((_, i) => <Cell key={i} fill={c.aging[i]} />)}</Bar></BarChart></ResponsiveContainer></ChartCard>
-        <ChartCard title="What sells" sub="Revenue by product type, before tax">
+        <ChartCard icon={ShoppingBag} title="What sells" sub="Revenue by product type, before tax">
           <ResponsiveContainer><BarChart data={d.revenueByType} margin={{ top: 8, right: 0, left: 0, bottom: 0 }}><CartesianGrid vertical={false} stroke={c.grid} strokeDasharray="3 3" /><XAxis dataKey="type" {...axis} /><YAxis hide /><Tooltip {...tip} />
             <Bar dataKey="v" fill={c.accent} radius={[6, 6, 0, 0]} maxBarSize={48} /></BarChart></ResponsiveContainer></ChartCard>
-        <ChartCard title="Where the money goes" sub="Expenses, last 12 months">
+        <ChartCard icon={PieIcon} title="Where the money goes" sub="Expenses, last 12 months">
           {d.expenses.length ? <div className="flex h-full items-center gap-3"><div className="h-full flex-1"><ResponsiveContainer><PieChart><Pie data={d.expenses} dataKey="v" nameKey="category" innerRadius="58%" outerRadius="88%" stroke="none" paddingAngle={2}>{d.expenses.map((_: any, i: number) => <Cell key={i} fill={c.series[i % c.series.length]} />)}</Pie><Tooltip {...tip} cursor={false} /></PieChart></ResponsiveContainer></div>
             <ul className="text-xs space-y-1.5 w-28 shrink-0">{d.expenses.slice(0, 6).map((e: any, i: number) => <li key={e.category} className="flex items-center gap-1.5 min-w-0"><span className="h-2 w-2 rounded-full shrink-0" style={{ background: c.series[i % c.series.length] }} /><span className="truncate text-muted">{e.category}</span></li>)}</ul></div>
             : <div className="h-full grid place-items-center text-sm text-muted text-center">No expenses recorded yet</div>}</ChartCard>
       </div>
       <div className="grid lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2"><h3 className="font-semibold mb-2 flex items-center justify-between">Recent invoices<button className="text-xs font-normal text-accent underline" onClick={() => nav('/invoices')}>See all</button></h3>
+        <div className="lg:col-span-2"><h3 className="font-semibold mb-2 flex items-center justify-between"><span className="flex items-center gap-2"><FileText size={15} className="text-accent" />Recent invoices</span><button className="text-xs font-normal text-accent underline" onClick={() => nav('/invoices')}>See all</button></h3>
           <Table rows={d.recentInvoices} cols={[
             { h: 'Number', render: (r: any) => <span className="num font-medium">{r.number}</span> }, { h: 'Client', render: (r: any) => r.client },
             { h: 'Status', render: (r: any) => <Pill s={r.status} /> }, { h: 'Total', right: true, render: (r: any) => money(r.total, r.currency) }]} onRow={(r: any) => nav(`/invoices?open=${r.id}`)} empty="No invoices yet — they will appear here as you create them." /></div>
         <div><h3 className="font-semibold mb-2">Recent activity</h3>
           <div className="card !p-0"><ul className="divide-y divide-line/70 max-h-[28rem] overflow-auto">
-            {d.activity.map((a: any) => <li key={a.id} className="px-4 py-3 text-sm"><span className="font-medium">{a.user ?? 'System'}</span> <span className="text-muted">{a.action}d</span> {a.entity.replace(/_/g, ' ').replace(/s$/, '')} <span className="num text-muted">#{a.entity_id}</span>
-              <div className="text-xs text-muted mt-0.5" title={new Date(a.created_at).toLocaleString()}>{ago(a.created_at)}</div></li>)}
+            {d.activity.map((a: any) => <li key={a.id} className="flex items-start gap-3 px-4 py-3 text-sm"><Avatar name={a.user ?? 'System'} size={28} /><div className="min-w-0 flex-1"><span className="font-medium">{a.user ?? 'System'}</span> <span className="text-muted">{a.action}d</span> {a.entity.replace(/_/g, ' ').replace(/s$/, '')} <span className="num text-muted">#{a.entity_id}</span>
+              <div className="text-xs text-muted mt-0.5" title={new Date(a.created_at).toLocaleString()}>{ago(a.created_at)}</div></div></li>)}
             {!d.activity.length && <li className="px-4 py-8 text-center text-sm text-muted">No activity yet</li>}</ul></div></div>
       </div>
     </Page>
