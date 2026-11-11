@@ -69,7 +69,7 @@ function Guard() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode><ThemeProvider><BrowserRouter><AuthProvider><DocViewerHost /><Routes>
+  <React.StrictMode><ThemeProvider><BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AuthProvider><DocViewerHost /><Routes>
     <Route path="/login" element={<Login />} />
     <Route path="/platform" element={<Suspense fallback={<Fallback />}><Platform /></Suspense>} />
     <Route path="/support" element={<Suspense fallback={<Fallback />}><SupportEntry /></Suspense>} />

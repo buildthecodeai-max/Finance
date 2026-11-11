@@ -2,6 +2,7 @@ import { AiButton } from './AiAssistant';
 import TwoFactorSetup from './TwoFactorSetup';
 import { NotificationBell } from './Notifications';
 import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
+import { preloadScreens } from '../preload';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Banknote, BarChart3, BookOpen, Briefcase, Building2, CalendarClock, ClipboardCheck, Calculator as CalcIcon, Check, ChevronDown, ChevronRight, ChevronsLeft, ChevronsUpDown,
@@ -218,6 +219,7 @@ export default function Layout() {
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('tf-sidebar') === '1'; } catch { return false; } });
   const [mobile, setMobile] = useState(false); const [calc, setCalc] = useState(false);
   useEffect(() => { try { localStorage.setItem('tf-sidebar', collapsed ? '1' : '0'); } catch { /* ignore */ } }, [collapsed]);
+  useEffect(() => { preloadScreens(); }, []);
   useEffect(() => { setMobile(false); window.scrollTo({ top: 0 }); }, [path]);       // a new page always starts at the top
   const initials = (user?.name ?? '?').split(' ').map((s: string) => s[0]).slice(0, 2).join('').toUpperCase();
   const g = groupFor(path), l = labelFor(path);
@@ -268,7 +270,7 @@ export default function Layout() {
           <button className="underline underline-offset-2" onClick={() => leaveAgency().then(() => nav('/'))}>Return to my workspace</button></div>}
         {support && <div role="status" className="px-4 md:px-8 py-2 text-sm bg-info/15 text-info border-b border-info/30">Support session — read-only view of this workspace. The customer can see and end this access. Reloading the page ends it.</div>}
         {bill?.banner && bill.banner.level !== 'info' && <div role="status" className={`px-4 md:px-8 py-2 text-sm flex flex-wrap items-center gap-x-3 border-b ${bill.banner.level === 'danger' ? 'bg-danger/10 text-danger border-danger/30' : 'bg-warn/10 text-warn border-warn/30'}`}><span>{bill.banner.message}</span>{role === 'admin' && <NavLink to="/billing" className="underline font-medium">Go to Billing</NavLink>}</div>}
-        <main id="main" tabIndex={-1} className="outline-none"><Suspense fallback={<Fallback />}><Outlet key={agency?.id ?? 0} /></Suspense></main>
+        <main id="main" tabIndex={-1} className="outline-none"><Suspense fallback={<Fallback />}><div key={path} className="page-enter"><Outlet key={agency?.id ?? 0} /></div></Suspense></main>
       </div>
       {calc && <Calculator onClose={() => setCalc(false)} />}
     </div>

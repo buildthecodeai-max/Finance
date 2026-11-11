@@ -21,7 +21,7 @@
 }
 
 @layer base {
-  html { -webkit-text-size-adjust: 100%; }
+  html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }   /* the page never shifts sideways when a scrollbar appears or goes */
   body { @apply bg-bg text-fg font-body antialiased; font-feature-settings: 'cv11', 'ss01'; }
   h1, h2, h3, h4 { @apply tracking-tight; }
   ::selection { background: rgb(var(--accent) / 0.25); }
@@ -84,3 +84,7 @@
 .pop-in { animation: pop-in .16s cubic-bezier(.16,1,.3,1) both; }
 @keyframes donut-draw { from { stroke-dasharray: 0 100; } }
 .donut-seg { animation: donut-draw .9s cubic-bezier(.16,1,.3,1) both; }
+
+/* A new page eases in with a short fade only, so a tab change never looks like a jump */
+@keyframes page-in { from { opacity: 0; } to { opacity: 1; } }
+.page-enter { animation: page-in .18s ease-out both; }
