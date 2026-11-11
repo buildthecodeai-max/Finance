@@ -211,3 +211,30 @@ describe('turning 2FA on and off for a person', () => {
     const sup = await operator('support'); expect((await call(sup.token, 'POST', `/platform/users/${u.id}/require-2fa`, { reason: 'not allowed' })).status).toBe(403);
   });
 });
+
+describe('adding, editing and deleting accounts', () => {
+  it('creates an ordinary account or an operator, edits name and email, and deletes only an account with no agency', async () => {
+    const email = `new-${rnd()}@users.test`;
+    expect((await P('POST', '/users', { name: 'Nia', email, password: 'short', reason: 'test hire' })).status).toBe(400);                        // a weak password is refused
+    expect((await P('POST', '/users', { name: 'Nia', email, password: PASSWORD })).status).toBe(400);                                          // a reason is needed
+    const c = await P('POST', '/users', { name: 'Nia', email, password: PASSWORD, reason: 'test hire' }); expect(c.status).toBe(201);
+    expect((await P('POST', '/users', { name: 'Nia', email, password: PASSWORD, reason: 'again' })).status).toBe(409);                        // one account per email
+    expect((await call(null, 'POST', '/auth/login', { email, password: PASSWORD })).status).toBe(200);                                           // and it can sign in
+    const [row] = await sql('SELECT is_platform_admin FROM users WHERE id = ?', [c.body.id]); expect(row.is_platform_admin).toBe(0);
+    const opEmail = `newop-${rnd()}@users.test`; const o = await P('POST', '/users', { name: 'Omar', email: opEmail, password: PASSWORD, operator_role: 'support', reason: 'new operator' });
+    const [orow] = await sql('SELECT is_platform_admin, platform_role FROM users WHERE id = ?', [o.body.id]); expect(orow).toMatchObject({ is_platform_admin: 1, platform_role: 'support' });
+
+    const other = await person('Taken'); expect((await P('PUT', `/users/${c.body.id}`, { email: other.email, reason: 'fix' })).status).toBe(409);
+    expect((await P('PUT', `/users/${c.body.id}`, { name: 'Nia', reason: 'same' })).status).toBe(400);                                          // nothing changed
+    const newEmail = `nia2-${rnd()}@users.test`; expect((await P('PUT', `/users/${c.body.id}`, { name: 'Nia Khan', email: newEmail, reason: 'name fix' })).status).toBe(200);
+    expect((await sql('SELECT name, email FROM users WHERE id = ?', [c.body.id]))[0]).toMatchObject({ name: 'Nia Khan', email: newEmail });
+
+    expect((await P('DELETE', `/users/${other.id}`, { reason: 'cleanup' })).status).toBe(409);                                                    // still works for an agency
+    expect((await P('DELETE', `/users/${o.body.id}`, { reason: 'cleanup' })).status).toBe(409);                                                   // an operator must lose access first
+    expect((await P('DELETE', `/users/${op.id}`, { reason: 'oops' })).status).toBe(409);                                                          // never yourself
+    expect((await P('DELETE', `/users/${c.body.id}`, { reason: 'left the company' })).status).toBe(200);
+    expect((await sql('SELECT COUNT(*) n FROM users WHERE id = ?', [c.body.id]))[0].n).toBe(0);
+    expect((await sql("SELECT COUNT(*) n FROM platform_audit_log WHERE action IN ('user_created','operator_created','edit_user','delete_user') AND admin_user_id = ?", [op.id]))[0].n).toBe(4);
+    const sup = await operator('support'); expect((await call(sup.token, 'POST', '/platform/users', { name: 'X', email: `x-${rnd()}@users.test`, password: PASSWORD, reason: 'no' })).status).toBe(403);   // needs the highest capability
+  });
+});

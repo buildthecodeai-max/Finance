@@ -80,9 +80,43 @@ export function ActionDialog({ act, onClose, onDone }: { act: Act; onClose(): vo
     <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className={`btn ${a.danger ? '!bg-danger' : ''}`} disabled={busy || reason.trim().length < 3 || (needsPw && !passwordOk(pw))} onClick={go}>{busy ? 'Working…' : a.button}</button></div></Modal>;
 }
 
+/* ---------------------------------------------------------------------------- add, edit and delete an account */
+/** Create a sign-in account. Leave the role empty for an ordinary person, or pick one to make them an operator at once. */
+export function NewAccountDialog({ operator, onClose, onDone }: { operator?: boolean; onClose(): void; onDone(msg: string): void }) {
+  const [f, setF] = useState({ name: '', email: '', password: '', role: operator ? 'support' : '', reason: '' }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const ok = f.name.trim() && /^\S+@\S+\.\S+$/.test(f.email.trim()) && passwordOk(f.password) && f.reason.trim().length >= 3;
+  const go = async () => { setBusy(true); setErr(''); try { await api('/platform/users', 'POST', { name: f.name.trim(), email: f.email.trim(), password: f.password, operator_role: f.role || null, reason: f.reason }); onDone(`${f.name.trim()}'s account was created${f.role ? ` as a ${f.role} operator` : ''}. Give them the password yourself, and ask them to change it after signing in.`); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  return <Modal title={operator ? 'New operator account' : 'Add a person'} onClose={onClose}><Err e={err} />
+    <p className="mb-3 text-sm text-muted">{operator ? 'Creates a new sign-in with access to this console.' : 'Creates a sign-in account. To give them access to an agency, add them from that agency’s Team page, or open the agency here.'}</p>
+    <div className="grid gap-3 sm:grid-cols-2"><Field label="Full name"><input className="input" autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field><Field label="Email (their sign-in)"><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field></div>
+    <Field label="Temporary password" hint="At least 10 characters. Never stored in the audit log."><PasswordField value={f.password} onChange={(v) => setF({ ...f, password: v })} /></Field>
+    <Field label="Console access" hint="Operators can sign in to this console. Most people need none."><select className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{!operator && <option value="">None, an ordinary account</option>}{OPERATOR_ROLES.map((r) => <option key={r.key} value={r.key}>{r.name}: {r.blurb}</option>)}</select></Field>
+    <Field label="Reason" hint="Kept in the operator audit log."><input className="input" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="e.g. New support hire, approved by the owner" /></Field>
+    <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !ok} onClick={go}><Plus size={15} />{busy ? 'Creating…' : 'Create account'}</button></div></Modal>;
+}
+function EditAccountDialog({ user, onClose, onDone }: { user: { id: number; name: string; email: string }; onClose(): void; onDone(msg: string): void }) {
+  const [f, setF] = useState({ name: user.name, email: user.email, reason: '' }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const changed = f.name.trim() !== user.name || f.email.trim().toLowerCase() !== user.email;
+  const go = async () => { setBusy(true); setErr(''); try { await api(`/platform/users/${user.id}`, 'PUT', { name: f.name.trim(), email: f.email.trim(), reason: f.reason }); onDone(`${f.name.trim()}'s details were updated.${f.email.trim().toLowerCase() !== user.email ? ' They were signed out and use the new email next time.' : ''}`); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  return <Modal title={`Edit details: ${user.name}`} onClose={onClose}><Err e={err} />
+    <div className="grid gap-3 sm:grid-cols-2"><Field label="Full name"><input className="input" autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field><Field label="Email (their sign-in)"><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field></div>
+    <p className="mb-3 text-xs text-muted">The email is one login for every agency this person works for. Changing it signs them out.</p>
+    <Field label="Reason" hint="Kept in the operator audit log."><input className="input" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="e.g. Typo in their email, confirmed by the owner" /></Field>
+    <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !changed || !f.name.trim() || f.reason.trim().length < 3} onClick={go}>{busy ? 'Saving…' : 'Save changes'}</button></div></Modal>;
+}
+function DeleteAccountDialog({ user, onClose, onDone }: { user: { id: number; name: string; email: string }; onClose(): void; onDone(msg: string): void }) {
+  const [reason, setReason] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const go = async () => { setBusy(true); setErr(''); try { await api(`/platform/users/${user.id}`, 'DELETE', { reason }); onDone(`${user.name}'s account was deleted.`); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  return <Modal title={`Delete ${user.name}?`} onClose={onClose}><Err e={err} />
+    <p className="mb-2 text-sm">This permanently deletes the account <b>{user.email}</b>. It cannot be undone.</p>
+    <p className="mb-3 text-sm text-muted">It only works for someone who no longer works for any agency and is not an operator. If they have history in the books, switch the account off instead.</p>
+    <Field label="Reason" hint="Kept in the operator audit log."><input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+    <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={onClose}>Keep account</button><button className="btn !bg-danger" disabled={busy || reason.trim().length < 3} onClick={go}>{busy ? 'Deleting…' : 'Delete account'}</button></div></Modal>;
+}
+
 /* ---------------------------------------------------------------------------- the person window */
 function UserWindow({ id, me, onClose, onOpenAgency, onChanged }: { id: number; me: Me; onClose(): void; onOpenAgency(id: number): void; onChanged(msg: string): void }) {
-  const [d, setD] = useState<any>(null); const [err, setErr] = useState(''); const [act, setAct] = useState<Act | null>(null); const canAct = me.caps.includes('suspend');
+  const [d, setD] = useState<any>(null); const [err, setErr] = useState(''); const [act, setAct] = useState<Act | null>(null); const [sub, setSub] = useState<'edit' | 'delete' | null>(null); const canAct = me.caps.includes('suspend');
   const load = () => api(`/platform/users/${id}`).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [id]);
   if (!d) return <Modal title="Person" wide onClose={onClose}>{err ? <Err e={err} /> : <Skeleton className="h-56" />}</Modal>;
@@ -115,16 +149,20 @@ function UserWindow({ id, me, onClose, onOpenAgency, onChanged }: { id: number; 
         <div className="space-y-2">
           <div className="px-1 text-[10px] font-semibold uppercase tracking-wider text-muted">Account actions</div>
           {canAct && !self ? <>
+            <button className="btn-ghost w-full !justify-start" onClick={() => setSub('edit')}><UserCog size={15} />Edit name or email</button>
             <Btn kind="password" icon={Mail} label="Send password link" />
             <Btn kind="setpw" icon={LockKeyhole} label="Set a password" />
             <Btn kind="signout" icon={LogOut} label={`Sign out everywhere${d.live_sessions ? ` (${d.live_sessions})` : ''}`} />
             {u.totp_enabled ? <><Btn kind="reset2fa" icon={KeyRound} label="Reset 2FA (lost phone)" /><Btn kind="off2fa" icon={ShieldOff} label="Turn off 2FA" danger /></> : u.totp_required ? <><p className="px-1 text-xs text-warn">2FA is required. Waiting for them to set it up.</p><Btn kind="off2fa" icon={ShieldOff} label="Stop requiring 2FA" /></> : <Btn kind="require2fa" icon={ShieldCheck} label="Turn on 2FA" />}
             {off ? <Btn kind="enable" icon={CheckCircle2} label="Switch account on" /> : <Btn kind="disable" icon={Ban} label="Switch account off" danger />}
+            <button className="btn-ghost w-full !justify-start text-danger" onClick={() => setSub('delete')}><X size={15} />Delete account</button>
             {d.reset_pending && <p className="px-1 text-xs text-muted">A password link is waiting to be used.</p>}
           </> : <p className="px-1 text-xs text-muted">{self ? 'These actions are not available on your own account. Ask another admin operator.' : 'Your role can look at people but not change their accounts.'}</p>}
         </div>
       </div>
       {act && <ActionDialog act={act} onClose={() => setAct(null)} onDone={(msg) => { setAct(null); onChanged(msg); load(); }} />}
+      {sub === 'edit' && <EditAccountDialog user={target} onClose={() => setSub(null)} onDone={(msg) => { setSub(null); onChanged(msg); load(); }} />}
+      {sub === 'delete' && <DeleteAccountDialog user={target} onClose={() => setSub(null)} onDone={(msg) => { setSub(null); onClose(); onChanged(msg); }} />}
     </Modal>
   );
 }
@@ -133,7 +171,7 @@ function UserWindow({ id, me, onClose, onOpenAgency, onChanged }: { id: number; 
 const FILTERS: [string, string][] = [['all', 'Everyone'], ['operators', 'Operators'], ['owners', 'Agency owners'], ['multi', 'Several agencies'], ['no2fa', 'No 2FA'], ['disabled', 'Switched off']];
 export function PlatformUsers({ me, onOpenAgency, focus, onFocused }: { me: Me; onOpenAgency(id: number): void; focus?: number | null; onFocused?(): void }) {
   const [res, setRes] = useState<any>(null); const [q, setQ] = useState(''); const [filter, setFilter] = useState('all'); const [page, setPage] = useState(1);
-  const [open, setOpen] = useState<number | null>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState('');
+  const [open, setOpen] = useState<number | null>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [adding, setAdding] = useState(false);
   useEffect(() => { if (focus) { setOpen(focus); onFocused?.(); } }, [focus]);
   const load = () => api(`/platform/users?page=${page}&filter=${filter}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`).then((r) => { setRes(r); setErr(''); }).catch((e) => setErr(e.message));
   useEffect(() => { const h = setTimeout(load, q ? 250 : 0); return () => clearTimeout(h); }, [q, filter, page]);
@@ -147,7 +185,8 @@ export function PlatformUsers({ me, onOpenAgency, focus, onFocused }: { me: Me; 
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{tile('All users', c?.users, 'all', UsersIcon)}{tile('Operators', c?.operators, 'operators', ShieldCheck, 'info')}{tile('No 2FA', c?.no2fa, 'no2fa', ShieldAlert, c?.no2fa ? 'warn' : 'success')}{tile('Switched off', c?.disabled, 'disabled', Ban, c?.disabled ? 'danger' : 'success')}</div>
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1" role="tablist" aria-label="Filter people">{FILTERS.map(([k, l]) => <button key={k} role="tab" aria-selected={filter === k} onClick={() => setFilter(k)} className={`whitespace-nowrap rounded-lg border px-3 py-1.5 text-sm ${filter === k ? 'border-accent bg-accent/15 font-medium text-accent' : 'border-line hover:bg-surface2'}`}>{l}</button>)}</div>
-      <div className="relative w-full sm:w-80"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input className="input pl-8" aria-label="Search people" placeholder="Name, email or agency…" value={q} onChange={(e) => setQ(e.target.value)} /></div></div>
+      <div className="relative w-full sm:w-80"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input className="input pl-8" aria-label="Search people" placeholder="Name, email or agency…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+      {me.caps.includes('suspend') && <button className="btn" onClick={() => setAdding(true)}><UserPlus size={16} />Add person</button>}</div>
     {msg && <div role="status" className="flex justify-between gap-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success"><span>{msg}</span><button aria-label="Dismiss" onClick={() => setMsg('')}><X size={14} /></button></div>}
     <Err e={err} />
     {!res ? <Skeleton className="h-72" /> : <div className="card !p-0 overflow-hidden">
@@ -162,6 +201,7 @@ export function PlatformUsers({ me, onOpenAgency, focus, onFocused }: { me: Me; 
         {!res.rows.length && <div className="px-4 py-12 text-center text-sm text-muted">No one matches{q ? ` “${q}”` : ' this filter'}.</div>}</div>
       {res.total > res.page_size && <Pager total={res.total} page={page - 1} size={res.page_size} onPage={(p) => setPage(p + 1)} noun="people" />}
     </div>}
+    {adding && <NewAccountDialog onClose={() => setAdding(false)} onDone={(m) => { setAdding(false); setMsg(m); load(); }} />}
     {open && <UserWindow id={open} me={me} onClose={() => setOpen(null)} onOpenAgency={onOpenAgency} onChanged={(m) => { setMsg(m); load(); }} />}
   </div>;
 }
@@ -182,14 +222,14 @@ function AccountPicker({ value, onChange, onPick, picked }: { value: string; onC
         <button type="button" className="text-muted hover:text-fg" aria-label="Choose someone else" onClick={() => { onPick(null); onChange(''); }}><X size={15} /></button></div>
         : <><div className="relative"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input className="input pl-8" type="email" autoFocus placeholder="Name or email of an existing account…" value={value} onChange={(e) => onChange(e.target.value)} /></div>
           {hits.length > 0 && <ul className="mt-1 overflow-hidden rounded-lg border border-line bg-surface shadow-pop" role="listbox">{hits.map((u) => <li key={u.id}><button type="button" role="option" aria-selected="false" className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface2" onClick={() => onPick(u)}><Avatar name={u.name} size={28} /><span className="min-w-0 flex-1"><span className="block truncate text-sm">{u.name}</span><span className="block truncate text-xs text-muted">{u.email}</span></span></button></li>)}</ul>}
-          {value.trim().length >= 3 && !hits.length && <p className="mt-1 text-xs text-muted">No matching account. They need to have signed up first.</p>}</>}
+          {value.trim().length >= 3 && !hits.length && <p className="mt-1 text-xs text-muted">No matching account. Use “New account” to create one for them.</p>}</>}
     </div>
   );
 }
 
 type OpTab = 'operators' | 'roles';
 export function PlatformOperators({ me }: { me: Me }) {
-  const [rows, setRows] = useState<any[] | null>(null); const [dlg, setDlg] = useState<any>(null); const [act, setAct] = useState<Act | null>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<any[] | null>(null); const [dlg, setDlg] = useState<any>(null); const [act, setAct] = useState<Act | null>(null); const [err, setErr] = useState(''); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false); const [newAcct, setNewAcct] = useState(false);
   const [tab, setTab] = useState<OpTab>('operators'); const [q, setQ] = useState(''); const [roleF, setRoleF] = useState(''); const [menu, setMenu] = useState<number | null>(null); const [roleCounts, setRoleCounts] = useState<any[] | null>(null);
   const load = () => api('/platform/operators').then(setRows).catch((e) => setErr(e.message)); useEffect(() => { load(); }, []);
   useEffect(() => { api('/platform/agency-roles').then(setRoleCounts).catch(() => setRoleCounts(null)); }, []);
@@ -203,7 +243,7 @@ export function PlatformOperators({ me }: { me: Me }) {
   const item = (label: string, on: () => void, Icon: any, danger = false) => <button role="menuitem" className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-surface2 ${danger ? 'text-danger' : ''}`} onClick={on}><Icon size={14} className="shrink-0" />{label}</button>;
   return <div className="space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3"><p className="max-w-2xl text-sm text-muted">Give each person the lowest role that lets them do their job. Everything an operator does is written to the audit log with their name and a reason.</p>
-      <button className="btn" onClick={() => { setErr(''); setDlg({ kind: 'add', email: '', picked: null, role: 'support', reason: '' }); }}><UserPlus size={16} />Add operator</button></div>
+      <div className="flex gap-2"><button className="btn" onClick={() => { setErr(''); setDlg({ kind: 'add', email: '', picked: null, role: 'support', reason: '' }); }}><UserPlus size={16} />Add operator</button><button className="btn-ghost" onClick={() => setNewAcct(true)}><Plus size={16} />New account</button></div></div>
     {msg && <div role="status" className="flex justify-between gap-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success"><span>{msg}</span><button aria-label="Dismiss" onClick={() => setMsg('')}><X size={14} /></button></div>}
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{OPERATOR_ROLES.map(roleTile)}
@@ -253,6 +293,7 @@ export function PlatformOperators({ me }: { me: Me }) {
         <div className="overflow-x-auto"><table className="w-full border-separate border-spacing-0"><thead><tr><th>Area</th>{AGENCY_ROLES.map((r) => <th key={r.key} className="text-center">{r.name}</th>)}</tr></thead>
           <tbody>{AGENCY_MATRIX.map(([label, lv]) => <tr key={label}><td className="text-sm">{label}</td>{lv.map((l, i) => <td key={i} className={`text-center text-xs font-medium ${LEVEL[l][1]}`}>{l === 'full' ? <Check size={16} className="mx-auto" aria-label="Full access" /> : LEVEL[l][0]}</td>)}</tr>)}</tbody></table></div></div></>}
 
+    {newAcct && <NewAccountDialog operator onClose={() => setNewAcct(false)} onDone={(m) => { setNewAcct(false); setMsg(m); load(); }} />}
     {dlg && <Modal title={dlg.kind === 'add' ? 'Add an operator' : dlg.kind === 'edit' ? `Change role: ${dlg.r.name}` : `Remove ${dlg.r.name}`} onClose={() => setDlg(null)}><Err e={err} />
       {dlg.kind === 'add' && <Field label="Who" hint="Pick someone who already has an account. They also need 2FA on before the console opens for them."><AccountPicker value={dlg.email} onChange={(v) => setDlg({ ...dlg, email: v })} picked={dlg.picked} onPick={(u) => setDlg({ ...dlg, picked: u, email: u?.email ?? '' })} /></Field>}
       {dlg.kind === 'revoke' ? <p className="mb-3 text-sm">{dlg.r.email} will no longer be able to open the platform console. Their account is not deleted.</p>

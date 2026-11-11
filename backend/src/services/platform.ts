@@ -610,6 +610,46 @@ export async function systemStatus() {
   };
 }
 
+/** An operator creates a sign-in account. It can be made an operator at once; agency access is given from the agency's own Team page. */
+export async function createUserByOperator(req: Request, b: { name: string; email: string; password: string; operator_role?: OperatorRole | null }, reason: string) {
+  const email = b.email.trim().toLowerCase();
+  if (b.operator_role && !(b.operator_role in ROLE_CAPS)) throw new HttpError(400, `Role must be one of ${Object.keys(ROLE_CAPS).join(', ')}`);
+  const [[dup]]: any = await pool.query('SELECT id FROM users WHERE email = ?', [email]); if (dup) throw new HttpError(409, 'An account with that email already exists. Find them under People instead.');
+  const { default: bcrypt } = await import('bcryptjs');
+  const [r]: any = await pool.query('INSERT INTO users (email, name, password_hash, is_platform_admin, platform_role) VALUES (?,?,?,?,?)', [email, b.name.trim(), await bcrypt.hash(b.password, 12), b.operator_role ? 1 : 0, b.operator_role ?? null]);
+  await audit(req, b.operator_role ? 'operator_created' : 'user_created', null, `${email}${b.operator_role ? ` as ${b.operator_role} operator` : ''}`, reason, { after: { email, name: b.name.trim(), operator_role: b.operator_role ?? null } });
+  return { id: r.insertId, email };
+}
+
+/** Change a person's name or sign-in email. Their email is the same login for every agency they work for. */
+export async function editUserByOperator(req: Request, id: number, patch: { name?: string; email?: string }, reason: string) {
+  const u = await userOrThrow(id); const acct: Record<string, string> = {};
+  if (patch.name && patch.name.trim() !== u.name) acct.name = patch.name.trim();
+  if (patch.email && patch.email.trim().toLowerCase() !== u.email) {
+    const email = patch.email.trim().toLowerCase(); const [[dup]]: any = await pool.query('SELECT id FROM users WHERE email = ? AND id <> ?', [email, id]); if (dup) throw new HttpError(409, 'Another account already uses that email');
+    acct.email = email;
+  }
+  if (!Object.keys(acct).length) throw new HttpError(400, 'Nothing was changed.');
+  await pool.query(`UPDATE users SET ${Object.keys(acct).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...Object.values(acct), id]);
+  if (acct.email) await revokeSessions(id);   // a new login address means signing in again
+  await audit(req, 'edit_user', null, `${u.email}: ${[acct.name ? `name → ${acct.name}` : '', acct.email ? `email → ${acct.email}` : ''].filter(Boolean).join('; ')}`, reason, { before: { name: u.name, email: u.email }, after: { name: acct.name ?? u.name, email: acct.email ?? u.email } });
+  return { email: acct.email ?? u.email };
+}
+
+/** Delete an account for good. Only when it works for no agency and holds no operator access; one with history in the books is switched off instead. */
+export async function deleteUserByOperator(req: Request, id: number, reason: string) {
+  notSelf(req, id, 'delete'); const u = await userOrThrow(id);
+  if (u.is_platform_admin) throw new HttpError(409, 'This person is an operator. Remove their operator access first (Operators tab).');
+  const [[m]]: any = await pool.query('SELECT COUNT(*) n FROM memberships WHERE user_id = ?', [id]);
+  if (m.n) throw new HttpError(409, `${u.name} still works for ${m.n} agenc${m.n === 1 ? 'y' : 'ies'}. Remove them from there first (Agencies → People), or switch the account off instead.`);
+  try {
+    await pool.query('DELETE FROM refresh_tokens WHERE user_id = ?', [id]); await pool.query('DELETE FROM password_resets WHERE user_id = ?', [id]);
+    await pool.query('DELETE FROM users WHERE id = ?', [id]);
+  } catch (e: any) { if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) throw new HttpError(409, 'This account has history in the books, so it cannot be deleted. Switch it off instead.'); throw e; }
+  await audit(req, 'delete_user', null, u.email, reason, { before: { name: u.name, email: u.email } });
+  return { email: u.email };
+}
+
 /** An operator sets someone's password directly (for a person who cannot use the reset email). They are signed out everywhere and must use the new password. */
 export async function setUserPasswordByOperator(req: Request, id: number, password: string, reason: string) {
   notSelf(req, id, 'set the password of'); const u = await userOrThrow(id);
