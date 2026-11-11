@@ -251,6 +251,7 @@ export default function Layout() {
                   <MenuBtn key={to} onClick={() => { close(); nav(to); }}><Icon size={15} className="text-muted" />{label}</MenuBtn>))}
               </Popover>)}
             <button className="btn-icon hidden sm:inline-flex" onClick={() => setCalc(true)} aria-label="Calculator" title="Calculator"><CalcIcon size={18} /></button>
+            <NotificationBell />
             <AiButton />
             <button className="btn-icon hidden sm:inline-flex" onClick={() => nav('/help')} aria-label="User guide" title="User guide"><HelpCircle size={18} /></button>
             <ThemeMenu />

@@ -56,6 +56,7 @@ const Statements = lazy(() => import('./pages/Statements'));
 const Operations = lazy(() => import('./pages/Operations'));
 const PublicQuote = lazy(() => import('./pages/PublicQuote'));
 const Platform = lazy(() => import('./pages/Platform'));
+const Notifications = lazy(() => import('./pages/Notifications'));
 const Support = lazy(() => import('./pages/Support'));
 const SupportEntry = lazy(() => import('./pages/Platform').then((m) => ({ default: m.SupportEntry })));
 const AgencyAccessEntry = lazy(() => import('./pages/Platform').then((m) => ({ default: m.AgencyAccessEntry })));
@@ -106,6 +107,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Route path="settings" element={<Settings />} />
       <Route path="help" element={<Help />} />
       <Route path="support-center" element={<Support />} />
+      <Route path="notifications" element={<Notifications />} />
       <Route path="audit" element={<Audit />} />
       <Route path="leads" element={<Leads />} />
       <Route path="quotes" element={<QuoteList />} />

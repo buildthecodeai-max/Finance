@@ -23,6 +23,7 @@ const GUIDE: Section[] = [
       tips: ['If a menu item is missing, your role or your plan does not include it. Ask an Admin.'] },
   ] },
   { id: 'daily', title: 'Your day', icon: CalendarClock, intro: 'Where to start each morning.', topics: [
+    { id: 'notifications', title: 'Notifications', to: '/notifications', about: 'The bell in the top bar counts what needs your attention: a client accepting or declining a quote, a payment arriving, an invoice going overdue or falling due, your tasks and lead follow-ups that are due, trips leaving within a week, replies from support and, for the owner, plan and limit warnings. Click one to jump to it. It is marked read as you go, and you can mark things read or unread yourself. Items clear on their own once the thing is dealt with, and what you see depends on your role.' },
     { id: 'dashboard', title: 'Dashboard', to: '/', about: 'The headline numbers (revenue, trips sold, what clients owe you, commission) with the change since last month, then what needs your attention and what is coming up in the next 14 days.',
       tips: ['Click any card or line to jump straight to the records behind it.', 'Money is shown in your agency’s base currency.'] },
     { id: 'operations', title: 'Operations: your daily list', to: '/operations', about: 'One list of follow-ups to make, tasks to finish, quotes about to expire, departures and passport checks, grouped as Overdue, Today, Tomorrow, Coming up and Later.',
