@@ -12,7 +12,7 @@ export const FULL_ACCESS = ['trialing', 'active', 'past_due', 'grace'];     // e
 export const GRACE_DAYS = 7, TRIAL_REMINDER_DAYS = [3, 1];
 const sqlTime = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ');
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86400_000);
-const addInterval = (d: Date, i: string) => { const x = new Date(d); if (i === 'yearly') x.setUTCFullYear(x.getUTCFullYear() + 1); else x.setUTCMonth(x.getUTCMonth() + 1); return x; };
+export const addInterval = (d: Date, i: string) => { const x = new Date(d); if (i === 'yearly') x.setUTCFullYear(x.getUTCFullYear() + 1); else x.setUTCMonth(x.getUTCMonth() + 1); return x; };
 const planErr = (message: string, extra: object = {}) => Object.assign(new HttpError(402, message), { code: 'plan_limit', ...extra });
 
 /** Payment provider. Swappable so tests (and other providers) can replace Stripe. */
@@ -87,7 +87,7 @@ export async function startTrial(agencyId: number, planCode = 'growth') {
   await pool.query('INSERT IGNORE INTO subscriptions (agency_id, plan_id, status, trial_ends_at) VALUES (?,?,?,?)', [agencyId, p.id, 'trialing', sqlTime(addDays(new Date(), p.trial_days))]);
   await pool.query('INSERT IGNORE INTO billing_events (agency_id, kind, detail) VALUES (?,?,?)', [agencyId, 'trial_started', `${planCode}, ${p.trial_days} days`]);
 }
-const log = (c: any, agencyId: number, kind: string, detail: string | null, key?: string, by?: number | null) =>
+export const log = (c: any, agencyId: number, kind: string, detail: string | null, key?: string, by?: number | null) =>
   c.query('INSERT IGNORE INTO billing_events (agency_id, kind, detail, event_key, created_by) VALUES (?,?,?,?,?)', [agencyId, kind, detail, key ?? null, by ?? null]).then((r: any) => r[0].affectedRows === 1);
 
 async function planByPrice(priceId: string | undefined) { if (!priceId) return null; const [[p]]: any = await pool.query('SELECT * FROM plans WHERE stripe_price_monthly = ? OR stripe_price_yearly = ?', [priceId, priceId]); return p ? { ...p, interval: p.stripe_price_yearly === priceId ? 'yearly' : 'monthly' } : null; }
@@ -179,7 +179,7 @@ export async function runLifecycle(now = new Date(), onlyAgencyId?: number) {
 }
 
 /* ------------------------------------------------------------------ agency actions */
-async function planOrThrow(code: string) { const [[p]]: any = await pool.query('SELECT * FROM plans WHERE code = ? AND active = 1', [code]); if (!p) throw new HttpError(400, 'Unknown plan'); return p; }
+export async function planOrThrow(code: string) { const [[p]]: any = await pool.query('SELECT * FROM plans WHERE code = ? AND active = 1', [code]); if (!p) throw new HttpError(400, 'Unknown plan'); return p; }
 const priceId = (p: any, iv: string) => (iv === 'yearly' ? p.stripe_price_yearly : p.stripe_price_monthly);
 
 export async function startSubscribe(t: Tenant, planCode: string, interval: 'monthly' | 'yearly', email: string) {
@@ -195,7 +195,7 @@ export async function openPortal(t: Tenant) {
   return gateway.portal(s.stripe_customer_id, `${config.appUrl}/billing`);
 }
 /** A plan can be chosen only if current usage already fits it; we never delete data to make a downgrade work. */
-async function assertFits(agencyId: number, p: any) {
+export async function assertFits(agencyId: number, p: any) {
   const u = await usage(agencyId), over: string[] = [];
   if (p.max_seats !== null && u.seats > p.max_seats) over.push(`${u.seats} team members (limit ${p.max_seats})`);
   if (p.max_branches !== null && u.branches > p.max_branches) over.push(`${u.branches} branches (limit ${p.max_branches})`);

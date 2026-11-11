@@ -167,7 +167,7 @@ export default function Platform() {
                     </button>
                   ))}
                 </div>
-                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <PlatformAudit me={me} />}{tab === 'security' && <PlatformSecurity onOpenUser={me.caps.includes('support') ? (id) => { setFocusUser(id); setTab('users'); } : undefined} />}{tab === 'system' && <PlatformSystem canEdit={me.caps.includes('suspend')} />}{tab === 'support' && <PlatformSupport canEdit={me.caps.includes('suspend')} onChange={refreshHelp} />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} focus={focusUser} onFocused={() => setFocusUser(null)} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <PlatformApprovals me={me} onChange={refreshPending} />}
+                {tab === 'dashboard' && <Dashboard onNavigate={setTab} focus={focus} onFocused={() => setFocus(null)} />}{tab === 'overview' && <Overview />}{tab === 'agencies' && <Agencies focus={focus} onFocused={() => setFocus(null)} />}{tab === 'plans' && <Plans />}{tab === 'audit' && <PlatformAudit me={me} />}{tab === 'security' && <PlatformSecurity onOpenUser={me.caps.includes('support') ? (id) => { setFocusUser(id); setTab('users'); } : undefined} />}{tab === 'system' && <PlatformSystem canEdit={me.caps.includes('suspend')} canSettle={me.caps.includes('billing')} />}{tab === 'support' && <PlatformSupport canEdit={me.caps.includes('suspend')} onChange={refreshHelp} />}{tab === 'operators' && <PlatformOperators me={me} />}{tab === 'users' && <PlatformUsers me={me} focus={focusUser} onFocused={() => setFocusUser(null)} onOpenAgency={(id) => { setTab('agencies'); setFocus(id); }} />}{tab === 'approvals' && <PlatformApprovals me={me} onChange={refreshPending} />}
               </OpCtx.Provider>}
           </div>
         </main>
@@ -735,15 +735,16 @@ function Plans() {
   const n = (v: any) => (v === '' || v === null || v === undefined ? null : Number(v));
   const problem = (e: any) => !/^[A-Za-z]{3}$/.test(e.currency ?? '') ? 'Currency must be a 3-letter code.' : !e.name?.trim() ? 'Give the plan a name.' : e.isNew && !/^[a-z0-9_-]{2,30}$/.test(e.code) ? 'Code: 2–30 lowercase letters, numbers, - or _ (it cannot be changed later).'
     : [e.price_monthly, e.price_yearly, e.trial_days].some((v) => v === '' || Number(v) < 0 || Number.isNaN(Number(v))) ? 'Prices and trial days must be zero or more.'
+    : [e.price_monthly_pkr, e.price_yearly_pkr].some((v) => v !== '' && v !== null && v !== undefined && (Number(v) < 0 || Number.isNaN(Number(v)))) ? 'Rupee prices must be zero or more, or empty.'
     : [e.max_seats, e.max_branches, e.max_bookings_month].some((v) => v !== '' && v !== null && (Number(v) < 1 || Number.isNaN(Number(v)))) ? 'Limits must be 1 or more, or unlimited.' : '';
   const save = async () => {
     const { agencies, id, code, isNew, ...rest } = edit;
     const allowedMods = Array.isArray(rest.allowed_modules) && rest.allowed_modules.length > 0 ? rest.allowed_modules : null;
-    const body = { ...rest, currency: String(rest.currency).toUpperCase(), price_monthly: Number(rest.price_monthly), price_yearly: Number(rest.price_yearly), trial_days: Number(rest.trial_days), sort: Number(rest.sort), max_seats: n(rest.max_seats), max_branches: n(rest.max_branches), max_bookings_month: n(rest.max_bookings_month), active: !!rest.active, features: rest.features, allowed_modules: allowedMods };
+    const body = { ...rest, currency: String(rest.currency).toUpperCase(), price_monthly: Number(rest.price_monthly), price_yearly: Number(rest.price_yearly), trial_days: Number(rest.trial_days), sort: Number(rest.sort), max_seats: n(rest.max_seats), max_branches: n(rest.max_branches), max_bookings_month: n(rest.max_bookings_month), active: !!rest.active, features: rest.features, allowed_modules: allowedMods, price_monthly_pkr: n(rest.price_monthly_pkr), price_yearly_pkr: n(rest.price_yearly_pkr) };
     setBusy(true);
     try { if (isNew) await guarded(() => api('/platform/plans', 'POST', { ...body, code })); else await guarded(() => api(`/platform/plans/${id}`, 'PUT', body)); setEdit(null); setErr(''); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
-  const blank = { isNew: true, code: '', name: '', description: '', currency: 'USD', price_monthly: 0, price_yearly: 0, trial_days: 14, max_seats: '', max_branches: '', max_bookings_month: '', features: ['portal'], allowed_modules: [] as string[], support_level: 'email', stripe_price_monthly: '', stripe_price_yearly: '', active: true, sort: 10, reason: '' };
+  const blank = { isNew: true, code: '', name: '', description: '', currency: 'USD', price_monthly: 0, price_yearly: 0, trial_days: 14, max_seats: '', max_branches: '', max_bookings_month: '', features: ['portal'], allowed_modules: [] as string[], support_level: 'email', stripe_price_monthly: '', stripe_price_yearly: '', price_monthly_pkr: '', price_yearly_pkr: '', active: true, sort: 10, reason: '' };
   const open = (p: any) => { setErr(''); setEdit({ ...p, reason: '' }); };
   const up = (k: string) => (e: any) => setEdit({ ...edit, [k]: e.target.value });
   const lim = (k: string, label: string, unit: string) => (
@@ -787,6 +788,10 @@ function Plans() {
         <Field label="Monthly price"><input className="input num" type="number" min={0} value={edit.price_monthly} onChange={up('price_monthly')} /></Field>
         <Field label="Yearly price" hint={save_pct === null ? undefined : save_pct > 0 ? `Customers save ${save_pct}% by paying yearly` : save_pct === 0 ? 'Same as paying monthly' : 'Dearer than paying monthly — check this'}><input className="input num" type="number" min={0} value={edit.price_yearly} onChange={up('price_yearly')} /></Field>
         <Field label="Free trial (days)"><input className="input num" type="number" min={0} value={edit.trial_days} onChange={up('trial_days')} /></Field>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-x-4">
+        <Field label="Monthly price in rupees (PKR)" hint="Lets agencies pay this plan with JazzCash or Easypaisa. Leave empty to turn that off for monthly."><input className="input num" type="number" min={0} placeholder="e.g. 14000" value={edit.price_monthly_pkr ?? ''} onChange={up('price_monthly_pkr')} /></Field>
+        <Field label="Yearly price in rupees (PKR)" hint="The amount charged for a whole year in one payment."><input className="input num" type="number" min={0} placeholder="e.g. 140000" value={edit.price_yearly_pkr ?? ''} onChange={up('price_yearly_pkr')} /></Field>
       </div>
       <h4 className="text-sm font-semibold mt-3 mb-2">Limits</h4>
       <div className="grid sm:grid-cols-3 gap-x-4">{lim('max_seats', 'Team seats', 'Users who can sign in')}{lim('max_branches', 'Branches', 'Offices')}{lim('max_bookings_month', 'Bookings per month', 'New bookings')}</div>

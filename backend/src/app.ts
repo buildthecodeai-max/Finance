@@ -41,6 +41,7 @@ import { billingRouter } from './routes/billing.js';
 import { subscriptionGuard } from './services/billing.js';
 import { automationRouter } from './routes/automation.js';
 import { portalAdminRouter, publicPortalRouter } from './routes/portal.js';
+import { payReturnRouter } from './routes/payReturn.js';
 import { adminRouter } from './routes/admin.js';
 import { webhooksRouter } from './routes/webhooks.js';
 
@@ -83,6 +84,7 @@ if (useLocal && !config.isProd)
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: process.env.NODE_ENV === 'test' ? 5000 : 50 }), authRouter);
 app.use('/api/integrations', integrationsCallbackRouter);
 app.use('/api/public/portal', publicPortalRouter);
+app.use('/api/pay-return', payReturnRouter);
 app.use('/api/v1', v1Router);
 app.use('/api/platform', platformRouter);
 app.use('/api/public/quotes', publicQuotesRouter); // token-authenticated, rate-limited, no session // OAuth redirect target (state-signed)

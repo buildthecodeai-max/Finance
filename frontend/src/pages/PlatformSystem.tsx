@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Activity, AlertTriangle, Brain, KeyRound, Trash2, CheckCircle2, Clock, CreditCard, Database, FileBox, Gauge, HardDrive, Mail, MemoryStick, RefreshCw, Server, Timer, Webhook, XCircle, type LucideIcon } from 'lucide-react';
 import { api } from '../api';
 import { Err, Field, Modal, Skeleton } from '../components/ui';
+import { PlatformLocalPay } from './PlatformLocalPay';
 
 /* The System page: is the platform healthy right now, what is it connected to, and what is it doing. Everything is a yes/no or a number; no secret ever reaches the browser. */
 
@@ -68,7 +69,7 @@ function AiKey({ info, canEdit, onChanged }: { info: any; canEdit: boolean; onCh
   );
 }
 
-export function PlatformSystem({ canEdit = false }: { canEdit?: boolean }) {
+export function PlatformSystem({ canEdit = false, canSettle = false }: { canEdit?: boolean; canSettle?: boolean }) {
   const [aiInfo, setAiInfo] = useState<any>(null); const loadAi = () => api('/platform/settings/ai').then(setAiInfo).catch(() => {});
   useEffect(() => { loadAi(); }, []);
   const [s, setS] = useState<any>(null); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [at, setAt] = useState(0); const [tick, setTick] = useState(0);
@@ -108,6 +109,7 @@ export function PlatformSystem({ canEdit = false }: { canEdit?: boolean }) {
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{tiles.map((x) => <Tile key={x.name} {...x} />)}</div>
     <AiKey info={aiInfo} canEdit={canEdit} onChanged={() => { loadAi(); load(); }} />
+    <PlatformLocalPay canEdit={canEdit} canSettle={canSettle} />
 
     <div className="grid gap-4 lg:grid-cols-3">
       <div className="card lg:col-span-2">

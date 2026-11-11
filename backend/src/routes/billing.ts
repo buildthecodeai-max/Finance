@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../db.js';
 import { requireRole } from '../auth.js';
 import * as B from '../services/billing.js';
+import * as L from '../services/localPay.js';
 import { parse, T } from './util.js';
 
 /** Billing for the agency's own subscription. Everyone can see status; only admins change it. Works even when the workspace is suspended. */
@@ -11,7 +12,7 @@ const ADMIN = requireRole('admin');
 const Choice = z.object({ plan: z.string().min(2).max(30), interval: z.enum(['monthly', 'yearly']).default('monthly') });
 
 billingRouter.get('/plans', async (_req, res) => {
-  const [rows]: any = await pool.query('SELECT code, name, description, price_monthly, price_yearly, currency, trial_days, max_seats, max_branches, max_bookings_month, features, support_level FROM plans WHERE active = 1 ORDER BY sort');
+  const [rows]: any = await pool.query('SELECT code, name, description, price_monthly, price_yearly, price_monthly_pkr, price_yearly_pkr, currency, trial_days, max_seats, max_branches, max_bookings_month, features, support_level FROM plans WHERE active = 1 ORDER BY sort');
   res.json(rows.map((p: any) => ({ ...p, features: String(p.features).split(',').filter(Boolean) })));
 });
 
@@ -24,11 +25,17 @@ billingRouter.get('/subscription', async (req, res) => {
       cancel_at_period_end: !!s.cancel_at_period_end, pending_plan: pending ?? null, pending_interval: s.pending_interval, manual: !!s.is_manual, has_payment_method: !!s.stripe_customer_id },
     limits: { seats: s.max_seats, branches: s.max_branches, bookings: s.max_bookings_month }, features: String(s.features).split(',').filter(Boolean),
     allowed_modules: s.allowed_modules ? String(s.allowed_modules).split(',').filter(Boolean) : null,
-    usage: await B.usage(a), banner: B.banner(s), read_only: !B.FULL_ACCESS.includes(s.status), online_billing: B.gateway.enabled(),
+    usage: await B.usage(a), banner: B.banner(s), read_only: !B.FULL_ACCESS.includes(s.status), online_billing: B.gateway.enabled(), local_pay: await L.options(),
   });
 });
 
 billingRouter.post('/subscribe', ADMIN, async (req, res) => { const b = parse(Choice, req.body); const [[u]]: any = await pool.query('SELECT email FROM users WHERE id = ?', [req.ctx!.userId]); res.json({ url: await B.startSubscribe(T(req), b.plan, b.interval, u.email) }); });
+// Pay for a plan period with JazzCash or Easypaisa (rupees). Returns where to send the browser; the plan only extends once the gateway's answer is verified.
+billingRouter.post('/local/start', ADMIN, async (req, res) => {
+  const b = parse(Choice.extend({ provider: z.enum(['jazzcash', 'easypaisa']) }), req.body); const [[u]]: any = await pool.query('SELECT email FROM users WHERE id = ?', [req.ctx!.userId]);
+  res.json(await L.start({ agencyId: req.ctx!.agencyId, userId: req.ctx!.userId, email: u?.email ?? '', plan: b.plan, interval: b.interval, provider: b.provider }));
+});
+billingRouter.get('/local/payments', requireRole('admin', 'finance_manager'), async (req, res) => res.json(await L.listForAgency(req.ctx!.agencyId)));
 billingRouter.post('/portal', ADMIN, async (req, res) => res.json({ url: await B.openPortal(T(req)) }));
 billingRouter.post('/change-plan', ADMIN, async (req, res) => { const b = parse(Choice, req.body); res.json(await B.changePlan(T(req), b.plan, b.interval)); });
 billingRouter.post('/cancel-pending-change', ADMIN, async (req, res) => { await B.cancelPending(T(req)); res.json({ ok: true }); });

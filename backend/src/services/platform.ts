@@ -16,6 +16,7 @@ import { authenticator } from 'otplib';
 import crypto from 'node:crypto';
 import { decrypt, sha256 } from '../crypto.js';
 import { changeMember, memberWorkload, removeMember } from './records.js';
+import * as LP from './localPay.js';
 
 export type OperatorRole = 'readonly' | 'support' | 'billing' | 'admin';
 export type Cap = 'read' | 'support' | 'billing' | 'suspend';
@@ -291,7 +292,7 @@ export async function revokeSupportSession(req: Request, sessionId: number, reas
 /* ------------------------------------------------------------------ plans */
 export const MODULE_CODES = ['crm', 'ticketing', 'finance', 'accounting', 'insights'] as const;
 export type ModuleCode = (typeof MODULE_CODES)[number];
-export interface PlanIn { code?: string; name: string; description?: string | null; price_monthly: number; price_yearly: number; currency?: string; trial_days: number; max_seats: number | null; max_branches: number | null; max_bookings_month: number | null; features: string[]; allowed_modules: string[] | null; support_level: string; stripe_price_monthly?: string | null; stripe_price_yearly?: string | null; active: boolean; sort: number }
+export interface PlanIn { code?: string; name: string; description?: string | null; price_monthly: number; price_yearly: number; currency?: string; trial_days: number; max_seats: number | null; max_branches: number | null; max_bookings_month: number | null; features: string[]; allowed_modules: string[] | null; support_level: string; stripe_price_monthly?: string | null; stripe_price_yearly?: string | null; price_monthly_pkr?: number | null; price_yearly_pkr?: number | null; active: boolean; sort: number }
 /** Built-in codes (portal, api …) switch real functionality on. Any other text is a feature the plan advertises; "Parent > Sub" is a sub-feature. */
 const checkFeatures = (f: string[]) => {
   const bad = f.filter((x) => !(FEATURES as readonly string[]).includes(x) && !/^[^,<>;|]{1,40}( > [^,<>;|>]{1,40})?$/.test(x) || x !== x.trim());
@@ -310,6 +311,7 @@ export async function createPlan(req: Request, b: PlanIn) {
   checkFeatures(b.features); checkModules(b.allowed_modules);
   try { const [r]: any = await pool.query('INSERT INTO plans (code, name, description, price_monthly, price_yearly, currency, trial_days, max_seats, max_branches, max_bookings_month, features, allowed_modules, support_level, stripe_price_monthly, stripe_price_yearly, active, sort) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     [b.code, b.name, b.description ?? null, b.price_monthly, b.price_yearly, b.currency ?? 'USD', b.trial_days, b.max_seats, b.max_branches, b.max_bookings_month, b.features.join(','), b.allowed_modules ? b.allowed_modules.join(',') : null, b.support_level, b.stripe_price_monthly ?? null, b.stripe_price_yearly ?? null, b.active ? 1 : 0, b.sort]);
+    if (b.price_monthly_pkr != null || b.price_yearly_pkr != null) await pool.query('UPDATE plans SET price_monthly_pkr = ?, price_yearly_pkr = ? WHERE id = ?', [b.price_monthly_pkr ?? null, b.price_yearly_pkr ?? null, r.insertId]);
     await audit(req, 'plan_create', null, `${b.code}`); return r.insertId as number; } catch (e: any) { if (e.code === 'ER_DUP_ENTRY') throw new HttpError(409, 'A plan with that code already exists'); throw e; }
 }
 export async function updatePlan(req: Request, id: number, b: PlanIn, reasonIn: unknown) {
@@ -318,7 +320,8 @@ export async function updatePlan(req: Request, id: number, b: PlanIn, reasonIn: 
   const planState = (r: any) => ({ name: r.name, price_monthly: Number(r.price_monthly), price_yearly: Number(r.price_yearly), currency: r.currency, trial_days: r.trial_days, max_seats: r.max_seats, max_branches: r.max_branches, max_bookings_month: r.max_bookings_month, features: String(r.features ?? ''), allowed_modules: r.allowed_modules ?? null, active: !!r.active });
   await pool.query(`UPDATE plans SET name = ?, description = ?, price_monthly = ?, price_yearly = ?, currency = ?, trial_days = ?, max_seats = ?, max_branches = ?, max_bookings_month = ?, features = ?, allowed_modules = ?, support_level = ?, stripe_price_monthly = ?, stripe_price_yearly = ?, active = ?, sort = ? WHERE id = ?`,
     [b.name, b.description ?? null, b.price_monthly, b.price_yearly, (b.currency ?? cur.currency).toUpperCase(), b.trial_days, b.max_seats, b.max_branches, b.max_bookings_month, b.features.join(','), b.allowed_modules ? b.allowed_modules.join(',') : null, b.support_level, b.stripe_price_monthly ?? null, b.stripe_price_yearly ?? null, b.active ? 1 : 0, b.sort, id]);
-  const diff = Object.entries({ currency: (b.currency ?? cur.currency).toUpperCase(), price_monthly: b.price_monthly, price_yearly: b.price_yearly, max_seats: b.max_seats, max_branches: b.max_branches, max_bookings_month: b.max_bookings_month, features: b.features.join(','), allowed_modules: (b.allowed_modules ?? []).join(','), active: b.active ? 1 : 0 }).filter(([k, v]) => String((cur as any)[k] ?? '') !== String(v)).map(([k, v]) => `${k}: ${(cur as any)[k]} → ${v}`).join('; ');
+  if (b.price_monthly_pkr !== undefined || b.price_yearly_pkr !== undefined) await pool.query('UPDATE plans SET price_monthly_pkr = ?, price_yearly_pkr = ? WHERE id = ?', [b.price_monthly_pkr === undefined ? cur.price_monthly_pkr : b.price_monthly_pkr, b.price_yearly_pkr === undefined ? cur.price_yearly_pkr : b.price_yearly_pkr, id]);
+  const diff = Object.entries({ currency: (b.currency ?? cur.currency).toUpperCase(), ...(b.price_monthly_pkr !== undefined ? { price_monthly_pkr: b.price_monthly_pkr } : {}), ...(b.price_yearly_pkr !== undefined ? { price_yearly_pkr: b.price_yearly_pkr } : {}), price_monthly: b.price_monthly, price_yearly: b.price_yearly, max_seats: b.max_seats, max_branches: b.max_branches, max_bookings_month: b.max_bookings_month, features: b.features.join(','), allowed_modules: (b.allowed_modules ?? []).join(','), active: b.active ? 1 : 0 }).filter(([k, v]) => String((cur as any)[k] ?? '') !== String(v)).map(([k, v]) => `${k}: ${(cur as any)[k]} → ${v}`).join('; ');
   const [[next]]: any = await pool.query('SELECT * FROM plans WHERE id = ?', [id]);
   await audit(req, 'plan_update', null, `${cur.code}: ${diff || 'no material change'}`, reason, { before: planState(cur), after: planState(next) });
   const [[n]]: any = await pool.query('SELECT COUNT(*) n FROM subscriptions WHERE plan_id = ?', [id]); return { agencies_affected: n.n };
@@ -651,6 +654,40 @@ export async function removeAiKey(req: Request, reasonIn: unknown) {
   return aiKeyInfo();
 }
 
+
+/* ------------------------------------------------------------------ JazzCash / Easypaisa merchant accounts, and settling their payments by hand */
+export const localPayInfo = () => LP.info();
+const shape = (re: RegExp, msg: string) => (v: unknown) => { const t = String(v ?? '').trim(); if (!re.test(t)) throw new HttpError(400, msg); return t; };
+export async function setLocalPay(req: Request, provider: string, b: Record<string, any>, reasonIn: unknown) {
+  const reason = needReason(reasonIn); if (!LP.PROVIDERS.includes(provider as LP.Provider)) throw new HttpError(404, 'Unknown payment provider');
+  if (provider === 'jazzcash') {
+    const c: LP.JazzConfig = { merchant_id: shape(/^[A-Za-z0-9]{4,30}$/, 'The merchant ID is letters and digits only, for example MC12345.')(b.merchant_id), password: shape(/^\S{4,80}$/, 'Enter the merchant password (no spaces).')(b.password),
+      integrity_salt: shape(/^\S{6,100}$/, 'Enter the integrity salt (no spaces).')(b.integrity_salt), sandbox: !!b.sandbox };
+    await LP.saveConfig('jazzcash', c, req.platform!.userId); await audit(req, 'set_local_pay', null, `JazzCash saved: merchant ${c.merchant_id}, ${c.sandbox ? 'test' : 'live'} mode`, reason);
+  } else {
+    const key = String(b.hash_key ?? '').trim(); if (![16, 24, 32].includes(Buffer.byteLength(key))) throw new HttpError(400, 'The hash key must be exactly 16 characters (or 24 / 32).');
+    const c: LP.EasyConfig = { store_id: shape(/^\d{3,12}$/, 'The store ID is a number, for example 12345.')(b.store_id), hash_key: key, sandbox: !!b.sandbox };
+    const inq = [b.account_num, b.username, b.password].map((x) => String(x ?? '').trim());
+    if (inq.some(Boolean)) { if (inq.some((x) => !x)) throw new HttpError(400, 'To let us confirm payments with Easypaisa, enter all three: account number, username and password. Or leave all three empty.'); [c.account_num, c.username, c.password] = inq as [string, string, string]; }
+    await LP.saveConfig('easypaisa', c, req.platform!.userId); await audit(req, 'set_local_pay', null, `Easypaisa saved: store ${c.store_id}, ${c.sandbox ? 'test' : 'live'} mode, ${c.account_num ? 'with' : 'without'} payment confirmation login`, reason);
+  }
+  return LP.info();
+}
+export async function removeLocalPay(req: Request, provider: string, reasonIn: unknown) {
+  const reason = needReason(reasonIn); if (!LP.PROVIDERS.includes(provider as LP.Provider)) throw new HttpError(404, 'Unknown payment provider');
+  if (!(await LP.removeConfig(provider as LP.Provider))) throw new HttpError(409, 'Nothing was saved for that provider.');
+  await audit(req, 'remove_local_pay', null, `${LP.LABEL[provider as LP.Provider]} removed`, reason); return LP.info();
+}
+export const listLocalPayments = (q: { status?: string; page?: number }) => LP.listAll(q);
+/** An operator who has checked the provider's own records can mark a payment received (extends the plan), or mark it failed. */
+export async function settleLocalPayment(req: Request, id: number, action: 'confirm' | 'reject', reasonIn: unknown) {
+  const reason = needReason(reasonIn), pay = await LP.getPaymentById(id); if (!pay) throw new HttpError(404, 'Payment not found');
+  if (pay.status === 'paid') throw new HttpError(409, 'That payment was already received.');
+  if (action === 'confirm') { await LP.applyPaid(pay.txn_ref, { code: 'manual', message: reason, by: 'operator', operatorId: req.platform!.userId }); }
+  else { if (pay.status === 'failed') throw new HttpError(409, 'That payment is already marked as failed.'); await pool.query("UPDATE local_payments SET status = 'failed', gateway_code = 'manual', gateway_message = ?, confirmed_by = ? WHERE id = ?", [reason.slice(0, 300), req.platform!.userId, id]); }
+  await audit(req, action === 'confirm' ? 'local_payment_confirm' : 'local_payment_reject', pay.agency_id, `${LP.LABEL[pay.provider as LP.Provider]} ${pay.txn_ref}, PKR ${pay.amount_pkr}`, reason);
+  return { ok: true };
+}
 
 /** Turns two-factor sign-in on or off for a person. "On" requires it: they carry on until their next request, then must set up an authenticator before anything else works. "Off" removes their authenticator and the requirement, and signs them out. */
 export async function setUserTwoFactor(req: Request, id: number, on: boolean, reason: string) {
