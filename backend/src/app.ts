@@ -44,6 +44,7 @@ import { portalAdminRouter, publicPortalRouter } from './routes/portal.js';
 import { payReturnRouter } from './routes/payReturn.js';
 import { adminRouter } from './routes/admin.js';
 import { webhooksRouter } from './routes/webhooks.js';
+import { extImportRouter } from './routes/extImport.js';
 
 export const app = express();
 app.set('trust proxy', 1); // behind cPanel/Apache/Passenger proxy
@@ -124,6 +125,7 @@ api.use('/cheque-formats', chequeRouter);
 api.use('/tickets', ticketsRouter);
 api.use('/admin', adminRouter);
 api.use('/finance', financeRouter);
+api.use('/ext-import', extImportRouter);
 api.use('/portal-admin', portalAdminRouter);
 api.use('/automation', automationRouter);
 api.use('/hub', hubRouter);

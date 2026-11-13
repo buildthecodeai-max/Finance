@@ -4,7 +4,7 @@ const screens = [
   () => import('./pages/Invoices'), () => import('./pages/Payments'), () => import('./pages/FinanceOverview'), () => import('./pages/Operations'), () => import('./pages/Reports'),
   () => import('./pages/CashBank'), () => import('./pages/Accounts'), () => import('./pages/Settings'), () => import('./pages/Team'), () => import('./pages/Billing'),
   () => import('./pages/Commissions'), () => import('./pages/Visas'), () => import('./pages/Umrah'), () => import('./pages/Automation'), () => import('./pages/Integrations'),
-  () => import('./pages/Notifications'), () => import('./pages/Support'), () => import('./pages/ClientPortal'), () => import('./pages/Audit'), () => import('./pages/Help'),
+  () => import('./pages/Notifications'), () => import('./pages/Support'), () => import('./pages/ClientPortal'), () => import('./pages/Audit'), () => import('./pages/Help'), () => import('./pages/ExternalImport'),
 ];
 let started = false;
 export function preloadScreens() {

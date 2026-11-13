@@ -6,7 +6,7 @@ import { preloadScreens } from '../preload';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Banknote, BarChart3, BookOpen, Briefcase, Building2, CalendarClock, ClipboardCheck, Calculator as CalcIcon, Check, ChevronDown, ChevronRight, ChevronsLeft, ChevronsUpDown,
-  Coins, CreditCard, HelpCircle, LifeBuoy, FileMinus, FileSignature, FileText, HandCoins, LineChart, Truck, LayoutDashboard, Library, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Percent, Plane, Plus, ScrollText, Search, Settings, MoonStar, ShieldCheck, Stamp, Sun, Target, Ticket, TrendingUp, Undo2, Users, Wallet, X,
+  Coins, CreditCard, HelpCircle, LifeBuoy, FileMinus, FileSignature, FileUp, FileText, HandCoins, LineChart, Truck, LayoutDashboard, Library, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Percent, Plane, Plus, ScrollText, Search, Settings, MoonStar, ShieldCheck, Stamp, Sun, Target, Ticket, TrendingUp, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api } from '../api';
 import { useAuth, AgencyRef } from '../auth';
@@ -46,6 +46,7 @@ const GROUPS: { title: string; module: string | string[] | null; items: Item[] }
       { to: '/payments', label: 'Payments received', icon: I(CreditCard) },
       { to: '/credit-notes', label: 'Credit notes & refunds', icon: I(FileMinus), roles: FINANCE },
       { to: '/statements', label: 'Client statements', icon: I(ScrollText), roles: FINANCE }] },
+    { to: '/external-import', label: 'External import', icon: I(FileUp) },
     { to: '/suppliers', label: 'Suppliers', icon: I(Building2), children: [
       { to: '/suppliers', label: 'All suppliers', icon: I(Building2) },
       { to: '/supplier-bills', label: 'Supplier bills', icon: I(Truck), roles: FINANCE },

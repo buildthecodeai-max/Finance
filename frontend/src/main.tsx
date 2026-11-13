@@ -53,6 +53,7 @@ const Billing = lazy(() => import('./pages/Billing'));
 const Team = lazy(() => import('./pages/Team'));
 const ExchangeRates = lazy(() => import('./pages/ExchangeRates'));
 const Statements = lazy(() => import('./pages/Statements'));
+const ExternalImport = lazy(() => import('./pages/ExternalImport'));
 const Operations = lazy(() => import('./pages/Operations'));
 const PublicQuote = lazy(() => import('./pages/PublicQuote'));
 const Platform = lazy(() => import('./pages/Platform'));
@@ -126,6 +127,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Route path="billing" element={<Billing />} />
       <Route path="team" element={<Team />} />
       <Route path="statements" element={<Statements />} />
+      <Route path="external-import" element={<ExternalImport />} />
       <Route path="exchange-rates" element={<ExchangeRates />} />
     </Route>
   </Routes></AuthProvider></BrowserRouter></ThemeProvider></React.StrictMode>,

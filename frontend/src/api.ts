@@ -45,6 +45,35 @@ export async function api<T = any>(path: string, method = 'GET', body?: unknown,
   return data as T;
 }
 
-export const money = (n: number, cur = 'USD') => new Intl.NumberFormat('en', { style: 'currency', currency: cur }).format(n ?? 0);
+/** The signed-in agency's base currency: amounts shown without an explicit currency (ledger, accounts, statements…) are in this, not a hard-coded USD. */
+let baseCurrency = 'USD';
+export const setBaseCurrency = (c?: string | null) => { if (c && /^[A-Z]{3}$/.test(c)) baseCurrency = c; };
+export const money = (n: number, cur: string = baseCurrency) => new Intl.NumberFormat('en', { style: 'currency', currency: cur }).format(n ?? 0);
 /** A plain amount with thousands separators and two decimals; "—" when there is nothing to show. */
 export const n2 = (v: any) => (v === '' || v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+/** Sends one file as the raw request body (with progress). The name travels in a header, so any file type and size up to the server limit works. */
+export async function upload<T = any>(path: string, file: File, onProgress?: (fraction: number) => void): Promise<T> {
+  const send = () => new Promise<{ status: number; body: any }>((resolve, reject) => {
+    const x = new XMLHttpRequest(); x.open('POST', `/api${path}`); x.withCredentials = true;
+    if (token) x.setRequestHeader('Authorization', `Bearer ${token}`);
+    if (agencyId) x.setRequestHeader('X-Agency-Id', String(agencyId));
+    x.setRequestHeader('Content-Type', 'application/octet-stream'); x.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+    x.onload = () => { let body: any = x.responseText; try { body = JSON.parse(x.responseText); } catch { /* not JSON */ } resolve({ status: x.status, body }); };
+    x.onerror = () => reject(new Error('Upload failed — check your connection'));
+    x.send(file);
+  });
+  let r = await send();
+  if (r.status === 401 && (await refresh())) r = await send();
+  if (r.status >= 400) throw Object.assign(new Error(r.body?.error ?? 'Upload failed'), { status: r.status, data: r.body });
+  return r.body as T;
+}
+
+/** Downloads an authenticated file (CSV etc.) through the browser's save flow. */
+export async function download(path: string, filename: string) {
+  let r = await raw(path);
+  if (r.status === 401 && (await refresh())) r = await raw(path);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'Download failed');
+  const url = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
