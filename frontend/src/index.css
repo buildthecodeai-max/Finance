@@ -70,7 +70,7 @@
     rgb(var(--surface));
 }
 .hero-mesh::before {                                   /* faint grid, fades out toward the bottom */
-  content: ''; position: absolute; inset: 0; z-index: -1; opacity: .5;
+  content: ''; position: absolute; inset: 0; z-index: -1; opacity: .5; border-radius: inherit;
   background-image: linear-gradient(rgb(var(--line) / .55) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--line) / .55) 1px, transparent 1px);
   background-size: 34px 34px; -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 85%); mask-image: linear-gradient(to bottom, #000 0%, transparent 85%);
 }

@@ -394,7 +394,7 @@ function AgencyDetailModal({ detail, me, onClose, onAct, onRefresh }: { detail: 
   const tabs: [typeof tab, string, number?][] = [['overview', 'Overview'], ['people', 'People', detail.members.length], ['billing', 'Billing', detail.billing_events.length], ['activity', 'Activity']];
   const tile = (label: string, value: any, hint?: string, tone = '') => <div className="card !p-3"><div className="text-xs text-muted">{label}</div><div className={`mt-1 text-2xl font-bold num ${tone}`}>{value}</div>{hint && <div className="mt-0.5 text-[11px] text-muted">{hint}</div>}</div>;
   return <Modal title="Agency" wide onClose={onClose}>
-    <section className="hero-mesh -mt-1 mb-4 rounded-xl border border-line p-4 md:p-5" style={{ ['--hue' as any]: `var(--${hue})` }}>
+    <section className="hero-mesh !overflow-visible -mt-1 mb-4 rounded-xl border border-line p-4 md:p-5" style={{ ['--hue' as any]: `var(--${hue})` }}>
       <div className="flex flex-wrap items-start gap-4">
         <Avatar name={ag.name} size={60} />
         <div className="min-w-0 flex-1">
