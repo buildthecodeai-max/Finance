@@ -131,6 +131,18 @@ describe('receipts & allocations', () => {
     expect((await A.post(`/finance/receipts/${r.body.id}/void`, { reason: 'Again' })).status).toBe(409);
     const t = await tb(); expect(t.debit).toBeCloseTo(t.credit, 2);
   });
+  it('a voided payment disappears from the invoice and the ledger lists, balances unchanged', async () => {
+    const cl = await mkClient(), id = await issued(cl);
+    const before = await stmt(cl);
+    const r = await receipt({ client_id: cl, amount: 500, allocations: [{ invoice_id: id, amount: 500 }] });
+    expect((await A.get(`/invoices/${id}`)).body.payments.length).toBe(1);
+    expect((await A.post(`/finance/receipts/${r.body.id}/void`, { reason: 'Bounced' })).status).toBe(200);
+    expect((await A.get(`/invoices/${id}`)).body.payments.length).toBe(0);
+    const after = await stmt(cl);
+    expect(after.rows.length).toBe(before.rows.length);
+    expect(after.closing).toBe(before.closing);
+    const t = await tb(); expect(t.debit).toBeCloseTo(t.credit, 2);
+  });
   it('legacy "record payment" endpoint now posts to the ledger too', async () => {
     const cl = await mkClient(), id = await issued(cl);
     const r = await A.post('/payments/inbound', { invoice_id: id, amount: 400, method: 'cash' }); expect(r.status).toBe(201);

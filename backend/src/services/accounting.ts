@@ -145,6 +145,16 @@ export async function ensureParty(t: Tenant, table: 'clients' | 'suppliers', id:
 }
 
 /** Reverse a posted voucher (swap debit/credit) instead of deleting it. Honours period locks on the reversal date. */
+/**
+ * Display filter for ledger listings: a voided receipt/payment and its reversal cancel to zero, so when BOTH fall inside the period shown
+ * they are left out of the list (the totals and running balance are unchanged). Needs aliases g = gl_entries, v = vouchers; params: [from, to, from, to].
+ */
+export const HIDE_VOIDED_PAIRS = `
+  AND NOT (v.voucher_type IN ('receipt','payment') AND v.reversed_by IS NOT NULL AND g.entry_date >= ?
+           AND EXISTS (SELECT 1 FROM gl_entries r WHERE r.agency_id = g.agency_id AND r.voucher_id = v.reversed_by AND r.entry_date <= ?))
+  AND NOT (v.reversal_of IS NOT NULL AND EXISTS (SELECT 1 FROM vouchers o WHERE o.agency_id = v.agency_id AND o.id = v.reversal_of AND o.voucher_type IN ('receipt','payment')
+           AND EXISTS (SELECT 1 FROM gl_entries og WHERE og.agency_id = o.agency_id AND og.voucher_id = o.id AND og.entry_date >= ?)) AND g.entry_date <= ?)`;
+
 export async function reverseVoucher(t: Tenant, voucherId: number, date: string, reason: string): Promise<number> {
   const v = await t.get('vouchers', voucherId);
   if (!v) throw new HttpError(404, 'Voucher not found');

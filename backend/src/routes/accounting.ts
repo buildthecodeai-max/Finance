@@ -3,7 +3,7 @@ import { dependents, deleteBranch, renameBranch } from '../services/records.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, WRITERS, requireRole } from '../auth.js';
-import { BALANCE_SQL, createAccount, nextAccountCode, postVoucher, reverseVoucher } from '../services/accounting.js';
+import { BALANCE_SQL, HIDE_VOIDED_PAIRS, createAccount, nextAccountCode, postVoucher, reverseVoucher } from '../services/accounting.js';
 import { r2, today } from '../services/money.js';
 import { idParam, parse, T } from './util.js';
 
@@ -110,7 +110,7 @@ accountingRouter.get('/ledger', READERS, async (req, res) => {
   const opening = r2(acc.opening_dr - acc.opening_cr + prior!.d);
   const rows = await t.query(
     `SELECT g.id, g.entry_date, g.debit, g.credit, g.narration, v.id voucher_id, v.voucher_type, v.voucher_no, v.ref_table, v.ref_id, v.reversed_by, v.reversal_of FROM gl_entries g JOIN vouchers v ON v.id = g.voucher_id AND v.agency_id = g.agency_id
-     WHERE g.agency_id = ? AND g.account_id = ? AND g.entry_date BETWEEN ? AND ? ORDER BY g.entry_date, g.id`, [t.agencyId, id, from, to]);
+     WHERE g.agency_id = ? AND g.account_id = ? AND g.entry_date BETWEEN ? AND ? ${HIDE_VOIDED_PAIRS} ORDER BY g.entry_date, g.id`, [t.agencyId, id, from, to, from, to, from, to]);
   let bal = opening;
   const lines = rows.map((r: any) => ({ ...r, balance: (bal = r2(bal + r.debit - r.credit)) }));
   res.json({ account: acc, from, to, opening, closing: bal, debit: r2(rows.reduce((x: number, r: any) => x + r.debit, 0)), credit: r2(rows.reduce((x: number, r: any) => x + r.credit, 0)), rows: lines });

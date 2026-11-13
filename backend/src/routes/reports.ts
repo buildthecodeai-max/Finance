@@ -4,7 +4,7 @@ import { fileKey, putFile, signedUrl } from '../storage.js';
 import { htmlToPdf } from '../services/pdf.js';
 import { T } from './util.js';
 import { Tenant } from '../db.js';
-import { BALANCE_SQL } from '../services/accounting.js';
+import { BALANCE_SQL, HIDE_VOIDED_PAIRS } from '../services/accounting.js';
 import { agencyLogoData } from '../services/vouchers.js';
 import { addDays, today } from '../services/money.js';
 import { CATALOG, PARAM_REPORTS as PARAMS } from '../services/reportCatalog.js';
@@ -362,7 +362,7 @@ export const GENERATORS: Record<string, Gen> = {
     const prior = await t.one<{ d: number }>('SELECT COALESCE(SUM(debit - credit),0) d FROM gl_entries WHERE agency_id = ? AND account_id = ? AND entry_date < ?', [t.agencyId, id, from]);
     const opening = sum([acc.opening_dr - acc.opening_cr, prior!.d]);
     const ents = await t.query(`SELECT g.entry_date, g.debit, g.credit, g.narration, v.id vid, v.voucher_no, v.voucher_type, v.ref_table FROM gl_entries g JOIN vouchers v ON v.id = g.voucher_id AND v.agency_id = g.agency_id
-      WHERE g.agency_id = ? AND g.account_id = ? AND g.entry_date BETWEEN ? AND ? ORDER BY g.entry_date, g.id`, [t.agencyId, id, from, to]);
+      WHERE g.agency_id = ? AND g.account_id = ? AND g.entry_date BETWEEN ? AND ? ${HIDE_VOIDED_PAIRS} ORDER BY g.entry_date, g.id`, [t.agencyId, id, from, to, from, to, from, to]);
     let bal = opening;
     const rows: any[][] = [['', 'Opening balance', '', '', '', n2(opening)]], links: (string | null)[] = [null], kinds = ['muted'];
     for (const e of ents) { bal = sum([bal, e.debit, -e.credit]); rows.push([e.entry_date, e.voucher_no, e.narration ?? '', e.debit ? n2(e.debit) : '', e.credit ? n2(e.credit) : '', n2(bal)]); links.push(voucherLink(e)); kinds.push(''); }

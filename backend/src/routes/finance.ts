@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { WRITERS, requireRole } from '../auth.js';
 import { HttpError } from '../errors.js';
-import { BALANCE_SQL } from '../services/accounting.js';
+import { BALANCE_SQL, HIDE_VOIDED_PAIRS } from '../services/accounting.js';
 import * as F from '../services/finance.js';
 import * as PR from '../services/payment-runs.js';
 import { fileKey, putFile, signedUrl } from '../storage.js';
@@ -73,7 +73,7 @@ financeRouter.get('/statements/:kind/:id', async (req, res) => {
   const prior = await t.one<{ d: number }>('SELECT COALESCE(SUM(debit - credit),0) d FROM gl_entries WHERE agency_id = ? AND account_id = ? AND entry_date < ?', [t.agencyId, acc.id, from]);
   const sign = kind === 'clients' ? 1 : -1; // receivables: debit-positive; payables shown credit-positive
   const rows = await t.query(`SELECT g.entry_date, g.debit, g.credit, g.narration, v.voucher_no, v.voucher_type FROM gl_entries g JOIN vouchers v ON v.id = g.voucher_id AND v.agency_id = g.agency_id
-    WHERE g.agency_id = ? AND g.account_id = ? AND g.entry_date BETWEEN ? AND ? ORDER BY g.entry_date, g.id`, [t.agencyId, acc.id, from, to]);
+    WHERE g.agency_id = ? AND g.account_id = ? AND g.entry_date BETWEEN ? AND ? ${HIDE_VOIDED_PAIRS} ORDER BY g.entry_date, g.id`, [t.agencyId, acc.id, from, to, from, to, from, to]);
   let bal = r2(sign * (acc.opening_dr - acc.opening_cr + prior!.d)); const opening = bal;
   const out = rows.map((r: any) => ({ ...r, balance: (bal = r2(bal + sign * (r.debit - r.credit))) }));
   const open = kind === 'clients'

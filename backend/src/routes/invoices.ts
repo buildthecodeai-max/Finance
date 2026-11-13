@@ -46,7 +46,7 @@ async function load(t: ReturnType<typeof T>, id: number) {
   if (!inv) throw new HttpError(404, 'Invoice not found');
   const lines = await t.query('SELECT * FROM invoice_lines WHERE agency_id = ? AND invoice_id = ? ORDER BY id', [t.agencyId, id]);
   const installments = await t.query('SELECT * FROM invoice_installments WHERE agency_id = ? AND invoice_id = ? ORDER BY due_date', [t.agencyId, id]);
-  const payments = await t.query(`SELECT p.id, p.direction, p.amount, p.method, p.paid_at, p.reference, p.receipt_id, p.voided FROM payments p WHERE p.agency_id = ? AND p.invoice_id = ? ORDER BY p.paid_at, p.id`, [t.agencyId, id]);
+  const payments = await t.query(`SELECT p.id, p.direction, p.amount, p.method, p.paid_at, p.reference, p.receipt_id, p.voided FROM payments p WHERE p.agency_id = ? AND p.invoice_id = ? AND p.voided = 0 ORDER BY p.paid_at, p.id`, [t.agencyId, id]);
   const credit_notes = await t.query('SELECT id, cn_no, status, total, issue_date, reason FROM credit_notes WHERE agency_id = ? AND invoice_id = ? ORDER BY id', [t.agencyId, id]);
   return { inv, lines, installments, payments, credit_notes };
 }
