@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
-import { api, ownSession, refresh, setReenter, setSession } from './api';
+import { api, ownSession, refresh, setBaseCurrency, setReenter, setSession } from './api';
 
 export interface AgencyRef { id: number; name: string; base_currency: string; tax_label: string; role: 'admin' | 'finance_manager' | 'agent' | 'viewer' }
 interface Ctx {
@@ -32,6 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => { const h = () => { refresh().then((r) => r && apply(r)).catch(() => {}); }; window.addEventListener('tf:2fa-required', h); return () => window.removeEventListener('tf:2fa-required', h); }, []);   // the server said a 2FA requirement now applies
 
   const agency = s?.agencies.find((a) => a.id === aid) ?? null;
+  setBaseCurrency(agency?.base_currency);          // before children render, so every unlabelled amount uses the agency's own currency
   // The operator's own token lives only in the refresh cookie, so every call below fetches it fresh and never disturbs the session in use.
   const asOperator = async () => {
     const o = await ownSession(); if (!o) throw new Error('Your session has expired. Please sign in again.');
