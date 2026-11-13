@@ -4,7 +4,7 @@ import { Download, Plus, Search, X } from 'lucide-react';
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Err, Field, Modal, Num, Page, Pill, Skeleton, Table } from '../components/ui';
-import { isoDate, today, useOpenOnNew } from '../lookup';
+import { isoDate, today, useCleared, useOpenOnNew } from '../lookup';
 
 const METHODS = ['bank_transfer', 'cash', 'direct_debit', 'stripe'];
 const METHOD_LABEL: Record<string, string> = { bank_transfer: 'Bank transfer', cash: 'Cash', direct_debit: 'Direct debit', stripe: 'Card (Stripe)' };
@@ -98,7 +98,8 @@ export default function Payments() {
   useOpenOnNew(() => { if (finance) setRecording(true); });
   useEffect(() => { const inv = Number(sp.get('invoice')); if (inv && finance) { setPreInvoice(inv); setRecording(true); sp.delete('invoice'); setSp(sp, { replace: true }); } }, [sp]);
 
-  const all = rows ?? [];
+  const cl = useCleared(`cleared-void-payments-${agency?.id}`);
+  const all = (rows ?? []).filter((p) => !(p.voided && cl.ids.has(p.id)));
   const from = PERIODS.find((p) => p.key === period)!.from();
   const inPeriod = useMemo(() => all.filter((p) => (!from || day(p.paid_at) >= from) && (!method || p.method === method)), [all, from, method]);
   const counts = useMemo(() => Object.fromEntries(TABS.map((t) => [t.key, inPeriod.filter(t.test).length])), [inPeriod]);
@@ -157,7 +158,9 @@ export default function Payments() {
       {note && <div role="status" className="rounded-lg border border-success/30 bg-success/10 text-success text-sm px-3 py-2 mb-3 flex justify-between gap-3">
         <span>{note}</span><button className="opacity-70 hover:opacity-100" aria-label="Dismiss" onClick={() => setNote('')}><X size={14} /></button></div>}
 
-      {rows === null ? <Skeleton className="h-64" /> : (
+      {rows === null ? <Skeleton className="h-64" /> : (<>
+{tab === 'voided' && (shown.length > 0 || cl.ids.size > 0) && <div className="flex flex-wrap items-center gap-2 mb-2 text-sm"><span className="text-muted">Voided records stay in the books and audit log; clearing only hides them here.</span>
+          {shown.length > 0 && <button className="btn-ghost" onClick={() => cl.clear(shown.map((p) => p.id))}>Clear voided ({shown.length})</button>}{cl.ids.size > 0 && <button className="btn-ghost" onClick={cl.restore}>Show cleared</button>}</div>}
         <Table rows={shown}
           empty={all.length === 0 ? (finance ? 'No payments yet — click “Record payment” when a client pays an invoice.' : 'No payments yet.') : `No ${tab === 'all' ? '' : TABS.find((t) => t.key === tab)!.label.toLowerCase() + ' '}payments${filtered ? ' match these filters' : ''}.`}
           cols={[
@@ -167,7 +170,7 @@ export default function Payments() {
             { h: 'Method', render: (r) => <>{METHOD_LABEL[r.method] ?? r.method}{r.reference && <div className="text-xs text-muted truncate max-w-[12rem]" title={r.reference}>Ref {r.reference}</div>}</> },
             { h: 'Amount', right: true, render: (r) => <span className={r.voided ? 'text-muted line-through' : ''}>{money(r.amount, r.currency)}{r.currency !== baseCur && !r.voided && <div className="text-xs text-muted">≈ {money(base$(r), baseCur)}</div>}</span> },
             { h: 'Status', render: (r) => (r.voided ? <Pill s="voided" /> : r.reconciled ? <Pill s="reconciled" /> : <Pill s="pending" />) }]} />
-      )}
+      </>)}
       {rows && rows.length >= 500 && <p className="text-xs text-muted mt-2">Showing the latest 500 payments. Use Reports → Payment register for the full history.</p>}
 
       {recording && <RecordPayment preInvoice={preInvoice} onClose={() => setRecording(false)} onDone={(t) => { setRecording(false); setNote(t); load(); }} />}

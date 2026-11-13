@@ -27,3 +27,11 @@ export function useOpenOnNew(open: () => void) {
 /** Where to see the record something refers to (a lead, quote, booking or client), or null when it isn't tied to one. */
 export const recordPath = (type?: string | null, id?: number | null): string | null =>
   !type || !id ? null : ({ booking: `/bookings/${id}`, quote: `/quotes/${id}`, lead: `/leads?open=${id}`, client: `/clients?open=${id}` } as Record<string, string>)[type] ?? null;
+
+/** "Clear voided": hides voided records from a list without touching them — they stay in the books and the audit log. Remembered in this browser. */
+export function useCleared(key: string) {
+  const read = () => { try { return new Set<number>(JSON.parse(localStorage.getItem(key) ?? '[]')); } catch { return new Set<number>(); } };
+  const [ids, setIds] = useState<Set<number>>(read);
+  const save = (s: Set<number>) => { setIds(s); try { localStorage.setItem(key, JSON.stringify([...s])); } catch { /* private mode */ } };
+  return { ids, clear: (list: number[]) => save(new Set([...ids, ...list])), restore: () => save(new Set()) };
+}

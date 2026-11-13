@@ -4,7 +4,7 @@ import { AlertCircle, Copy, FileClock, Hourglass, Pencil, Plus, Search, X, type 
 import { api, money } from '../api';
 import { useAuth } from '../auth';
 import { Avatar, Err, Field, Modal, Page, Pill, Skeleton, Table } from '../components/ui';
-import { today, useOpenOnNew } from '../lookup';
+import { today, useCleared, useOpenOnNew } from '../lookup';
 import { viewPdf } from '../components/PdfViewer';
 
 const TYPES = ['flight', 'hotel', 'package', 'cruise', 'transfer', 'other'];
@@ -225,7 +225,8 @@ export default function Invoices() {
   const act = async (fn: () => Promise<any>, done: string) => { try { await fn(); setNote({ ok: true, text: done }); load(); } catch (e: any) { setNote({ ok: false, text: e.message }); } };
   const openInvoice = (id: number | null) => { setOpenId(id); if (sp.has('open')) { sp.delete('open'); setSp(sp, { replace: true }); } };
 
-  const all = rows ?? [];
+  const cl = useCleared(`cleared-void-invoices-${agency?.id}`);
+  const all = (rows ?? []).filter((r) => !(r.status === 'void' && cl.ids.has(r.id)));
   const counts = useMemo(() => Object.fromEntries(TABS.map((t) => [t.key, all.filter(t.test).length])), [rows]);
   const money$ = (list: any[]) => list.reduce((s, r) => s + balance(r) * (r.fx_rate ?? 1), 0);
   const unpaid = all.filter(TABS[3].test), overdue = all.filter(TABS[4].test);
@@ -262,7 +263,9 @@ export default function Invoices() {
       {note && <div role={note.ok ? 'status' : 'alert'} className={`rounded-lg border text-sm px-3 py-2 mb-3 flex justify-between gap-3 ${note.ok ? 'border-success/30 bg-success/10 text-success' : 'border-danger/30 bg-danger/10 text-danger'}`}>
         <span>{note.text}</span><button className="opacity-70 hover:opacity-100" aria-label="Dismiss" onClick={() => setNote(null)}><X size={14} /></button></div>}
 
-      {rows === null ? <Skeleton className="h-64" /> : (
+      {rows === null ? <Skeleton className="h-64" /> : (<>
+{tab === 'closed' && (shown.some((r) => r.status === 'void') || cl.ids.size > 0) && <div className="flex flex-wrap items-center gap-2 mb-2 text-sm"><span className="text-muted">Voided invoices stay in the books and audit log; clearing only hides them here.</span>
+          {shown.some((r) => r.status === 'void') && <button className="btn-ghost" onClick={() => cl.clear(shown.filter((r) => r.status === 'void').map((r) => r.id))}>Clear voided ({shown.filter((r) => r.status === 'void').length})</button>}{cl.ids.size > 0 && <button className="btn-ghost" onClick={cl.restore}>Show cleared</button>}</div>}
         <Table rows={shown} noun="invoices" onRow={(r) => openInvoice(r.id)}
           empty={all.length === 0 ? (q ? `No invoice matches “${q}”.` : editor ? 'No invoices yet — click “New invoice” to create your first one.' : 'No invoices yet.') : `Nothing in “${TABS.find((t) => t.key === tab)!.label}”${q ? ` matching “${q}”` : ''}.`}
           cols={[
@@ -278,7 +281,7 @@ export default function Invoices() {
               {finance && PAYABLE.includes(r.status) && balance(r) > 0.005 && <button className="btn" onClick={() => nav(`/client-receipts?client=${r.client_id}`)}>Receive payment</button>}
               {r.status !== 'draft' && <button className="btn-ghost" onClick={() => viewPdf(async () => (await api(`/invoices/${r.id}/pdf-url`)).url, `Invoice ${r.number}`)}>PDF</button>}</div> },
           ]} />
-      )}
+      </>)}
       {rows && rows.length >= 500 && <p className="text-xs text-muted mt-2">Showing the latest 500 invoices. Use the search box to find older ones.</p>}
 
       {form && <InvoiceForm initial={form.initial} onDone={() => setForm(null)} onSaved={(id) => { setForm(null); load(); openInvoice(id); }} />}
